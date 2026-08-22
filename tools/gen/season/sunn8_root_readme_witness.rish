@@ -1,0 +1,28 @@
+# tools/gen/season/sunn8_root_readme_witness.rish — SUNN8 root README living face.
+#
+#   rishi/bin/rishi run tools/gen/season/sunn8_root_readme_witness.rish
+#
+# SUNN8 seated the front door; the standing voice molted Riyo -> Kyri on
+# 20260810 (the maintainer's word), so this witness tracks the LIVING voice. The
+# 20260808 first-principles README rewrite dropped journey stamps, so the old
+# "SUNN8" stamp assertion is retired — the door names facts, not rung numbers.
+
+say "sunn8: Language EN — the front door names the living pier."
+say "sunn8: Style Radiant — Kyri · the maintainer · acme-owner · SOURCE."
+say "sunn8: Lens TAME — SUNN8 seat · voice/name/onboarding · Quin OS stays."
+
+let r = read-file "README.md"
+assert r contains "Voice:** Kyri" else "sunn8: want Voice Kyri"
+assert r contains "the maintainer" else "sunn8: want the maintainer"
+assert r contains "acme-owner/grain" else "sunn8: want acme-owner/grain clone"
+assert r contains "SOURCE.md" else "sunn8: want SOURCE.md onboarding"
+assert r contains "context/KYRI.md" else "sunn8: want KYRI.md"
+assert r contains "standing writing voice" else "sunn8: want standing writing voice phrase"
+assert r contains "standing voice **Kyri**" else "sunn8: profile default want Kyri"
+assert (r contains "standing writing companion") == false else "sunn8: must not keep Quin as standing writing companion"
+assert (r contains "standing voice **Quin**") == false else "sunn8: must not keep Quin as profile default voice"
+assert (r contains "standing voice **Riyo**") == false else "sunn8: must not keep Riyo as living profile default"
+assert r contains "fifth OS variant" else "sunn8: Quin OS hat must stay named"
+assert r contains "Q-vane" else "sunn8: Quin Q-vane hat must stay named"
+
+say "GREEN: sunn8 — README Kyri · the maintainer · acme-owner · SOURCE · Quin OS/Q-vane held"

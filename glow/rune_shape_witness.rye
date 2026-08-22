@@ -1,0 +1,198 @@
+//! glow/rune_shape_witness.rye — proves `+$` / `$:` / `$%` mold parse.
+//!
+//!   rye build glow/rune_shape_witness.rye -femit-bin=glow/bin/rune_shape_witness
+//!   glow/bin/rune_shape_witness
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const rm = @import("rune_shape.rye");
+
+const witness_version = "20260724.205719";
+
+fn run_selftest() !u8 {
+    const one =
+        \\+$  amount-mold
+        \\  $:  amount=@u32
+        \\  ==
+    ;
+    const s1 = try rm.parse_source(one);
+    assert(s1.body == .tuple);
+    assert(s1.field_count == 1);
+    assert(std.mem.eql(u8, rm.first_field_slice(&s1), "amount"));
+    print("rune: thin +$ / $: amount-mold parses -- GREEN\n", .{});
+
+    const two =
+        \\+$  pair-mold
+        \\  $:  from=@u32
+        \\      amount=@u32
+        \\  ==
+    ;
+    const s2 = try rm.parse_source(two);
+    assert(s2.body == .tuple);
+    assert(s2.field_count == 2);
+    print("rune: multi-field +$ / $: pair-mold parses -- GREEN\n", .{});
+
+    const tagged =
+        \\+$  kind-mold
+        \\  $%  [%mint ~]
+        \\      [%send ~]
+        \\  ==
+    ;
+    const s3 = try rm.parse_source(tagged);
+    assert(s3.body == .tagged);
+    assert(s3.field_count == 2);
+    assert(std.mem.eql(u8, rm.field_slice(&s3, 0), "mint"));
+    assert(std.mem.eql(u8, rm.field_slice(&s3, 1), "send"));
+    print("rune: thin +$ / $% kind-mold mint/send parses -- GREEN\n", .{});
+
+    const payload =
+        \\+$  xact-mold
+        \\  $%  [%mint amount=@u32]
+        \\      [%send ~]
+        \\  ==
+    ;
+    const s4 = try rm.parse_source(payload);
+    assert(s4.body == .tagged);
+    assert(s4.field_count == 2);
+    assert(std.mem.eql(u8, rm.field_slice(&s4, 0), "mint"));
+    assert(rm.arm_has_payload(&s4, 0));
+    assert(rm.payload_count(&s4, 0) == 1);
+    assert(std.mem.eql(u8, rm.payload_slice(&s4, 0), "amount"));
+    assert(!rm.arm_has_payload(&s4, 1));
+    print("rune: +$ / $% xact-mold payload arm parses -- GREEN\n", .{});
+
+    const multi =
+        \\+$  xfer-mold
+        \\  $%  [%mint from=@u32 amount=@u32]
+        \\      [%send ~]
+        \\  ==
+    ;
+    const s5 = try rm.parse_source(multi);
+    assert(s5.body == .tagged);
+    assert(rm.payload_count(&s5, 0) == 2);
+    assert(std.mem.eql(u8, rm.payload_face_slice(&s5, 0, 0), "from"));
+    assert(std.mem.eql(u8, rm.payload_face_slice(&s5, 0, 1), "amount"));
+    assert(!rm.arm_has_payload(&s5, 1));
+    print("rune: +$ / $% xfer-mold multi-face payload parses -- GREEN\n", .{});
+
+    // `20260724.205719`: `@u64` admitted — stamp aura's first `$:` consumer.
+    const stamp_src =
+        \\+$  stamp-shape
+        \\  $:  stamp=@u64
+        \\  ==
+    ;
+    const su = try rm.parse_source(stamp_src);
+    assert(su.body == .tuple);
+    assert(su.field_count == 1);
+    assert(std.mem.eql(u8, rm.field_slice(&su, 0), "stamp"));
+    assert(rm.any_u64_field(&su));
+    assert(!rm.any_cord_field(&su));
+    assert(!rm.any_hex_field(&su));
+    print("rune: +$ / $: stamp=@u64 face parses -- GREEN\n", .{});
+
+    const mix_src =
+        \\+$  stamp-mix-shape
+        \\  $:  stamp=@u64
+        \\      amount=@u32
+        \\      memo=@t
+        \\  ==
+    ;
+    const sm = try rm.parse_source(mix_src);
+    assert(sm.body == .tuple);
+    assert(sm.field_count == 3);
+    assert(rm.any_u64_field(&sm));
+    assert(rm.any_cord_field(&sm));
+    assert(!rm.any_hex_field(&sm));
+    print("rune: +$ / $: stamp=@u64 mixed with @u32/@t parses -- GREEN\n", .{});
+
+    // Wall still stands: genuinely unsupported auras keep UnsupportedShapeAura.
+    if (rm.parse_source(
+        \\+$  amount-mold
+        \\  $:  amount=@u8
+        \\  ==
+    )) |_| {
+        return error.UnsupportedShapeAuraNotCaught;
+    } else |err| {
+        if (err != rm.ParseError.UnsupportedShapeAura) return err;
+    }
+    print("rune: unsupported @u8 refused UnsupportedShapeAura -- GREEN\n", .{});
+
+    // STOA180: `$:` face=@t parses; cord flag set; lower held separately.
+    const cord_src =
+        \\+$  memo-shape
+        \\  $:  memo=@t
+        \\  ==
+    ;
+    const sc = try rm.parse_source(cord_src);
+    assert(sc.body == .tuple);
+    assert(sc.field_count == 1);
+    assert(std.mem.eql(u8, rm.field_slice(&sc, 0), "memo"));
+    assert(rm.any_cord_field(&sc));
+    assert(!rm.any_hex_field(&sc));
+    print("rune: +$ / $: memo=@t cord face parses -- GREEN\n", .{});
+
+    // STOA183: `$:` face=@ux parses; hex flag set; lower held separately.
+    const hex_src =
+        \\+$  peer-shape
+        \\  $:  from=@ux
+        \\  ==
+    ;
+    const sh = try rm.parse_source(hex_src);
+    assert(sh.body == .tuple);
+    assert(sh.field_count == 1);
+    assert(std.mem.eql(u8, rm.field_slice(&sh, 0), "from"));
+    assert(rm.any_hex_field(&sh));
+    assert(!rm.any_cord_field(&sh));
+    print("rune: +$ / $: from=@ux hex face parses -- GREEN\n", .{});
+
+    // STOA187: `$%` payload face=@t / @ux parse; bytes flags set; lower held separately.
+    const pay_cord =
+        \\+$  note-mold
+        \\  $%  [%mint memo=@t]
+        \\      [%send ~]
+        \\  ==
+    ;
+    const spc = try rm.parse_source(pay_cord);
+    assert(spc.body == .tagged);
+    assert(rm.payload_count(&spc, 0) == 1);
+    assert(std.mem.eql(u8, rm.payload_face_slice(&spc, 0, 0), "memo"));
+    assert(spc.payload_face_is_cord[0][0]);
+    assert(!spc.payload_face_is_hex[0][0]);
+    assert(rm.any_payload_bytes_field(&spc));
+    print("rune: +$ / $% mint memo=@t payload cord parses -- GREEN\n", .{});
+
+    const pay_hex =
+        \\+$  peer-mold
+        \\  $%  [%mint from=@ux]
+        \\      [%send ~]
+        \\  ==
+    ;
+    const sph = try rm.parse_source(pay_hex);
+    assert(sph.body == .tagged);
+    assert(rm.payload_count(&sph, 0) == 1);
+    assert(std.mem.eql(u8, rm.payload_face_slice(&sph, 0, 0), "from"));
+    assert(sph.payload_face_is_hex[0][0]);
+    assert(!sph.payload_face_is_cord[0][0]);
+    assert(rm.any_payload_bytes_field(&sph));
+    print("rune: +$ / $% mint from=@ux payload hex parses -- GREEN\n", .{});
+
+    if (rm.parse_source(
+        \\+$  kind-mold
+        \\  $%  [%mint ~]
+        \\  ==
+    )) |_| {
+        return error.TooFewTagsNotCaught;
+    } else |err| {
+        if (err != rm.ParseError.TooFewTags) return err;
+    }
+    print("rune: single $% tag refused TooFewTags -- GREEN\n", .{});
+
+    print("rune: version {s}\n", .{witness_version});
+    print("GREEN: +$ / $: / $% mold front half parses — STOA74/75/76/78/80 · STOA97 · STOA187 · @u64 floor.\n", .{});
+    return 0;
+}
+
+pub fn main(_: std.process.Init) !u8 {
+    return run_selftest();
+}

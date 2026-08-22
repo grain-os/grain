@@ -1,0 +1,39 @@
+# tools/gen/season/sunn13_root_survey_witness.rish — SUNN13 root survey.
+#
+#   rishi/bin/rishi run tools/gen/season/sunn13_root_survey_witness.rish
+#
+# LICENSE copyright rewrite waits on the maintainer's word — assert hold stays the maintainer.
+
+say "sunn13: Language EN — root survey names living identity."
+say "sunn13: Style Radiant — the maintainer · Riyo · licenses hold the maintainer."
+say "sunn13: Lens TAME — SUNN13 · PUBKEYS · MAP · ORGANIZING · LICENSE hold."
+
+let p = read-file "PUBKEYS.md"
+assert p contains "Voice:** Kyri" else "sunn13: PUBKEYS want Voice Riyo"
+assert p contains "the maintainer" else "sunn13: PUBKEYS want the maintainer"
+assert p contains "acme-owner/grain" else "sunn13: PUBKEYS want acme-owner/grain"
+assert p contains "REMOTE_ROSTER" else "sunn13: PUBKEYS want REMOTE_ROSTER"
+assert p contains "the maintainer" else "sunn13: PUBKEYS want dated the maintainer note kept"
+
+let m = read-file "MAP.md"
+assert m contains "Voice:** Kyri" else "sunn13: MAP want Voice Riyo"
+assert m contains "context/KYRI.md" else "sunn13: MAP want RIYO.md writing cite"
+assert m contains "Q-vane" else "sunn13: MAP want Q-vane kept"
+assert m contains "Licenses (hold)" else "sunn13: MAP want Licenses hold section"
+assert m contains "the maintainer" else "sunn13: MAP want the maintainer hold named"
+assert m contains "the maintainer" else "sunn13: MAP want the maintainer on PUBKEYS face"
+assert (m contains "QUIN.md`](context/QUIN.md) is who is writing") == false else "sunn13: MAP must not keep Quin as writer"
+
+let o = read-file "ORGANIZING.md"
+assert o contains "Voice:** Kyri" else "sunn13: ORGANIZING want Voice Riyo"
+assert o contains "KYRI.md" else "sunn13: ORGANIZING want RIYO.md"
+assert o contains "Q-vane" else "sunn13: ORGANIZING want Q-vane"
+
+let mit = read-file "LICENSE-MIT"
+assert mit contains "the maintainer" else "sunn13: LICENSE-MIT want the maintainer hold"
+let apa = read-file "LICENSE-APACHE"
+assert apa contains "the maintainer" else "sunn13: LICENSE-APACHE want the maintainer hold"
+let cc = read-file "LICENSE-CC-BY"
+assert cc contains "the maintainer" else "sunn13: LICENSE-CC-BY want the maintainer hold"
+
+say "GREEN: sunn13 — PUBKEYS · MAP · ORGANIZING affirm · LICENSE copyright hold"

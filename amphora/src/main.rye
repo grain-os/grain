@@ -1,0 +1,1572 @@
+//! amphora/src/main.rye — Amphora: vessel software for a sealed crossing.
+//!
+//! Amphora is preservation in motion. It carries sealed resins across a
+//! crossing — wire, dock, or pocket — under the same resins law and Kumara
+//! stamp as the cellar. Seal and stamp live inside pour; chunk lives
+//! inside carry. The shoulder stays clear. Tamper must fail. Round-trip with
+//! pour and carry must close equal.
+//!
+//! This is the seed: one file, three commands, one crossing.
+//!
+//! Commands:
+//!   amphora pour <season> <vessel>   Fill, seal, then stamp a vessel.
+//!   amphora carry <vessel> <dock>    Move sealed cargo; chunk inside carry.
+//!   amphora restore <vessel>         Cold scrub, verify, restore faithful.
+//!   amphora version                  Print the Amphora CLI version.
+//!
+//! Build:
+//!   mkdir -p amphora/bin
+//!   RYE_ZIG=$PWD/vendor/zig-toolchain/zig \
+//!   rye/bin/rye build amphora/src/main.rye -femit-bin=amphora/bin/amphora
+//!   rye/bin/rye build amphora/vessel_seal.rye -femit-bin=amphora/bin/vessel-seal
+//!
+//! Bounds (named constants — Q4; CLI owns only what it uses):
+//!   stamp_len · stamp_dot_index · version_line_max · max_words
+//!   max_vessel_path_len · max_cargo_bytes · max_chunk_datagram
+//!   max_season_files · digest_hex_len · max_season_name_len
+//!   max_season_file_bytes · max_vessel_len
+//!   max_manifest_bytes (= max_cargo_bytes by formula · Q45)
+//!   max_seal_plain_mirror (couples vessel_seal.max_seal_plain · Q47)
+//!   max_carry_chunks (vessel roof / datagram · Q28)
+//!   exit_ok · exit_misread
+//!   Shared vessel bounds stay in amphora/*.rye; agreement via
+//!   tools/amphora_bounds_agree.rish (path C · alias groups · couples markers).
+//!
+//! Errors (named for the fault — Q5–Q11 · Q20 · Q23–Q24 · Q46):
+//!   UnknownCommand · TooManyWords · MissingOperand · PathTooLong
+//!   CommandNotGrown · ResultUnwritable
+//!   SeasonAbsent · SeasonEmpty · SeasonOverflow · SeasonUnreadable
+//!   CargoTooLarge · VesselUnwritable · SealToolAbsent · SealFailed
+//!   StampToolAbsent · StampFailed · IdentityFork · ManifestOverflow
+//!   StampUnverified · SealUnopened (Q20 carry walls)
+//!   DockUnwritable · ChunkTorn · CrossingUnequal (Q23–Q24 crossing)
+//!   ResinAbsent · CargoUnproven · RestoreUnwritable (Q46 return)
+//!   Module split named, not swept: InvalidVessel vs BadVessel (G10).
+//!
+//! Architecture (four sections, one file for the seed):
+//!   § Pour    — parse (Q6) · read (Q7) · seal (Q8) · stamp (Q9) · guard (Q10) · manifest (Q11): pour grown; witnesses wait Q12
+//!   § Carry   — J2: parse (Q19) · walls (Q20) · guard (Q21) · chunks (Q22+);
+//!               kind 0x33 frames · far dock verifies · fork law travels
+//!   § Restore — J3: parse (Q35) · walls (Q36) · open (Q37+) · files
+//!               re-proven · re-pour equals parent · fork law at the out-home
+//!   § Main    — CLI: pour / carry / restore / version
+//!
+//! One loop · one crossing. Identity refuses a second pour that would fork.
+//! Far side verifies stamp and seal before cargo is trusted again.
+//! Result on stdout; diagnostics on stderr — a result no caller can read
+//! is not a result (Amphora's half; family law awaits the maintainer's word).
+//!
+//! Class W wire shoulder stays amber-ring1-season (e149 park) — not renamed here.
+//! Path C: this file does not import amphora/vessel_*.rye.
+//! Q8 seals by writing an unsealed vessel then running amphora/bin/vessel-seal
+//! (subprocess · same AEAD roof · import wall held).
+//! Q9 stamps by running amphora/bin/vessel-core sign after the seal
+//! (subprocess · stamp_sig outside the sealed head · rite: seal, then stamp).
+//! Q10 guards the write: a second pour may repeat an identity, never fork
+//! it — an occupant with the same parent re-pours; any other occupant refuses.
+//! Q11 writes readable manifest lines into the head — every enclosed thing
+//! named with its type-mark and digest (resins law) — stamp-covered, so the
+//! listing reads without opening and tampers fail Kumara verify (measured);
+//! the seal keeps guarding the cargo, and restore's law checks both walls.
+//! With the manifest, pour is grown: the round path exits ok; the stdout
+//! result family still awaits the maintainer's word, so success speaks stderr only.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const Sha3_256 = std.crypto.hash.sha3.Sha3_256;
+const Dir = std.Io.Dir;
+
+/// Amphora CLI version — YYYYMMDD.HHMMSS, America/New_York, later is larger.
+const amphora_version = "20260801.135514";
+
+// -------------------------------------------------------------------------
+// § Bounds — named with their why (Q4 · Q7 · Q8 · Q9)
+// -------------------------------------------------------------------------
+
+/// A compact stamp is eight date digits, one dot, six time digits.
+const stamp_len: u32 = 15;
+
+/// Index of the dot; the date half runs before it.
+const stamp_dot_index: u32 = 8;
+
+/// Buffer for "amphora " + stamp + newline — was a bare [48]u8.
+const version_line_max: u32 = 48;
+
+/// At most four argv words: program · command · two operands (pour/carry).
+const max_words: u32 = 4;
+
+/// Path text ceiling for season · vessel · dock args (POSIX PATH_MAX lean).
+const max_vessel_path_len: u16 = 4096;
+
+/// Sealed cargo / assembled resin ceiling in bytes.
+/// couples: vessel_fetch_wire.max_resin_bytes
+/// couples: vessel_seal.max_seal_plain
+const max_cargo_bytes: u32 = 1024;
+
+/// One datagram payload ceiling on the crossing wire.
+/// couples: vessel_fetch_wire.max_wire_payload
+const max_chunk_datagram: u16 = 340;
+
+/// How many files one season may pour — matches vessel cargo slots.
+/// couples: vessel_seal.max_cargo
+const max_season_files: u32 = 16;
+
+/// SHA3-256 hex length for one resin name.
+/// couples: vessel_fetch_wire.digest_hex_len
+const digest_hex_len: u32 = 64;
+
+/// Relative path text ceiling inside a season tree (not argv PATH_MAX).
+const max_season_name_len: u16 = 512;
+
+/// One source file ceiling while reading a season (ring-1 fixture holds 64 KiB).
+/// Distinct from max_cargo_bytes — that is assembled sealed cargo, not source size.
+const max_season_file_bytes: u32 = 128 * 1024;
+
+/// On-disk vessel text ceiling — same roof as vessel_seal / vessel_core.
+/// couples: vessel_seal.max_vessel_len
+/// couples: vessel_core.max_vessel_len
+const max_vessel_len: u32 = 8192;
+
+/// Class W AEAD associated data — format, not product vocabulary (e149 park).
+const shoulder_ring1_wire = "amber-ring1-season";
+
+/// Vessel format line value — amphora-v1 until a later format word.
+const vessel_format = "amphora-v1";
+
+/// Default seal tool path when AMPHORA_VESSEL_SEAL is unset (repo layout).
+const default_seal_bin = "amphora/bin/vessel-seal";
+
+/// Cargo type-mark for season source files — one mark, both listings.
+const mark_plain_bytes = "plain-bytes";
+
+/// Manifest listing ceiling — same quantity as sealed cargo, joined by
+/// formula (Q45). Never a second home for 1024; the Return's plain-open
+/// buffer and the pour listing share one roof.
+const max_manifest_bytes: u32 = max_cargo_bytes;
+
+/// One manifest name ceiling — a listed name must fit the entry contract.
+/// couples: manifest_entry.max_name_len
+const max_manifest_name_len: u32 = 200;
+
+/// Most chunks one crossing may cut — the vessel roof over the datagram
+/// ceiling, rounded up. 8192 / 340 rounds to 25; the bound is exact.
+const max_carry_chunks: u32 = (max_vessel_len + max_chunk_datagram - 1) / max_chunk_datagram;
+
+/// Opened-cargo ceiling this side of the seam — the seal module's own roof.
+/// couples: vessel_seal.max_seal_plain
+/// (Q47 width fix — cargo-walk indices assert under this mirror.)
+const max_seal_plain_mirror: u32 = 1024;
+
+/// Restored season out-home, derived beside the vessel: `<vessel>.season`.
+/// Format vocabulary, not product vocabulary (Q35 lean; Class W precedent —
+/// the maintainer's rename word replaces it whole, accrete-migrate on rename).
+const restore_out_suffix = ".season";
+
+/// Resins dock beside a vessel's parent directory — `{dirname}/resins/<digest>`.
+/// Listing-only sealed cargo needs these bodies for the Return (Q38–Q42).
+const resins_dir_name = "resins";
+
+/// Assembled far-side vessel name inside a dock directory.
+/// Format vocabulary, not product vocabulary (Q21 lean; Class W precedent —
+/// the maintainer's rename word replaces it whole, accrete-migrate on rename).
+const dock_vessel_name = "vessel.bron";
+
+/// Default stamp tool path when AMPHORA_VESSEL_CORE is unset (repo layout).
+const default_core_bin = "amphora/bin/vessel-core";
+
+/// Success exit — was a bare return 0.
+const exit_ok: u8 = 0;
+
+/// Misread / usage / unknown / waits — was bare return 2.
+const exit_misread: u8 = 2;
+
+// -------------------------------------------------------------------------
+// § Errors — named for the fault (Q5–Q11 · Q20 · Q23–Q24 · Q46)
+// -------------------------------------------------------------------------
+
+/// CLI faults only. Vessel modules keep InvalidVessel / BadVessel (G10).
+/// Twenty-six doors — each fault has its own refuse arm; none swept.
+const CliError = error{
+    UnknownCommand,
+    TooManyWords,
+    MissingOperand,
+    PathTooLong,
+    CommandNotGrown,
+    ResultUnwritable,
+    SeasonAbsent,
+    SeasonEmpty,
+    SeasonOverflow,
+    SeasonUnreadable,
+    CargoTooLarge,
+    VesselUnwritable,
+    SealToolAbsent,
+    SealFailed,
+    StampToolAbsent,
+    StampFailed,
+    IdentityFork,
+    ManifestOverflow,
+    StampUnverified,
+    SealUnopened,
+    DockUnwritable,
+    ChunkTorn,
+    CrossingUnequal,
+    ResinAbsent,
+    CargoUnproven,
+    RestoreUnwritable,
+};
+
+/// One door for every CLI fault — switch on the name, never compare.
+fn refuse(fault: CliError, detail: []const u8) u8 {
+    switch (fault) {
+        error.UnknownCommand => {
+            print("amphora: unknown command — '{s}'\n\n", .{detail});
+            print_usage();
+        },
+        error.TooManyWords => print("amphora: too many words\n", .{}),
+        error.MissingOperand => print("amphora: missing operand — '{s}'\n", .{detail}),
+        error.PathTooLong => print("amphora: path too long — '{s}'\n", .{detail}),
+        error.CommandNotGrown => print("amphora: command waits its quest — '{s}'\n", .{detail}),
+        error.ResultUnwritable => print("amphora: result unwritable — '{s}'\n", .{detail}),
+        error.SeasonAbsent => print("amphora: season absent — '{s}'\n", .{detail}),
+        error.SeasonEmpty => print("amphora: season empty — '{s}'\n", .{detail}),
+        error.SeasonOverflow => print("amphora: season overflow — '{s}'\n", .{detail}),
+        error.SeasonUnreadable => print("amphora: season unreadable — '{s}'\n", .{detail}),
+        error.CargoTooLarge => print("amphora: cargo too large — '{s}'\n", .{detail}),
+        error.VesselUnwritable => print("amphora: vessel unwritable — '{s}'\n", .{detail}),
+        error.SealToolAbsent => print("amphora: seal tool absent — '{s}'\n", .{detail}),
+        error.SealFailed => print("amphora: seal failed — '{s}'\n", .{detail}),
+        error.StampToolAbsent => print("amphora: stamp tool absent — '{s}'\n", .{detail}),
+        error.StampFailed => print("amphora: stamp failed — '{s}'\n", .{detail}),
+        error.IdentityFork => print("amphora: identity fork — '{s}'\n", .{detail}),
+        error.ManifestOverflow => print("amphora: manifest overflow — '{s}'\n", .{detail}),
+        error.StampUnverified => print("amphora: stamp unverified — '{s}'\n", .{detail}),
+        error.SealUnopened => print("amphora: seal unopened — '{s}'\n", .{detail}),
+        error.DockUnwritable => print("amphora: dock unwritable — '{s}'\n", .{detail}),
+        error.ChunkTorn => print("amphora: chunk torn — '{s}'\n", .{detail}),
+        error.CrossingUnequal => print("amphora: crossing unequal — '{s}'\n", .{detail}),
+        error.ResinAbsent => print("amphora: resin absent — '{s}'\n", .{detail}),
+        error.CargoUnproven => print("amphora: cargo unproven — '{s}'\n", .{detail}),
+        error.RestoreUnwritable => print("amphora: restore unwritable — '{s}'\n", .{detail}),
+    }
+    return exit_misread;
+}
+
+// -------------------------------------------------------------------------
+// § Pour — parse (Q6) · read (Q7) · seal (Q8) · stamp (Q9) · guard (Q10) · manifest (Q11): pour grown
+// -------------------------------------------------------------------------
+
+/// Operands for `pour <season> <vessel>` after a successful parse.
+const PourArgs = struct {
+    season: []const u8,
+    vessel: []const u8,
+};
+
+/// One season file after read — relative name + SHA3-256 hex + byte length.
+const SeasonEntry = struct {
+    name_len: u16,
+    name: [max_season_name_len]u8,
+    digest_hex: [digest_hex_len]u8,
+    byte_len: u32,
+};
+
+/// Bounded catalog of a cellar ring-1-shaped season tree.
+const SeasonCatalog = struct {
+    file_count: u32,
+    total_bytes: u32,
+    entries: [max_season_files]SeasonEntry,
+};
+
+/// Parse pour operands. Does not open the season or write a vessel.
+/// Path C: no vessel-module import — only argv shape and named ceilings.
+fn parse_pour_args(args: []const []const u8) CliError!PourArgs {
+    assert(args.len >= 2);
+    assert(std.mem.eql(u8, args[1], "pour"));
+    if (args.len < 4) return error.MissingOperand;
+    if (args.len > max_words) return error.TooManyWords;
+    const season = args[2];
+    const vessel = args[3];
+    if (season.len == 0) return error.MissingOperand;
+    if (vessel.len == 0) return error.MissingOperand;
+    if (season.len > max_vessel_path_len) return error.PathTooLong;
+    if (vessel.len > max_vessel_path_len) return error.PathTooLong;
+    return .{ .season = season, .vessel = vessel };
+}
+
+fn write_hex_lower(bytes: []const u8, out: []u8) void {
+    assert(out.len == bytes.len * 2);
+    const hex = "0123456789abcdef";
+    for (bytes, 0..) |b, i| {
+        out[i * 2] = hex[b >> 4];
+        out[i * 2 + 1] = hex[b & 0xf];
+    }
+}
+
+/// Parent directory of a path — `.` when the path has no slash.
+fn path_dirname(path: []const u8) []const u8 {
+    assert(path.len > 0);
+    if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| {
+        if (i == 0) return "/";
+        return path[0..i];
+    }
+    return ".";
+}
+
+/// `{dirname(vessel)}/resins` — bodies ride beside the sealed listing.
+fn resins_dir_path(vessel: []const u8, buf: []u8) CliError![]const u8 {
+    assert(vessel.len > 0);
+    const dir = path_dirname(vessel);
+    return std.fmt.bufPrint(buf, "{s}/{s}", .{ dir, resins_dir_name }) catch {
+        return error.PathTooLong;
+    };
+}
+
+/// One resin address: `{dirname(vessel)}/resins/{digest_hex}`.
+fn resin_file_path(vessel: []const u8, digest_hex: []const u8, buf: []u8) CliError![]const u8 {
+    assert(digest_hex.len == digest_hex_len);
+    const dir = path_dirname(vessel);
+    return std.fmt.bufPrint(buf, "{s}/{s}/{s}", .{ dir, resins_dir_name, digest_hex }) catch {
+        return error.PathTooLong;
+    };
+}
+
+/// Walk a season directory; hash each file; fill catalog. Path C — std only.
+fn read_season(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    season_path: []const u8,
+    catalog: *SeasonCatalog,
+) CliError!void {
+    assert(season_path.len > 0);
+    assert(season_path.len <= max_vessel_path_len);
+    catalog.file_count = 0;
+    catalog.total_bytes = 0;
+
+    const cwd = Dir.cwd();
+    const dir = cwd.openDir(io, season_path, .{ .iterate = true }) catch {
+        return error.SeasonAbsent;
+    };
+    defer dir.close(io);
+
+    var walker = dir.walk(allocator) catch return error.SeasonUnreadable;
+    defer walker.deinit();
+
+    var file_buf: [max_season_file_bytes]u8 = undefined;
+    while (true) {
+        const maybe = walker.next(io) catch return error.SeasonUnreadable;
+        const entry = maybe orelse break;
+        if (entry.kind != .file) continue;
+
+        if (catalog.file_count >= max_season_files) return error.SeasonOverflow;
+        if (entry.path.len == 0) return error.SeasonUnreadable;
+        if (entry.path.len > max_season_name_len) return error.SeasonOverflow;
+
+        const data = entry.dir.readFile(io, entry.basename, &file_buf) catch {
+            return error.SeasonUnreadable;
+        };
+        if (data.len > max_season_file_bytes) return error.SeasonOverflow;
+        const add: u32 = @intCast(data.len);
+
+        var digest: [Sha3_256.digest_length]u8 = undefined;
+        Sha3_256.hash(data, &digest, .{});
+
+        const slot = &catalog.entries[catalog.file_count];
+        slot.name_len = @intCast(entry.path.len);
+        // No tally_copy import from amphora/src (path C) — bounded byte copy.
+        var ni: u32 = 0;
+        while (ni < entry.path.len) : (ni += 1) {
+            slot.name[ni] = entry.path[ni];
+        }
+        write_hex_lower(&digest, &slot.digest_hex);
+        slot.byte_len = add;
+        catalog.file_count += 1;
+        catalog.total_bytes += add;
+    }
+
+    if (catalog.file_count == 0) return error.SeasonEmpty;
+    assert(catalog.file_count <= max_season_files);
+}
+
+/// Stable cargo order — parent / nonce must not depend on walk order.
+fn sort_season_by_name(catalog: *SeasonCatalog) void {
+    var i: u32 = 1;
+    while (i < catalog.file_count) : (i += 1) {
+        var j = i;
+        while (j > 0) {
+            const left = catalog.entries[j - 1].name[0..catalog.entries[j - 1].name_len];
+            const right = catalog.entries[j].name[0..catalog.entries[j].name_len];
+            if (std.mem.order(u8, left, right) != .gt) break;
+            const tmp = catalog.entries[j - 1];
+            catalog.entries[j - 1] = catalog.entries[j];
+            catalog.entries[j] = tmp;
+            j -= 1;
+        }
+    }
+}
+
+/// Build Tilak cargo lines from the catalog. Returns plaintext length.
+fn build_cargo_plain(catalog: *const SeasonCatalog, out: []u8) CliError!u32 {
+    assert(catalog.file_count >= 1);
+    var off: u32 = 0;
+    var i: u32 = 0;
+    while (i < catalog.file_count) : (i += 1) {
+        const e = catalog.entries[i];
+        const name = e.name[0..e.name_len];
+        const line = std.fmt.bufPrint(out[off..], "cargo {s} {s} {s}\n", .{ mark_plain_bytes, e.digest_hex, name }) catch {
+            return error.CargoTooLarge;
+        };
+        off += @intCast(line.len);
+        if (off > max_cargo_bytes) return error.CargoTooLarge;
+    }
+    assert(off > 0);
+    assert(off <= max_cargo_bytes);
+    return off;
+}
+
+/// Q11: readable manifest lines — every enclosed thing, mark · digest · name.
+/// Lives in the head, so the seal covers it (tamper-evident) yet it reads
+/// without opening — the resins-law listing the sealed-crossing anatomy names.
+fn build_manifest_lines(catalog: *const SeasonCatalog, out: []u8) CliError!u32 {
+    assert(catalog.file_count >= 1);
+    var off: u32 = 0;
+    var i: u32 = 0;
+    while (i < catalog.file_count) : (i += 1) {
+        const e = catalog.entries[i];
+        const name = e.name[0..e.name_len];
+        if (name.len > max_manifest_name_len) return error.ManifestOverflow;
+        const line = std.fmt.bufPrint(out[off..], "manifest {s} {s} {s}\n", .{ mark_plain_bytes, e.digest_hex, name }) catch {
+            return error.ManifestOverflow;
+        };
+        off += @intCast(line.len);
+        if (off > max_manifest_bytes) return error.ManifestOverflow;
+    }
+    assert(off > 0);
+    assert(off <= max_manifest_bytes);
+    return off;
+}
+
+/// Write unsealed vessel text: format · stamp · shoulder · parent · manifest · cargo.
+fn write_unsealed_vessel(
+    io: std.Io,
+    vessel_path: []const u8,
+    parent_hex: *const [digest_hex_len]u8,
+    manifest: []const u8,
+    cargo: []const u8,
+) CliError!void {
+    assert(cargo.len > 0);
+    assert(cargo.len <= max_cargo_bytes);
+    assert(manifest.len > 0);
+    assert(manifest.len <= max_manifest_bytes);
+    assert(std.mem.eql(u8, shoulder_ring1_wire, "amber-ring1-season"));
+
+    var text: [max_vessel_len]u8 = undefined;
+    const head = std.fmt.bufPrint(&text, "# amphora vessel — season poured for crossing\nformat {s}\nstamp {s}\nshoulder {s}\nparent {s}\n", .{
+        vessel_format,
+        amphora_version,
+        shoulder_ring1_wire,
+        parent_hex,
+    }) catch return error.VesselUnwritable;
+    if (head.len + manifest.len + cargo.len > max_vessel_len) return error.CargoTooLarge;
+    var mi: u32 = 0;
+    while (mi < manifest.len) : (mi += 1) {
+        text[head.len + mi] = manifest[mi];
+    }
+    var ni: u32 = 0;
+    while (ni < cargo.len) : (ni += 1) {
+        text[head.len + manifest.len + ni] = cargo[ni];
+    }
+    const total = head.len + manifest.len + cargo.len;
+    const cwd = Dir.cwd();
+    cwd.writeFile(io, .{ .sub_path = vessel_path, .data = text[0..total] }) catch {
+        return error.VesselUnwritable;
+    };
+}
+
+/// Resolve vessel-seal binary: env · sibling of argv0 · repo default.
+fn resolve_seal_bin(
+    init: std.process.Init,
+    io: std.Io,
+    argv0: []const u8,
+    path_buf: []u8,
+) CliError![]const u8 {
+    const cwd = Dir.cwd();
+    if (init.environ_map.get("AMPHORA_VESSEL_SEAL")) |p| {
+        if (p.len == 0) return error.SealToolAbsent;
+        if (cwd.access(io, p, .{})) |_| {
+            return p;
+        } else |_| {
+            return error.SealToolAbsent;
+        }
+    }
+    if (std.mem.lastIndexOfScalar(u8, argv0, '/')) |slash| {
+        const dir = argv0[0..slash];
+        const sibling = std.fmt.bufPrint(path_buf, "{s}/vessel-seal", .{dir}) catch {
+            return error.SealToolAbsent;
+        };
+        if (cwd.access(io, sibling, .{})) |_| {
+            return sibling;
+        } else |_| {}
+    }
+    if (cwd.access(io, default_seal_bin, .{})) |_| {
+        return default_seal_bin;
+    } else |_| {
+        return error.SealToolAbsent;
+    }
+}
+
+/// Path C: seal via vessel-seal subprocess — no comptime vessel import.
+fn run_vessel_seal(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    seal_bin: []const u8,
+    vessel_path: []const u8,
+) CliError!void {
+    assert(seal_bin.len > 0);
+    assert(vessel_path.len > 0);
+    const argv = [_][]const u8{ seal_bin, "seal", vessel_path };
+    const result = std.process.run(allocator, io, .{ .argv = &argv }) catch {
+        return error.SealFailed;
+    };
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => return error.SealFailed,
+    };
+    if (code != 0) return error.SealFailed;
+}
+
+/// Confirm seal fields landed — nonce and cargo hex must both be present.
+fn verify_seal_fields(io: std.Io, vessel_path: []const u8) CliError!void {
+    var buf: [max_vessel_len]u8 = undefined;
+    const text = Dir.cwd().readFile(io, vessel_path, &buf) catch {
+        return error.SealFailed;
+    };
+    const has_nonce = std.mem.indexOf(u8, text, "\nseal_nonce ") != null or std.mem.startsWith(u8, text, "seal_nonce ");
+    const has_cargo = std.mem.indexOf(u8, text, "\nseal_cargo ") != null;
+    if (!has_nonce or !has_cargo) return error.SealFailed;
+}
+
+/// Resolve vessel-core binary: env · sibling of argv0 · repo default.
+fn resolve_core_bin(
+    init: std.process.Init,
+    io: std.Io,
+    argv0: []const u8,
+    path_buf: []u8,
+) CliError![]const u8 {
+    assert(argv0.len > 0);
+    assert(path_buf.len > 0);
+    const cwd = Dir.cwd();
+    if (init.environ_map.get("AMPHORA_VESSEL_CORE")) |p| {
+        if (p.len == 0) return error.StampToolAbsent;
+        if (cwd.access(io, p, .{})) |_| {
+            return p;
+        } else |_| {
+            return error.StampToolAbsent;
+        }
+    }
+    if (std.mem.lastIndexOfScalar(u8, argv0, '/')) |slash| {
+        const dir = argv0[0..slash];
+        const sibling = std.fmt.bufPrint(path_buf, "{s}/vessel-core", .{dir}) catch {
+            return error.StampToolAbsent;
+        };
+        if (cwd.access(io, sibling, .{})) |_| {
+            return sibling;
+        } else |_| {}
+    }
+    if (cwd.access(io, default_core_bin, .{})) |_| {
+        return default_core_bin;
+    } else |_| {
+        return error.StampToolAbsent;
+    }
+}
+
+/// Path C: stamp via vessel-core sign subprocess — no comptime vessel import.
+fn run_vessel_core_sign(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    core_bin: []const u8,
+    vessel_path: []const u8,
+) CliError!void {
+    assert(core_bin.len > 0);
+    assert(vessel_path.len > 0);
+    const argv = [_][]const u8{ core_bin, "sign", vessel_path };
+    const result = std.process.run(allocator, io, .{ .argv = &argv }) catch {
+        return error.StampFailed;
+    };
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => return error.StampFailed,
+    };
+    if (code != 0) return error.StampFailed;
+}
+
+/// Confirm the stamp landed — a stamp_sig field must be present after sign.
+fn verify_stamp_field(io: std.Io, vessel_path: []const u8) CliError!void {
+    assert(vessel_path.len > 0);
+    var buf: [max_vessel_len]u8 = undefined;
+    const text = Dir.cwd().readFile(io, vessel_path, &buf) catch {
+        return error.StampFailed;
+    };
+    const has_sig = std.mem.indexOf(u8, text, "\nstamp_sig ") != null or std.mem.startsWith(u8, text, "stamp_sig ");
+    if (!has_sig) return error.StampFailed;
+}
+
+/// Q9: resolve vessel-core, sign the sealed vessel, confirm stamp_sig landed.
+/// Rite: seal, then stamp — stamp_sig stays outside the sealed head.
+fn stamp_sealed_vessel(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv0: []const u8,
+    vessel_path: []const u8,
+) CliError!void {
+    assert(argv0.len > 0);
+    assert(vessel_path.len > 0);
+    var core_path_buf: [max_vessel_path_len]u8 = undefined;
+    const core_bin = try resolve_core_bin(init, io, argv0, &core_path_buf);
+    try run_vessel_core_sign(allocator, io, core_bin, vessel_path);
+    try verify_stamp_field(io, vessel_path);
+    print("amphora: vessel stamped rite=seal-then-stamp\n", .{});
+}
+
+/// Parent identity of a pour: SHA3-256 over the sorted cargo plain, lower hex.
+fn parent_of_cargo(cargo: []const u8, parent_hex: *[digest_hex_len]u8) void {
+    assert(cargo.len > 0);
+    assert(parent_hex.len == digest_hex_len);
+    var parent_digest: [Sha3_256.digest_length]u8 = undefined;
+    Sha3_256.hash(cargo, &parent_digest, .{});
+    write_hex_lower(&parent_digest, parent_hex);
+}
+
+/// Q10 write-guard: a second pour may repeat an identity, never fork it.
+/// An occupant with the same parent is the same pour said again — welcome.
+/// Any other occupant (different parent, no parent, unreadable) refuses,
+/// so the path's identity stays single across every pour.
+fn guard_identity_fork(io: std.Io, vessel_path: []const u8, parent_hex: []const u8) CliError!void {
+    assert(vessel_path.len > 0);
+    assert(parent_hex.len == digest_hex_len);
+    var buf: [max_vessel_len]u8 = undefined;
+    const text = Dir.cwd().readFile(io, vessel_path, &buf) catch |fault| switch (fault) {
+        error.FileNotFound => return, // first pour — nothing to fork
+        else => return error.IdentityFork, // occupant unreadable: continuity unconfirmed
+    };
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |raw| {
+        if (!std.mem.startsWith(u8, raw, "parent ")) continue;
+        const value = raw["parent ".len..];
+        if (std.mem.eql(u8, value, parent_hex)) {
+            return; // same identity — the re-pour is the same pour
+        }
+        return error.IdentityFork;
+    }
+    return error.IdentityFork; // occupant carries no parent — continuity unconfirmed
+}
+
+/// Filled front half of a pour — names into argv, lengths into caller buffers.
+const PourFilled = struct {
+    season: []const u8,
+    vessel: []const u8,
+    cargo_len: u32,
+    manifest_len: u32,
+};
+
+/// Pour front: parse · read · sort · cargo · manifest · parent · guard.
+/// Returns an exit code when a door refused, null when the fill is whole.
+fn pour_fill(
+    init: std.process.Init,
+    args: []const []const u8,
+    cargo: *[max_cargo_bytes]u8,
+    manifest: *[max_manifest_bytes]u8,
+    parent_hex: *[digest_hex_len]u8,
+    filled: *PourFilled,
+) ?u8 {
+    const allocator = init.arena.allocator();
+    const io = init.io;
+    const parsed = parse_pour_args(args) catch |fault| {
+        return switch (fault) {
+            error.MissingOperand => refuse(error.MissingOperand, "pour <season> <vessel>"),
+            error.PathTooLong => blk: {
+                if (args.len >= 3 and args[2].len > max_vessel_path_len) {
+                    break :blk refuse(error.PathTooLong, args[2]);
+                }
+                if (args.len >= 4 and args[3].len > max_vessel_path_len) {
+                    break :blk refuse(error.PathTooLong, args[3]);
+                }
+                break :blk refuse(error.PathTooLong, "pour");
+            },
+            error.TooManyWords => refuse(error.TooManyWords, ""),
+            else => refuse(error.CommandNotGrown, "pour"),
+        };
+    };
+
+    var catalog: SeasonCatalog = undefined;
+    read_season(allocator, io, parsed.season, &catalog) catch |fault| {
+        return switch (fault) {
+            error.SeasonAbsent => refuse(error.SeasonAbsent, parsed.season),
+            error.SeasonEmpty => refuse(error.SeasonEmpty, parsed.season),
+            error.SeasonOverflow => refuse(error.SeasonOverflow, parsed.season),
+            else => refuse(error.SeasonUnreadable, parsed.season),
+        };
+    };
+    assert(catalog.file_count >= 1);
+    print("amphora: season read files={d} bytes={d}\n", .{ catalog.file_count, catalog.total_bytes });
+
+    sort_season_by_name(&catalog);
+    const cargo_len = build_cargo_plain(&catalog, cargo) catch |fault| {
+        return refuse(fault, parsed.season);
+    };
+    const manifest_len = build_manifest_lines(&catalog, manifest) catch |fault| {
+        return refuse(fault, parsed.season);
+    };
+    parent_of_cargo(cargo[0..cargo_len], parent_hex);
+
+    guard_identity_fork(io, parsed.vessel, parent_hex) catch
+        return refuse(error.IdentityFork, parsed.vessel);
+
+    filled.* = .{
+        .season = parsed.season,
+        .vessel = parsed.vessel,
+        .cargo_len = cargo_len,
+        .manifest_len = manifest_len,
+    };
+    return null;
+}
+
+/// Pour ship: write manifest+cargo · seal · stamp — the grown round path.
+fn pour_ship(
+    init: std.process.Init,
+    args: []const []const u8,
+    filled: *const PourFilled,
+    cargo: *const [max_cargo_bytes]u8,
+    manifest: *const [max_manifest_bytes]u8,
+    parent_hex: *const [digest_hex_len]u8,
+) u8 {
+    const allocator = init.arena.allocator();
+    const io = init.io;
+    assert(filled.cargo_len > 0);
+    assert(filled.manifest_len > 0);
+
+    write_unsealed_vessel(
+        io,
+        filled.vessel,
+        parent_hex,
+        manifest[0..filled.manifest_len],
+        cargo[0..filled.cargo_len],
+    ) catch |fault| {
+        return refuse(fault, filled.vessel);
+    };
+
+    var seal_path_buf: [max_vessel_path_len]u8 = undefined;
+    const seal_bin = resolve_seal_bin(init, io, args[0], &seal_path_buf) catch {
+        // Detail names the default roof; AMPHORA_VESSEL_SEAL still gates resolve.
+        return refuse(error.SealToolAbsent, default_seal_bin);
+    };
+    run_vessel_seal(allocator, io, seal_bin, filled.vessel) catch {
+        return refuse(error.SealFailed, filled.vessel);
+    };
+    verify_seal_fields(io, filled.vessel) catch {
+        return refuse(error.SealFailed, filled.vessel);
+    };
+    print("amphora: vessel sealed cargo_bytes={d}\n", .{filled.cargo_len});
+
+    stamp_sealed_vessel(init, allocator, io, args[0], filled.vessel) catch |fault| {
+        return switch (fault) {
+            // Detail names the default roof; AMPHORA_VESSEL_CORE still gates resolve.
+            error.StampToolAbsent => refuse(error.StampToolAbsent, default_core_bin),
+            else => refuse(error.StampFailed, filled.vessel),
+        };
+    };
+    write_season_resins(allocator, io, filled.season, filled.vessel) catch |fault| {
+        return switch (fault) {
+            error.PathTooLong => refuse(error.PathTooLong, filled.vessel),
+            error.SeasonAbsent => refuse(error.SeasonAbsent, filled.season),
+            error.SeasonEmpty => refuse(error.SeasonEmpty, filled.season),
+            error.SeasonOverflow => refuse(error.SeasonOverflow, filled.season),
+            else => refuse(error.SeasonUnreadable, filled.season),
+        };
+    };
+    print("amphora: pour complete manifest_lines_bytes={d}\n", .{filled.manifest_len});
+    return exit_ok;
+}
+
+/// Re-walk the season and place each body at `{dirname}/resins/<digest>`.
+/// The sealed cargo stays a listing; the Return reads these resins (Q40).
+fn write_season_resins(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    season_path: []const u8,
+    vessel_path: []const u8,
+) CliError!void {
+    assert(season_path.len > 0);
+    assert(vessel_path.len > 0);
+    var dir_buf: [max_vessel_path_len]u8 = undefined;
+    const rdir = try resins_dir_path(vessel_path, &dir_buf);
+    const cwd = Dir.cwd();
+    cwd.createDirPath(io, rdir) catch return error.VesselUnwritable;
+
+    const dir = cwd.openDir(io, season_path, .{ .iterate = true }) catch {
+        return error.SeasonAbsent;
+    };
+    defer dir.close(io);
+    var walker = dir.walk(allocator) catch return error.SeasonUnreadable;
+    defer walker.deinit();
+
+    var file_buf: [max_season_file_bytes]u8 = undefined;
+    var wrote: u32 = 0;
+    while (true) {
+        const maybe = walker.next(io) catch return error.SeasonUnreadable;
+        const entry = maybe orelse break;
+        if (entry.kind != .file) continue;
+        const data = entry.dir.readFile(io, entry.basename, &file_buf) catch {
+            return error.SeasonUnreadable;
+        };
+        var digest: [Sha3_256.digest_length]u8 = undefined;
+        Sha3_256.hash(data, &digest, .{});
+        var hex: [digest_hex_len]u8 = undefined;
+        write_hex_lower(&digest, &hex);
+        var path_buf: [max_vessel_path_len]u8 = undefined;
+        const rpath = try resin_file_path(vessel_path, &hex, &path_buf);
+        cwd.writeFile(io, .{ .sub_path = rpath, .data = data }) catch {
+            return error.VesselUnwritable;
+        };
+        wrote += 1;
+    }
+    if (wrote == 0) return error.SeasonEmpty;
+    print("amphora: resins written count={d} dir={s}\n", .{ wrote, rdir });
+}
+
+/// Q11 door: parse · read · guard · write(manifest) · seal · stamp — pour
+/// grown; the round path exits ok. Witnesses wait Q12; stdout family waits
+/// the maintainer's word, so success speaks on stderr only.
+fn cmd_pour(init: std.process.Init, args: []const []const u8) u8 {
+    var cargo: [max_cargo_bytes]u8 = undefined;
+    var manifest: [max_manifest_bytes]u8 = undefined;
+    var parent_hex: [digest_hex_len]u8 = undefined;
+    var filled: PourFilled = undefined;
+    if (pour_fill(init, args, &cargo, &manifest, &parent_hex, &filled)) |code| {
+        return code;
+    }
+    return pour_ship(init, args, &filled, &cargo, &manifest, &parent_hex);
+}
+
+// =========================================================================
+// § Carry — J2 The Crossing (doc seed, Q18 — code grows Q19+)
+// -------------------------------------------------------------------------
+//
+// Carry moves a poured vessel to a far dock without ever trusting motion:
+// both walls verify BEFORE the first byte travels (stamp, then seal), the
+// far side guards identity exactly as pour does (same parent re-carries;
+// any other occupant refuses), cargo rides kind-0x33 chunk frames under the
+// wire module's named ceiling, and the crossing is only believed when the
+// far assembly reads byte-equal to the source. The manifest crosses whole,
+// readable at the dock before any seal is touched. Effects come last:
+// nothing lands at the dock until every check on the near side has passed.
+
+/// One carry's names — vessel to move, dock to receive it.
+const CarryArgs = struct {
+    vessel: []const u8,
+    dock: []const u8,
+};
+
+/// Q19: carry argument parse — `carry <vessel> <dock>`, bounds named.
+fn parse_carry_args(args: []const []const u8) CliError!CarryArgs {
+    assert(args.len >= 2);
+    assert(std.mem.eql(u8, args[1], "carry"));
+    if (args.len < 4) return error.MissingOperand;
+    if (args.len > max_words) return error.TooManyWords;
+    const vessel = args[2];
+    const dock = args[3];
+    if (vessel.len == 0) return error.MissingOperand;
+    if (dock.len == 0) return error.MissingOperand;
+    if (vessel.len > max_vessel_path_len) return error.PathTooLong;
+    if (dock.len > max_vessel_path_len) return error.PathTooLong;
+    return .{ .vessel = vessel, .dock = dock };
+}
+
+/// Q20 wall one: the Kumara stamp must verify before any motion.
+fn run_vessel_core_verify(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    core_bin: []const u8,
+    vessel_path: []const u8,
+) CliError!void {
+    assert(core_bin.len > 0);
+    assert(vessel_path.len > 0);
+    const argv = [_][]const u8{ core_bin, "verify", vessel_path };
+    const result = std.process.run(allocator, io, .{ .argv = &argv }) catch {
+        return error.StampUnverified;
+    };
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => return error.StampUnverified,
+    };
+    if (code != 0) return error.StampUnverified;
+}
+
+/// Q20 wall two: the seal must open before any motion.
+fn run_vessel_seal_open(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    seal_bin: []const u8,
+    vessel_path: []const u8,
+) CliError!void {
+    assert(seal_bin.len > 0);
+    assert(vessel_path.len > 0);
+    const argv = [_][]const u8{ seal_bin, "open-check", vessel_path };
+    const result = std.process.run(allocator, io, .{ .argv = &argv }) catch {
+        return error.SealUnopened;
+    };
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => return error.SealUnopened,
+    };
+    if (code != 0) return error.SealUnopened;
+}
+
+/// Q20: both walls verify before the first byte travels — stamp, then seal.
+fn carry_verify_walls(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv0: []const u8,
+    vessel_path: []const u8,
+) CliError!void {
+    assert(argv0.len > 0);
+    assert(vessel_path.len > 0);
+    var core_path_buf: [max_vessel_path_len]u8 = undefined;
+    const core_bin = try resolve_core_bin(init, io, argv0, &core_path_buf);
+    try run_vessel_core_verify(allocator, io, core_bin, vessel_path);
+    var seal_path_buf: [max_vessel_path_len]u8 = undefined;
+    const seal_bin = resolve_seal_bin(init, io, argv0, &seal_path_buf) catch
+        return error.SealUnopened;
+    try run_vessel_seal_open(allocator, io, seal_bin, vessel_path);
+    print("amphora: carry walls verified rite=stamp-then-seal\n", .{});
+}
+
+/// Read the source vessel's parent field — the identity that travels.
+/// Light line scan, path C: no vessel module import.
+fn read_vessel_parent(io: std.Io, vessel_path: []const u8, out: *[digest_hex_len]u8) CliError!void {
+    assert(vessel_path.len > 0);
+    var buf: [max_vessel_len]u8 = undefined;
+    const text = Dir.cwd().readFile(io, vessel_path, &buf) catch {
+        return error.StampUnverified;
+    };
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |raw| {
+        if (!std.mem.startsWith(u8, raw, "parent ")) continue;
+        const value = raw["parent ".len..];
+        if (value.len != digest_hex_len) return error.StampUnverified;
+        // No tally_copy import from amphora/src (path C) — bounded byte copy.
+        var ci: u32 = 0;
+        while (ci < digest_hex_len) : (ci += 1) {
+            out[ci] = value[ci];
+        }
+        return;
+    }
+    return error.StampUnverified;
+}
+
+/// Build `<dock>/vessel.bron` — the far-side path the fork law guards.
+fn dock_vessel_path(dock: []const u8, buf: []u8) CliError![]const u8 {
+    assert(dock.len > 0);
+    assert(buf.len >= max_vessel_path_len);
+    return std.fmt.bufPrint(buf, "{s}/{s}", .{ dock, dock_vessel_name }) catch {
+        return error.PathTooLong;
+    };
+}
+
+/// Q22: the chunk plan — how many kind-0x33 sized pieces this vessel cuts.
+/// Postcondition: 1 <= count <= max_carry_chunks.
+fn plan_chunks(vessel_bytes: u32) u32 {
+    assert(vessel_bytes > 0);
+    assert(vessel_bytes <= max_vessel_len);
+    const count: u32 = (vessel_bytes + max_chunk_datagram - 1) / max_chunk_datagram;
+    assert(count >= 1);
+    assert(count <= max_carry_chunks);
+    return count;
+}
+
+/// One chunk's on-dock name: chunk-NNNN.bron (format vocabulary, park open).
+fn dock_chunk_path(dock: []const u8, index: u32, buf: []u8) CliError![]const u8 {
+    assert(dock.len > 0);
+    assert(index < max_carry_chunks);
+    return std.fmt.bufPrint(buf, "{s}/chunk-{d:0>4}.bron", .{ dock, index }) catch {
+        return error.PathTooLong;
+    };
+}
+
+/// Q23: cut the vessel into ceiling-sized chunks and write them at the dock.
+/// Effects come last in each step: the dock directory is made, then chunks
+/// land in index order, each a plain byte slice of the sealed vessel text.
+fn write_dock_chunks(io: std.Io, dock: []const u8, vessel_text: []const u8, chunk_count: u32) CliError!void {
+    assert(vessel_text.len > 0);
+    assert(chunk_count == plan_chunks(@intCast(vessel_text.len)));
+    const cwd = Dir.cwd();
+    cwd.createDirPath(io, dock) catch return error.DockUnwritable;
+    var i: u32 = 0;
+    while (i < chunk_count) : (i += 1) {
+        const start: u32 = i * max_chunk_datagram;
+        const remain: u32 = @intCast(vessel_text.len - start);
+        const take: u32 = if (remain < max_chunk_datagram) remain else max_chunk_datagram;
+        assert(take >= 1);
+        var path_buf: [max_vessel_path_len]u8 = undefined;
+        const cpath = try dock_chunk_path(dock, i, &path_buf);
+        cwd.writeFile(io, .{ .sub_path = cpath, .data = vessel_text[start .. start + take] }) catch {
+            return error.DockUnwritable;
+        };
+    }
+}
+
+/// Q24: reassemble the chunks in order and demand byte-equality with the
+/// source — a crossing is only believed when the far bytes are the near bytes.
+fn assemble_dock_vessel(io: std.Io, dock: []const u8, far_vessel: []const u8, source_text: []const u8, chunk_count: u32) CliError!void {
+    assert(source_text.len > 0);
+    assert(chunk_count >= 1);
+    const cwd = Dir.cwd();
+    var joined: [max_vessel_len]u8 = undefined;
+    var off: u32 = 0;
+    var i: u32 = 0;
+    while (i < chunk_count) : (i += 1) {
+        var path_buf: [max_vessel_path_len]u8 = undefined;
+        const cpath = try dock_chunk_path(dock, i, &path_buf);
+        var cbuf: [max_chunk_datagram]u8 = undefined;
+        const piece = cwd.readFile(io, cpath, &cbuf) catch return error.ChunkTorn;
+        if (piece.len == 0) return error.ChunkTorn;
+        if (off + piece.len > joined.len) return error.ChunkTorn;
+        var bi: u32 = 0;
+        while (bi < piece.len) : (bi += 1) {
+            joined[off + bi] = piece[bi];
+        }
+        off += @intCast(piece.len);
+    }
+    if (off != source_text.len) return error.CrossingUnequal;
+    if (!std.mem.eql(u8, joined[0..off], source_text)) return error.CrossingUnequal;
+    cwd.writeFile(io, .{ .sub_path = far_vessel, .data = joined[0..off] }) catch {
+        return error.DockUnwritable;
+    };
+}
+
+/// Q25: the manifest crossed whole — the far vessel must list its cargo
+/// readably before anyone touches a seal. Byte-equality already implies it;
+/// this door says it aloud, so a dock reader's first promise is checked.
+fn verify_far_manifest(io: std.Io, far_vessel: []const u8) CliError!void {
+    assert(far_vessel.len > 0);
+    var buf: [max_vessel_len]u8 = undefined;
+    const text = Dir.cwd().readFile(io, far_vessel, &buf) catch
+        return error.ChunkTorn;
+    const has = std.mem.indexOf(u8, text, "\nmanifest ") != null or std.mem.startsWith(u8, text, "manifest ");
+    if (!has) return error.CrossingUnequal;
+}
+
+/// Names a carry check filled: the two operands and the far vessel path.
+const CarryFilled = struct {
+    vessel: []const u8,
+    dock: []const u8,
+    far_vessel: []const u8,
+};
+
+/// Carry front: parse · walls · traveling parent · far path · dock guard.
+/// Returns an exit code when a door refused, null when the check is whole.
+fn carry_check(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+    far_path_buf: *[max_vessel_path_len]u8,
+    filled: *CarryFilled,
+) ?u8 {
+    const parsed = parse_carry_args(args) catch |fault| {
+        return switch (fault) {
+            error.MissingOperand => refuse(error.MissingOperand, "carry <vessel> <dock>"),
+            error.PathTooLong => blk: {
+                if (args.len >= 3 and args[2].len > max_vessel_path_len) {
+                    break :blk refuse(error.PathTooLong, args[2]);
+                }
+                if (args.len >= 4 and args[3].len > max_vessel_path_len) {
+                    break :blk refuse(error.PathTooLong, args[3]);
+                }
+                break :blk refuse(error.PathTooLong, "carry");
+            },
+            error.TooManyWords => refuse(error.TooManyWords, ""),
+            else => refuse(error.CommandNotGrown, "carry"),
+        };
+    };
+    assert(parsed.vessel.len > 0);
+    assert(parsed.dock.len > 0);
+
+    carry_verify_walls(init, allocator, init.io, args[0], parsed.vessel) catch |fault| {
+        return switch (fault) {
+            error.StampToolAbsent => refuse(error.StampToolAbsent, default_core_bin),
+            error.SealUnopened => refuse(error.SealUnopened, parsed.vessel),
+            else => refuse(error.StampUnverified, parsed.vessel),
+        };
+    };
+
+    var parent_hex: [digest_hex_len]u8 = undefined;
+    read_vessel_parent(init.io, parsed.vessel, &parent_hex) catch
+        return refuse(error.StampUnverified, parsed.vessel);
+    const far_vessel = dock_vessel_path(parsed.dock, far_path_buf) catch
+        return refuse(error.PathTooLong, parsed.dock);
+    guard_identity_fork(init.io, far_vessel, &parent_hex) catch
+        return refuse(error.IdentityFork, far_vessel);
+
+    filled.* = .{ .vessel = parsed.vessel, .dock = parsed.dock, .far_vessel = far_vessel };
+    return null;
+}
+
+/// Carry cross: plan · chunks (unless the witness seam trusts the dock) ·
+/// assemble byte-equal · far walls · far manifest — completion spoken last.
+fn carry_cross(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+    filled: *const CarryFilled,
+) u8 {
+    var vbuf: [max_vessel_len]u8 = undefined;
+    const vtext = Dir.cwd().readFile(init.io, filled.vessel, &vbuf) catch
+        return refuse(error.StampUnverified, filled.vessel);
+    assert(vtext.len > 0);
+    const chunk_count = plan_chunks(@intCast(vtext.len));
+    print("amphora: carry plan chunks={d} ceiling={d} bytes={d}\n", .{ chunk_count, max_chunk_datagram, vtext.len });
+
+    // Witness seam (Q27): with AMPHORA_CARRY_TRUST_DOCK set, assemble from
+    // the chunks already standing at the dock rather than cutting fresh —
+    // this is how planted torn / reordered / forged chunks become testable,
+    // since a production carry lawfully heals a dock by re-cutting. The env
+    // gate mirrors AMPHORA_VESSEL_SEAL / _CORE; production carries never set it.
+    const trust_dock = init.environ_map.get("AMPHORA_CARRY_TRUST_DOCK") != null;
+    if (!trust_dock) {
+        write_dock_chunks(init.io, filled.dock, vtext, chunk_count) catch |fault| {
+            return switch (fault) {
+                error.PathTooLong => refuse(error.PathTooLong, filled.dock),
+                else => refuse(error.DockUnwritable, filled.dock),
+            };
+        };
+    }
+    assemble_dock_vessel(init.io, filled.dock, filled.far_vessel, vtext, chunk_count) catch |fault| {
+        return switch (fault) {
+            error.ChunkTorn => refuse(error.ChunkTorn, filled.dock),
+            error.CrossingUnequal => refuse(error.CrossingUnequal, filled.dock),
+            else => refuse(error.DockUnwritable, filled.far_vessel),
+        };
+    };
+    carry_verify_walls(init, allocator, init.io, args[0], filled.far_vessel) catch |fault| {
+        return switch (fault) {
+            error.SealUnopened => refuse(error.SealUnopened, filled.far_vessel),
+            else => refuse(error.StampUnverified, filled.far_vessel),
+        };
+    };
+    verify_far_manifest(init.io, filled.far_vessel) catch
+        return refuse(error.CrossingUnequal, filled.far_vessel);
+    print("amphora: far manifest readable\n", .{});
+    ferry_resins(init.io, allocator, filled.vessel, filled.far_vessel) catch |fault| {
+        return switch (fault) {
+            error.PathTooLong => refuse(error.PathTooLong, filled.dock),
+            error.ResinAbsent => refuse(error.ResinAbsent, filled.vessel),
+            else => refuse(error.DockUnwritable, filled.dock),
+        };
+    };
+    print("amphora: carry complete chunks={d} far={s}\n", .{ chunk_count, filled.far_vessel });
+    return exit_ok;
+}
+
+/// Ferry `{near}/resins/*` to `{far}/resins/*` so the Return has bodies.
+fn ferry_resins(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    near_vessel: []const u8,
+    far_vessel: []const u8,
+) CliError!void {
+    assert(near_vessel.len > 0);
+    assert(far_vessel.len > 0);
+    var near_buf: [max_vessel_path_len]u8 = undefined;
+    var far_buf: [max_vessel_path_len]u8 = undefined;
+    const near_dir = try resins_dir_path(near_vessel, &near_buf);
+    const far_dir = try resins_dir_path(far_vessel, &far_buf);
+    const cwd = Dir.cwd();
+    const src = cwd.openDir(io, near_dir, .{ .iterate = true }) catch {
+        return error.ResinAbsent;
+    };
+    defer src.close(io);
+    cwd.createDirPath(io, far_dir) catch return error.DockUnwritable;
+
+    var walker = src.walk(allocator) catch return error.ResinAbsent;
+    defer walker.deinit();
+    var file_buf: [max_season_file_bytes]u8 = undefined;
+    var n: u32 = 0;
+    while (true) {
+        const maybe = walker.next(io) catch return error.ResinAbsent;
+        const entry = maybe orelse break;
+        if (entry.kind != .file) continue;
+        if (entry.path.len != digest_hex_len) return error.ResinAbsent;
+        const data = entry.dir.readFile(io, entry.basename, &file_buf) catch {
+            return error.ResinAbsent;
+        };
+        var out_buf: [max_vessel_path_len]u8 = undefined;
+        const dest = std.fmt.bufPrint(&out_buf, "{s}/{s}", .{ far_dir, entry.path }) catch {
+            return error.PathTooLong;
+        };
+        cwd.writeFile(io, .{ .sub_path = dest, .data = data }) catch {
+            return error.DockUnwritable;
+        };
+        n += 1;
+    }
+    if (n == 0) return error.ResinAbsent;
+    print("amphora: resins ferried count={d}\n", .{n});
+}
+
+/// Q27 door: check (parse · walls · guard) then cross (plan · chunks ·
+/// byte-equal · far walls · manifest) — sequencer, the pour split's mirror.
+fn cmd_carry(init: std.process.Init, args: []const []const u8) u8 {
+    const allocator = init.arena.allocator();
+    var far_path_buf: [max_vessel_path_len]u8 = undefined;
+    var filled: CarryFilled = undefined;
+    if (carry_check(init, allocator, args, &far_path_buf, &filled)) |code| {
+        return code;
+    }
+    return carry_cross(init, allocator, args, &filled);
+}
+
+// -------------------------------------------------------------------------
+// § Restore — J3 The Return (doctrine seed, Q34 — code grows Q35+)
+// -------------------------------------------------------------------------
+//
+// Restore walks the cargo home without ever trusting the walk: both walls
+// verify before the seal is opened (the carry rite, reused), the seal
+// module's own open door yields the plaintext cargo, every restored file is
+// re-proven against the digest it rode in on, and the whole return is only
+// believed when the restored season re-pours to the very same parent. The
+// out-home takes a derived name — format vocabulary, park open — and the
+// fork law guards it exactly as it guards every other landing. Effects
+// come last; belief comes last of all.
+
+/// Build `<vessel>.season` — the out-home the fork law will guard.
+fn restore_out_path(vessel: []const u8, buf: []u8) CliError![]const u8 {
+    assert(vessel.len > 0);
+    assert(buf.len >= max_vessel_path_len);
+    return std.fmt.bufPrint(buf, "{s}{s}", .{ vessel, restore_out_suffix }) catch {
+        return error.PathTooLong;
+    };
+}
+
+/// Q35: restore argument parse — `restore <vessel>`, bounds named.
+fn parse_restore_args(args: []const []const u8) CliError![]const u8 {
+    assert(args.len >= 2);
+    assert(std.mem.eql(u8, args[1], "restore"));
+    if (args.len < 3) return error.MissingOperand;
+    if (args.len > 3) return error.TooManyWords;
+    const vessel = args[2];
+    if (vessel.len == 0) return error.MissingOperand;
+    if (vessel.len > max_vessel_path_len) return error.PathTooLong;
+    return vessel;
+}
+
+/// Q37 instrument: `vessel-seal open <vessel> <plain-out>` via subprocess.
+fn run_vessel_seal_open_file(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    seal_bin: []const u8,
+    vessel_path: []const u8,
+    plain_out: []const u8,
+) CliError!void {
+    assert(seal_bin.len > 0);
+    assert(vessel_path.len > 0);
+    assert(plain_out.len > 0);
+    const argv = [_][]const u8{ seal_bin, "open", vessel_path, plain_out };
+    const result = std.process.run(allocator, io, .{ .argv = &argv }) catch {
+        return error.SealUnopened;
+    };
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => return error.SealUnopened,
+    };
+    if (code != 0) return error.SealUnopened;
+}
+
+/// Q38: parse cargo lines (`cargo mark digest name`) into a season catalog.
+fn catalog_from_cargo_plain(plain: []const u8, catalog: *SeasonCatalog) CliError!void {
+    assert(plain.len > 0);
+    assert(plain.len <= max_seal_plain_mirror); // couples: vessel_seal.max_seal_plain
+    catalog.file_count = 0;
+    catalog.total_bytes = 0;
+    var start: u32 = 0;
+    while (start < plain.len) {
+        var end = start;
+        while (end < plain.len and plain[end] != '\n') : (end += 1) {}
+        const line = plain[start..end];
+        if (line.len > 0) try append_cargo_line(line, catalog);
+        start = if (end < plain.len) end + 1 else end;
+    }
+    if (catalog.file_count == 0) return error.SeasonEmpty;
+}
+
+fn append_cargo_line(line: []const u8, catalog: *SeasonCatalog) CliError!void {
+    const prefix = "cargo ";
+    if (!std.mem.startsWith(u8, line, prefix)) return error.CargoUnproven;
+    const rest = line[prefix.len..];
+    var sp1: u32 = 0;
+    while (sp1 < rest.len and rest[sp1] != ' ') : (sp1 += 1) {}
+    if (sp1 == 0 or sp1 >= rest.len) return error.CargoUnproven;
+    const mark = rest[0..sp1];
+    if (!std.mem.eql(u8, mark, mark_plain_bytes)) return error.CargoUnproven;
+    const after_mark = rest[sp1 + 1 ..];
+    if (after_mark.len < digest_hex_len + 2) return error.CargoUnproven;
+    if (after_mark[digest_hex_len] != ' ') return error.CargoUnproven;
+    const digest = after_mark[0..digest_hex_len];
+    const name = after_mark[digest_hex_len + 1 ..];
+    if (name.len == 0 or name.len > max_season_name_len) return error.CargoUnproven;
+    if (catalog.file_count >= max_season_files) return error.SeasonOverflow;
+    const slot = &catalog.entries[catalog.file_count];
+    slot.name_len = @intCast(name.len);
+    var ni: u32 = 0;
+    while (ni < name.len) : (ni += 1) {
+        slot.name[ni] = name[ni];
+    }
+    var di: u32 = 0;
+    while (di < digest_hex_len) : (di += 1) {
+        const c = digest[di];
+        const ok = (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f');
+        if (!ok) return error.CargoUnproven;
+        slot.digest_hex[di] = c;
+    }
+    slot.byte_len = 0;
+    catalog.file_count += 1;
+}
+
+/// Q39: fork law at `<vessel>.season` — absent welcomes; same parent re-restores.
+fn restore_guard_out(io: std.Io, allocator: std.mem.Allocator, vessel: []const u8, out_home: []const u8) CliError!void {
+    var parent_hex: [digest_hex_len]u8 = undefined;
+    read_vessel_parent(io, vessel, &parent_hex) catch return error.StampUnverified;
+    const cwd = Dir.cwd();
+    const probe = cwd.openDir(io, out_home, .{}) catch {
+        return; // first restore — no out-home yet
+    };
+    probe.close(io);
+    var catalog: SeasonCatalog = undefined;
+    try read_season(allocator, io, out_home, &catalog);
+    sort_season_by_name(&catalog);
+    var cargo: [max_cargo_bytes]u8 = undefined;
+    const cargo_len = try build_cargo_plain(&catalog, &cargo);
+    var season_parent: [digest_hex_len]u8 = undefined;
+    parent_of_cargo(cargo[0..cargo_len], &season_parent);
+    if (!std.mem.eql(u8, &season_parent, &parent_hex)) return error.IdentityFork;
+}
+
+/// Q40: write each resin into the out-home and re-prove its riding digest.
+fn restore_write_prove(
+    io: std.Io,
+    vessel: []const u8,
+    out_home: []const u8,
+    catalog: *const SeasonCatalog,
+) CliError!void {
+    assert(catalog.file_count >= 1);
+    const cwd = Dir.cwd();
+    cwd.createDirPath(io, out_home) catch return error.RestoreUnwritable;
+    var i: u32 = 0;
+    while (i < catalog.file_count) : (i += 1) {
+        const e = catalog.entries[i];
+        const name = e.name[0..e.name_len];
+        var rbuf: [max_vessel_path_len]u8 = undefined;
+        const rpath = try resin_file_path(vessel, &e.digest_hex, &rbuf);
+        var body: [max_season_file_bytes]u8 = undefined;
+        const data = cwd.readFile(io, rpath, &body) catch return error.ResinAbsent;
+        var dest_buf: [max_vessel_path_len]u8 = undefined;
+        const dest = std.fmt.bufPrint(&dest_buf, "{s}/{s}", .{ out_home, name }) catch {
+            return error.PathTooLong;
+        };
+        if (std.mem.lastIndexOfScalar(u8, dest, '/')) |slash| {
+            if (slash > 0) {
+                cwd.createDirPath(io, dest[0..slash]) catch return error.RestoreUnwritable;
+            }
+        }
+        cwd.writeFile(io, .{ .sub_path = dest, .data = data }) catch {
+            return error.RestoreUnwritable;
+        };
+        var digest: [Sha3_256.digest_length]u8 = undefined;
+        Sha3_256.hash(data, &digest, .{});
+        var hex: [digest_hex_len]u8 = undefined;
+        write_hex_lower(&digest, &hex);
+        if (!std.mem.eql(u8, &hex, &e.digest_hex)) return error.CargoUnproven;
+    }
+    print("amphora: restore files proven count={d}\n", .{catalog.file_count});
+}
+
+/// Q41: restored season re-pours to the same parent the vessel carries.
+fn restore_same_parent(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    vessel: []const u8,
+    out_home: []const u8,
+) CliError!void {
+    var want: [digest_hex_len]u8 = undefined;
+    read_vessel_parent(io, vessel, &want) catch return error.StampUnverified;
+    var catalog: SeasonCatalog = undefined;
+    try read_season(allocator, io, out_home, &catalog);
+    sort_season_by_name(&catalog);
+    var cargo: [max_cargo_bytes]u8 = undefined;
+    const cargo_len = try build_cargo_plain(&catalog, &cargo);
+    var got: [digest_hex_len]u8 = undefined;
+    parent_of_cargo(cargo[0..cargo_len], &got);
+    if (!std.mem.eql(u8, &got, &want)) return error.CargoUnproven;
+    print("amphora: restore same-parent ok\n", .{});
+}
+
+/// Q37–Q38: open the sealed cargo and parse the listing into a catalog.
+fn restore_open_catalog(
+    init: std.process.Init,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv0: []const u8,
+    vessel: []const u8,
+    catalog: *SeasonCatalog,
+) ?u8 {
+    var seal_path_buf: [max_vessel_path_len]u8 = undefined;
+    const seal_bin = resolve_seal_bin(init, io, argv0, &seal_path_buf) catch {
+        return refuse(error.SealToolAbsent, default_seal_bin);
+    };
+    var plain_buf: [max_vessel_path_len]u8 = undefined;
+    const plain_path = std.fmt.bufPrint(&plain_buf, "{s}.plain", .{vessel}) catch {
+        return refuse(error.PathTooLong, vessel);
+    };
+    run_vessel_seal_open_file(allocator, io, seal_bin, vessel, plain_path) catch {
+        return refuse(error.SealUnopened, vessel);
+    };
+    var plain_bytes: [max_cargo_bytes]u8 = undefined;
+    const plain = Dir.cwd().readFile(io, plain_path, &plain_bytes) catch {
+        return refuse(error.SealUnopened, plain_path);
+    };
+    catalog_from_cargo_plain(plain, catalog) catch |fault| {
+        return refuse(fault, vessel);
+    };
+    print("amphora: restore catalog files={d} plain_bytes={d}\n", .{ catalog.file_count, plain.len });
+    return null;
+}
+
+/// Q36–Q42: walls · open · catalog · guard · write/prove · same-parent · exit ok.
+fn cmd_restore(init: std.process.Init, args: []const []const u8) u8 {
+    const vessel = parse_restore_args(args) catch |fault| {
+        return switch (fault) {
+            error.MissingOperand => refuse(error.MissingOperand, "restore <vessel>"),
+            error.PathTooLong => refuse(error.PathTooLong, args[2]),
+            error.TooManyWords => refuse(error.TooManyWords, ""),
+            else => refuse(error.CommandNotGrown, "restore"),
+        };
+    };
+    assert(vessel.len > 0);
+    const allocator = init.arena.allocator();
+    const io = init.io;
+
+    carry_verify_walls(init, allocator, io, args[0], vessel) catch |fault| {
+        return switch (fault) {
+            error.StampToolAbsent => refuse(error.StampToolAbsent, default_core_bin),
+            error.SealUnopened => refuse(error.SealUnopened, vessel),
+            else => refuse(error.StampUnverified, vessel),
+        };
+    };
+    var out_buf: [max_vessel_path_len]u8 = undefined;
+    const out_home = restore_out_path(vessel, &out_buf) catch
+        return refuse(error.PathTooLong, vessel);
+    print("amphora: restore walls verified out={s}\n", .{out_home});
+
+    var catalog: SeasonCatalog = undefined;
+    if (restore_open_catalog(init, allocator, io, args[0], vessel, &catalog)) |code| {
+        return code;
+    }
+    restore_guard_out(io, allocator, vessel, out_home) catch |fault| {
+        return switch (fault) {
+            error.IdentityFork => refuse(error.IdentityFork, out_home),
+            error.StampUnverified => refuse(error.StampUnverified, vessel),
+            error.SeasonAbsent => refuse(error.SeasonAbsent, out_home),
+            error.SeasonEmpty => refuse(error.SeasonEmpty, out_home),
+            error.SeasonOverflow => refuse(error.SeasonOverflow, out_home),
+            error.SeasonUnreadable => refuse(error.SeasonUnreadable, out_home),
+            error.CargoTooLarge => refuse(error.CargoTooLarge, out_home),
+            error.PathTooLong => refuse(error.PathTooLong, out_home),
+            else => refuse(error.StampUnverified, vessel),
+        };
+    };
+    restore_write_prove(io, vessel, out_home, &catalog) catch |fault| {
+        return switch (fault) {
+            error.ResinAbsent => refuse(error.ResinAbsent, vessel),
+            error.CargoUnproven => refuse(error.CargoUnproven, out_home),
+            error.PathTooLong => refuse(error.PathTooLong, out_home),
+            error.RestoreUnwritable => refuse(error.RestoreUnwritable, out_home),
+            else => refuse(error.RestoreUnwritable, out_home),
+        };
+    };
+    restore_same_parent(io, allocator, vessel, out_home) catch {
+        return refuse(error.CargoUnproven, out_home);
+    };
+    print("amphora: restore complete out={s}\n", .{out_home});
+    return exit_ok;
+}
+
+// -------------------------------------------------------------------------
+// § Main — CLI (Q3–Q11 · carry Q19+ · restore Q35+ · version)
+// =========================================================================
+
+pub fn main(init: std.process.Init) !u8 {
+    const allocator = init.arena.allocator();
+    const io = init.io;
+    const args = try init.minimal.args.toSlice(allocator);
+
+    assert(args.len >= 1);
+    // Invariants that can fail if bounds move wrongly — not const == literal.
+    assert(max_words >= 2);
+    assert(max_chunk_datagram <= max_cargo_bytes);
+    assert(max_vessel_path_len > max_words);
+    assert(max_season_files >= 1);
+    assert(max_vessel_len >= max_cargo_bytes);
+    assert(max_manifest_bytes == max_cargo_bytes);
+    assert(max_seal_plain_mirror == max_cargo_bytes);
+    assert(digest_hex_len == Sha3_256.digest_length * 2);
+    assert(amphora_version.len == stamp_len);
+    assert(amphora_version[stamp_dot_index] == '.');
+    assert(std.mem.eql(u8, shoulder_ring1_wire, "amber-ring1-season"));
+
+    if (args.len > max_words) {
+        return refuse(error.TooManyWords, "");
+    }
+    if (args.len < 2) {
+        return refuse(error.MissingOperand, "a command");
+    }
+
+    const cmd = args[1];
+    if (std.mem.eql(u8, cmd, "version")) {
+        return cmd_version(io);
+    } else if (std.mem.eql(u8, cmd, "pour")) {
+        return cmd_pour(init, args);
+    } else if (std.mem.eql(u8, cmd, "carry")) {
+        return cmd_carry(init, args);
+    } else if (std.mem.eql(u8, cmd, "restore")) {
+        return cmd_restore(init, args);
+    } else {
+        return refuse(error.UnknownCommand, cmd);
+    }
+}
+
+/// Print the free version string on stdout — the seam `say` already uses.
+fn cmd_version(io: std.Io) u8 {
+    assert(amphora_version.len == stamp_len);
+    assert(amphora_version[stamp_dot_index] == '.');
+    var buf: [version_line_max]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "amphora {s}\n", .{amphora_version}) catch {
+        return refuse(error.ResultUnwritable, "version format");
+    };
+    const stdout = std.Io.File.stdout();
+    stdout.writeStreamingAll(io, line) catch {
+        return refuse(error.ResultUnwritable, "stdout");
+    };
+    return exit_ok;
+}
+
+fn print_usage() void {
+    print(
+        \\amphora — vessel software for a sealed crossing
+        \\
+        \\usage:
+        \\  amphora pour <season> <vessel>   fill, seal, then stamp
+        \\  amphora carry <vessel> <dock>    move sealed cargo
+        \\  amphora restore <vessel>         cold scrub, verify, restore
+        \\  amphora version                  print the Amphora version
+        \\
+    , .{});
+}

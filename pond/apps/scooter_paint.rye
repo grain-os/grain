@@ -1,0 +1,616 @@
+//! pond/apps/scooter_paint.rye -- Scooter, the painted face: a live channel folded to a frame, then to pixels.
+//!
+//! Season G (Open Media Primitives) -- the pond bridge rung. image/text_grid.rye built the join in the abstract:
+//! it paints ANY monospace grid of character bytes into an image. This module is the join made LIVE -- it feeds a
+//! real Scooter conversation through it. scooter_view.rye folds an append-only channel into a fixed 24x80 Frame of
+//! character cells; this rung takes that Frame's cells and hands them to text_grid.render_grid, so a keeper's
+//! conversation is not only bytes a terminal parses but PIXELS a surface (Grainphone, Realidream, Skate) shows.
+//!
+//! Layering held right: pond composes image, never the reverse. text_grid is self-contained in image/ and knows
+//! nothing of Scooter; this pond rung is the only place the two families meet, and it imports DOWN into image/.
+//!
+//! Pattern elder: image/text_grid.rye run_selftest -- it painted a hand-built grid shaped like a Frame; this rung
+//! paints a Frame folded from a real channel, closing the loop the elder left open by one line.
+//!
+//! The crux is one faithful, bounded bridge:
+//!   - render_channel folds a channel to a Frame (scooter_view.render) and paints it -- the whole verb a surface calls.
+//!   - paint_frame guards the honest edge: a Frame cell could carry a byte the 5x7 ASCII font cannot draw (a post
+//!     with a stray control or high byte), so paint_frame refuses ScooterFrameUnpaintable BY NAME before a pixel
+//!     moves, rather than letting text_grid mislabel it as a shape mismatch downstream.
+//!   - The bridge adds nothing but that guard: a paintable Frame renders BYTE-FOR-BYTE the same image text_grid
+//!     would paint from the same cells, so the fold stays referentially transparent and the image round-trips
+//!     through the open QOI codec unchanged.
+//!
+//! The colored twin brings text_grid's per-cell foreground palette to a LIVE conversation: render_channel_fg paints
+//! the status header (row 0, "scooter: N posts") in one color and the conversation body in another, over a solid
+//! ground -- a terminal shows its status line in an accent color and the reading beneath in the reading color, and
+//! this is that affordance made pixels. paint_frame_fg is the palette-taking sibling of paint_frame; both share the
+//! same paintability guard, and the colored verbs stand BESIDE the single-ink ones (which are untouched), so the
+//! render is still a pure pass-through of text_grid.render_grid_fg. Color moves ink, it adds none.
+//!
+//! The full colored cell brings text_grid's per-cell foreground AND background to a LIVE conversation: render_channel_bar
+//! paints the status header as a real colored BAR -- the header ink over a header GROUND (a filled band), the body over
+//! the reading ground -- so a keeper's status line reads white-on-blue the way a terminal's status bar does, not merely
+//! colored text over the page. Where render_channel_fg gave the header its own ink, this gives the header its own
+//! ground too: the one move that turns a colored word into a colored bar. paint_frame_cells is the two-palette sibling
+//! of paint_frame_fg, sharing the same paintability guard and standing BESIDE the single-ink and fg-only verbs (all
+//! untouched), so it is still a pure pass-through of text_grid.render_grid_cells. Ground first, ink over it, per cell.
+//!
+//! The drawn caret joins a composing session (scooter_compose) to the painted face: render_session folds the session
+//! to a frame and paints it with a visible block CURSOR at the caret cell -- inverse video (the glyph in the ground
+//! color over an ink-color ground), the classic terminal cursor a keeper watches. It is a pure pass-through of
+//! text_grid.render_grid_cursor -- the abstract cursor primitive every grid surface shares -- so the caret is one
+//! inverted cell, the conversation untouched: the drawn face equals the plain painted session everywhere but that
+//! single cell, and the cursor clears and follows the keeper as the caret moves.
+//!
+//! Facts only, custody-first: it reads a public journal a member already holds and paints it -- no network, no key
+//! signs, no funds. The wire that carries the image between two Constel piers reaches the serve gate (the
+//! maintainer's hand), and the live TTY that would show it is Dexter's own later rung.
+//!
+//!   env RYE_ZIG=vendor/zig-toolchain/zig rye/bin/rye build pond/apps/scooter_paint.rye -femit-bin=pond/bin/scooter-paint
+//!   pond/bin/scooter-paint selftest
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const channel = @import("scooter_channel.rye");
+const view = @import("scooter_view.rye");
+const compose = @import("scooter_compose.rye");
+const grid = @import("text_grid.rye");
+const glyph = @import("glyph.rye");
+const color = @import("color.rye");
+const qoi = @import("qoi.rye");
+const font_ascii = @import("font5x7_ascii.rye");
+
+pub const scooter_paint_version = "20260817.095815";
+
+/// The fixed number of cells in a Scooter frame -- the terminal grid this bridge paints, named as u32 for the
+/// bounded walk below. Equal to scooter_view's frame_rows * frame_cols (24 * 80 = 1920), asserted at use.
+pub const frame_cells: u32 = view.frame_rows * view.frame_cols;
+
+pub const ScooterPaintError = error{
+    ScooterFrameUnpaintable, // a frame cell carries a byte outside printable ASCII (space..'~') the font cannot draw
+};
+
+/// Is every cell of a folded frame a printable-ASCII byte the shared 5x7 font can draw? A Scooter post is member
+/// text, so a stray control or high byte is possible; this is the honest gate before the painter is asked to draw.
+pub fn frame_is_paintable(frame: *const view.Frame) bool {
+    // invariant: the frame is exactly the fixed terminal grid, so the walk below is provably finite.
+    assert(frame.cells.len == frame_cells);
+    var i: u32 = 0;
+    while (i < frame_cells) : (i += 1) {
+        const b = frame.cells[i];
+        // Printable ASCII is space (0x20) through '~' (0x7e) -- exactly what font5x7_ascii's atlas covers.
+        if (b < 0x20 or b > 0x7e) return false;
+    }
+    // invariant: an unbroken walk visited every cell of the grid.
+    assert(i == frame_cells);
+    return true;
+}
+
+/// Paint a folded Scooter frame into a fresh image sized exactly to the terminal grid: `fg` ink over a `bg` ground.
+/// Refuses ScooterFrameUnpaintable by name if any cell carries a byte the font cannot draw, before a pixel moves.
+pub fn paint_frame(
+    allocator: std.mem.Allocator,
+    atlas: *const glyph.GlyphAtlas,
+    frame: *const view.Frame,
+    fg: color.Rgba,
+    bg: color.Rgba,
+) !qoi.Pixmap {
+    // invariant: the frame is the fixed 24x80 grid text_grid paints one column pitch per cell.
+    assert(frame.cells.len == frame_cells);
+    // invariant: every cell draws, or we refuse by name here rather than mislabel it a shape mismatch downstream.
+    if (!frame_is_paintable(frame)) return error.ScooterFrameUnpaintable;
+    return grid.render_grid(allocator, atlas, frame.cells[0..], view.frame_cols, view.frame_rows, fg, bg);
+}
+
+/// The whole verb a surface reaches for: fold a channel to a terminal frame, then paint it into an image. Ink over
+/// a solid ground, sized exactly to the 24x80 grid; the same channel renders the same image every time.
+pub fn render_channel(
+    allocator: std.mem.Allocator,
+    atlas: *const glyph.GlyphAtlas,
+    ch: *const channel.Channel,
+    fg: color.Rgba,
+    bg: color.Rgba,
+) !qoi.Pixmap {
+    const frame = view.render(ch);
+    // invariant: the fold produced the fixed terminal grid, never more rows than the frame holds.
+    assert(frame.cells.len == frame_cells);
+    assert(frame.rows_used <= view.frame_rows);
+    return paint_frame(allocator, atlas, &frame, fg, bg);
+}
+
+/// Paint a folded Scooter frame with a per-cell foreground palette -- the colored-terminal twin of paint_frame.
+/// `fg` carries one color per cell (row-major, exactly frame_cells), so a status header, a caret, or an unread
+/// badge each reads its own color while the body reads the default. Refuses ScooterFrameUnpaintable by name if any
+/// cell carries a byte the font cannot draw, before a pixel moves; a mis-sized palette refuses GridFgMismatch (the
+/// painter's own guard) before any pixel is allocated.
+pub fn paint_frame_fg(
+    allocator: std.mem.Allocator,
+    atlas: *const glyph.GlyphAtlas,
+    frame: *const view.Frame,
+    fg: []const color.Rgba,
+    bg: color.Rgba,
+) !qoi.Pixmap {
+    // invariant: the frame is the fixed 24x80 grid the painter walks one column pitch per cell.
+    assert(frame.cells.len == frame_cells);
+    // invariant: every cell draws, or we refuse by name here rather than mislabel it a shape mismatch downstream.
+    if (!frame_is_paintable(frame)) return error.ScooterFrameUnpaintable;
+    return grid.render_grid_fg(allocator, atlas, frame.cells[0..], view.frame_cols, view.frame_rows, fg, bg);
+}
+
+/// The colored verb a surface reaches for: fold a channel to a terminal frame, then paint the status row (row 0,
+/// "scooter: N posts") in `header` and every other row in `body`, over a solid `bg`. This is a terminal's status
+/// line in an accent color and the conversation beneath in the reading color, made pixels. The same channel and
+/// colors render the same image every time; a pure pass-through of text_grid.render_grid_fg over the built palette.
+pub fn render_channel_fg(
+    allocator: std.mem.Allocator,
+    atlas: *const glyph.GlyphAtlas,
+    ch: *const channel.Channel,
+    header: color.Rgba,
+    body: color.Rgba,
+    bg: color.Rgba,
+) !qoi.Pixmap {
+    const frame = view.render(ch);
+    // invariant: the fold produced the fixed terminal grid, never more rows than the frame holds.
+    assert(frame.cells.len == frame_cells);
+    assert(frame.rows_used <= view.frame_rows);
+
+    // Build the per-cell palette: the first row (the status header, cells [0, frame_cols)) reads the accent color,
+    // every other row the body color. One color per cell, exactly frame_cells -- the shape render_grid_fg trusts.
+    const fg = try allocator.alloc(color.Rgba, frame_cells);
+    var i: u32 = 0;
+    while (i < frame_cells) : (i += 1) {
+        fg[i] = if (i < view.frame_cols) header else body;
+    }
+    // invariant: the palette carries exactly one color per cell of the fixed grid.
+    assert(fg.len == frame_cells);
+    return paint_frame_fg(allocator, atlas, &frame, fg, bg);
+}
+
+/// Paint a folded Scooter frame with a per-cell foreground AND background palette -- the full-colored-cell twin of
+/// paint_frame_fg. `fg` and `bg` each carry one color per cell (row-major, exactly frame_cells), so a status BAR fills
+/// its whole band a header ground with header ink over it, a selected row inverts, an unread badge highlights -- a real
+/// terminal cell holds an ink over a ground. Refuses ScooterFrameUnpaintable by name if any cell carries a byte the
+/// font cannot draw, before a pixel moves; a mis-sized palette refuses GridFgMismatch/GridBgMismatch (the painter's own
+/// guards) before any pixel is allocated.
+pub fn paint_frame_cells(
+    allocator: std.mem.Allocator,
+    atlas: *const glyph.GlyphAtlas,
+    frame: *const view.Frame,
+    fg: []const color.Rgba,
+    bg: []const color.Rgba,
+) !qoi.Pixmap {
+    // invariant: the frame is the fixed 24x80 grid the painter walks one column pitch per cell.
+    assert(frame.cells.len == frame_cells);
+    // invariant: every cell draws, or we refuse by name here rather than mislabel it a shape mismatch downstream.
+    if (!frame_is_paintable(frame)) return error.ScooterFrameUnpaintable;
+    return grid.render_grid_cells(allocator, atlas, frame.cells[0..], view.frame_cols, view.frame_rows, fg, bg);
+}
+
+/// The full-colored verb a surface reaches for: fold a channel to a terminal frame, then paint the status row (row 0,
+/// "scooter: N posts") as a real BAR -- `header` ink over a `header_bg` ground band -- and every other row `body` ink
+/// over a `body_bg` ground. This is a terminal's status bar (white-on-blue) and the conversation beneath (dark-on-page),
+/// made pixels: where render_channel_fg colored only the header's letters, this colors the whole header band. The same
+/// channel and colors render the same image every time; a pure pass-through of text_grid.render_grid_cells over the two
+/// built palettes.
+pub fn render_channel_bar(
+    allocator: std.mem.Allocator,
+    atlas: *const glyph.GlyphAtlas,
+    ch: *const channel.Channel,
+    header: color.Rgba,
+    header_bg: color.Rgba,
+    body: color.Rgba,
+    body_bg: color.Rgba,
+) !qoi.Pixmap {
+    const frame = view.render(ch);
+    // invariant: the fold produced the fixed terminal grid, never more rows than the frame holds.
+    assert(frame.cells.len == frame_cells);
+    assert(frame.rows_used <= view.frame_rows);
+
+    // Build the two per-cell palettes: the first row (the status bar, cells [0, frame_cols)) reads the header colors,
+    // every other row the body colors. One color per cell in each, exactly frame_cells -- the shape render_grid_cells
+    // trusts.
+    const fg = try allocator.alloc(color.Rgba, frame_cells);
+    const bg = try allocator.alloc(color.Rgba, frame_cells);
+    var i: u32 = 0;
+    while (i < frame_cells) : (i += 1) {
+        const in_header = i < view.frame_cols;
+        fg[i] = if (in_header) header else body;
+        bg[i] = if (in_header) header_bg else body_bg;
+    }
+    // invariant: each palette carries exactly one color per cell of the fixed grid.
+    assert(fg.len == frame_cells);
+    assert(bg.len == frame_cells);
+    return paint_frame_cells(allocator, atlas, &frame, fg, bg);
+}
+
+/// The drawn caret: paint a composing session with a visible block CURSOR at the caret cell. scooter_compose.Session
+/// already tracks caret_col (where the cursor sits in the prompt row); this paints that column as inverse video --
+/// the caret cell draws its glyph in `ground` over an `ink` ground, so it reads as a solid ink block over a space or
+/// a knocked-out glyph over a letter, exactly the block cursor every terminal shows. Every other cell reads `ink` over
+/// `ground`. Pure pass-through of text_grid.render_grid_cursor, the abstract cursor primitive: the caret is one cell,
+/// the conversation untouched. The same session renders the same image every time; the frame is checked paintable
+/// first, so a stray high byte refuses ScooterFrameUnpaintable by name before the painter is asked to draw.
+pub fn render_session(
+    allocator: std.mem.Allocator,
+    atlas: *const glyph.GlyphAtlas,
+    session: *const compose.Session,
+    ink: color.Rgba,
+    ground: color.Rgba,
+) !qoi.Pixmap {
+    const frame = session.frame();
+    // invariant: the fold produced the fixed terminal grid, so the caret index below is within the grid.
+    assert(frame.cells.len == frame_cells);
+    // invariant: every cell draws, or we refuse by name here rather than mislabel it downstream.
+    if (!frame_is_paintable(&frame)) return error.ScooterFrameUnpaintable;
+
+    // The caret cell: the prompt row (the reserved last row) at the tracked caret column. caret_col already asserts
+    // the column is within the row, and prompt_row is a real row, so the flat index is provably within the grid.
+    const caret: u32 = compose.prompt_row * view.frame_cols + session.caret_col();
+    // invariant: the caret cell is a real cell of the fixed grid.
+    assert(caret < frame_cells);
+
+    return grid.render_grid_cursor(allocator, atlas, frame.cells[0..], view.frame_cols, view.frame_rows, ink, ground, caret);
+}
+
+// --- selftest: fold a real conversation to pixels, prove the bridge faithful, deterministic, and refusing --------
+
+/// Count pixels that carry ink over a white ground -- any pixel not pure opaque white. Both the single-ink and the
+/// colored face paint ink over the same white ground, so this is the inked-pixel count each must share; color
+/// moves ink, it adds none.
+fn inked_over_white(pixels: []const u8) u32 {
+    // invariant: the buffer is a whole number of RGBA pixels.
+    assert(pixels.len % 4 == 0);
+    var n: u32 = 0;
+    var i: usize = 0;
+    while (i < pixels.len) : (i += 4) {
+        if (pixels[i] != 255 or pixels[i + 1] != 255 or pixels[i + 2] != 255 or pixels[i + 3] != 255) n += 1;
+    }
+    return n;
+}
+
+/// Does the RGBA pixel at byte offset `bi` equal the color `c`? A single-expression predicate so a solid-cell check
+/// reads as one non-compound assert (TAME bans a compound conjunction in an assert); the conjunction lives in this
+/// returned boolean, not the assert that calls it.
+fn pixel_is(pixels: []const u8, bi: usize, c: color.Rgba) bool {
+    return pixels[bi] == c.r and pixels[bi + 1] == c.g and pixels[bi + 2] == c.b and pixels[bi + 3] == c.a;
+}
+
+const host_key: u32 = 1001;
+const ada: u32 = 2002;
+
+fn run_selftest(garden: std.mem.Allocator) !u8 {
+    const atlas = try font_ascii.build_atlas(garden);
+
+    const black = color.Rgba{ .r = 0, .g = 0, .b = 0, .a = 255 };
+    const white = color.Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+
+    // A real Scooter conversation: a host opens a channel, admits a member, two posts land.
+    var ch = channel.Channel.open(host_key);
+    try ch.admit(host_key, ada);
+    _ = try ch.post(ada, "hello");
+    _ = try ch.post(host_key, "hi ada");
+
+    // The fold is a real terminal face -- its header row reads the true post count, so this is a conversation, not
+    // a crafted grid. (row_text trims the trailing padding for the eye.)
+    const frame = view.render(&ch);
+    // invariant: two posts landed, so the header names two.
+    assert(std.mem.eql(u8, view.row_text(&frame, 0), "scooter: 2 posts"));
+
+    // The whole verb hands back the conversation as an image, sized exactly to the 24x80 grid.
+    const face = try render_channel(garden, &atlas, &ch, black, white);
+    assert(face.width == view.frame_cols * grid.col_pitch);
+    assert(face.height == view.frame_rows * @as(u32, atlas.cell_h));
+    assert(face.pixels.len == @as(usize, face.width) * @as(usize, face.height) * 4);
+
+    // Faithful by measure: the bridge adds nothing but its guard -- a paintable frame renders BYTE-FOR-BYTE the
+    // same image text_grid would paint straight from the same cells. The pond rung is a pure, honest pass-through.
+    const straight = try grid.render_grid(garden, &atlas, frame.cells[0..], view.frame_cols, view.frame_rows, black, white);
+    assert(face.same_bytes(&straight));
+
+    // Determinism: the same channel renders the same conversation image every time.
+    const face2 = try render_channel(garden, &atlas, &ch, black, white);
+    assert(face2.same_bytes(&face));
+
+    // The conversation, painted, is a real portable image -- it round-trips through the open QOI codec byte-for-byte.
+    const cap = qoi.encoded_bound(face.width * face.height);
+    const dst = try garden.alloc(u8, cap);
+    const enc = try qoi.encode(&face, dst);
+    const back = try qoi.decode(garden, dst[0..enc.len]);
+    assert(back.same_bytes(&face));
+
+    // Per-cell color on a LIVE conversation: the same channel painted with the status header (row 0) in red and the
+    // body in black. render_channel_fg is a pure pass-through -- it renders BYTE-FOR-BYTE what text_grid paints from
+    // the same cells and the same header/body palette. (This block runs BEFORE the frame-poking refusal below, so the
+    // folded frame's cells are still clean here.)
+    {
+        const red = color.Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
+        const colored = try render_channel_fg(garden, &atlas, &ch, red, black, white);
+
+        // Faithful by measure: identical to the same header/body palette handed straight to text_grid.render_grid_fg.
+        const palette = try garden.alloc(color.Rgba, frame_cells);
+        var i: u32 = 0;
+        while (i < frame_cells) : (i += 1) {
+            palette[i] = if (i < view.frame_cols) red else black;
+        }
+        const straight_fg = try grid.render_grid_fg(garden, &atlas, frame.cells[0..], view.frame_cols, view.frame_rows, palette, white);
+        assert(colored.same_bytes(&straight_fg));
+
+        // Color moves ink, adds none: the colored face inks exactly the same pixel count as the single-ink face.
+        assert(colored.width == face.width);
+        assert(colored.height == face.height);
+        assert(inked_over_white(colored.pixels) == inked_over_white(face.pixels));
+
+        const cell_h: u32 = atlas.cell_h;
+
+        // The status header (row 0) reads red where the single-ink face read black -- the accent color landed on the
+        // status line. Find the first fully-black inked pixel in row 0's band and prove the colored face paints it red.
+        {
+            var found = false;
+            var y: u32 = 0;
+            while (y < cell_h and !found) : (y += 1) {
+                var x: u32 = 0;
+                while (x < face.width) : (x += 1) {
+                    const bi = (@as(usize, y) * @as(usize, face.width) + @as(usize, x)) * 4;
+                    if (face.pixels[bi + 3] != 0 and face.pixels[bi] == 0 and face.pixels[bi + 1] == 0 and face.pixels[bi + 2] == 0) {
+                        // invariant: the single-ink header pixel is black; the colored header paints it red.
+                        assert(colored.pixels[bi] == 255);
+                        assert(colored.pixels[bi + 1] == 0);
+                        assert(colored.pixels[bi + 2] == 0);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            // invariant: row 0 (the status header) carries ink, so a header pixel was found to compare.
+            assert(found);
+        }
+
+        // The conversation body (every row below the header) stays black on the colored face -- the reading color,
+        // distinct from the accent header. Find the first black-inked body pixel and prove it stays black when colored.
+        {
+            var found = false;
+            var y: u32 = cell_h;
+            while (y < face.height and !found) : (y += 1) {
+                var x: u32 = 0;
+                while (x < face.width) : (x += 1) {
+                    const bi = (@as(usize, y) * @as(usize, face.width) + @as(usize, x)) * 4;
+                    if (face.pixels[bi + 3] != 0 and face.pixels[bi] == 0 and face.pixels[bi + 1] == 0 and face.pixels[bi + 2] == 0) {
+                        // invariant: a body-row inked pixel stays black on the colored face -- the body color.
+                        assert(colored.pixels[bi] == 0);
+                        assert(colored.pixels[bi + 1] == 0);
+                        assert(colored.pixels[bi + 2] == 0);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            // invariant: the body carries ink (the two posts), so a body pixel was found to compare.
+            assert(found);
+        }
+
+        // Determinism: the same channel and colors render the same colored image every time.
+        const colored2 = try render_channel_fg(garden, &atlas, &ch, red, black, white);
+        assert(colored2.same_bytes(&colored));
+
+        // The colored conversation is a real portable image -- it round-trips through the open QOI codec byte-for-byte.
+        const ccap = qoi.encoded_bound(colored.width * colored.height);
+        const cdst = try garden.alloc(u8, ccap);
+        const cenc = try qoi.encode(&colored, cdst);
+        const cback = try qoi.decode(garden, cdst[0..cenc.len]);
+        assert(cback.same_bytes(&colored));
+
+        // A mis-sized palette refuses GridFgMismatch by name (the painter's own guard), before any pixel is allocated.
+        const short_fg = try garden.alloc(color.Rgba, frame_cells - 1);
+        if (paint_frame_fg(garden, &atlas, &frame, short_fg, white)) |_| {
+            return error.FgMismatchSlipped;
+        } else |e| if (e != error.GridFgMismatch) return error.WrongFgMismatch;
+    }
+
+    // The full colored cell on a LIVE conversation: the same channel painted with the status row as a real BAR --
+    // YELLOW ink over a BLUE header ground (a bright-on-blue status bar), the body black over white. render_channel_bar
+    // is a pure pass-through of text_grid.render_grid_cells over the two built palettes. The header ink is yellow, not
+    // white, so it is distinct from BOTH the page and the ground -- the measure below can then prove no header pixel
+    // stays the old white page and the blue ground shows between the glyphs. (This block runs BEFORE the frame-poking
+    // refusal below, so the folded frame's cells are still clean here.)
+    {
+        const blue = color.Rgba{ .r = 0, .g = 0, .b = 255, .a = 255 };
+        const yellow = color.Rgba{ .r = 255, .g = 255, .b = 0, .a = 255 };
+        const bar = try render_channel_bar(garden, &atlas, &ch, yellow, blue, black, white);
+        assert(bar.width == face.width);
+        assert(bar.height == face.height);
+
+        // Faithful by measure: identical to the two palettes handed straight to text_grid.render_grid_cells.
+        const fgpal = try garden.alloc(color.Rgba, frame_cells);
+        const bgpal = try garden.alloc(color.Rgba, frame_cells);
+        var i: u32 = 0;
+        while (i < frame_cells) : (i += 1) {
+            const in_header = i < view.frame_cols;
+            fgpal[i] = if (in_header) yellow else black;
+            bgpal[i] = if (in_header) blue else white;
+        }
+        const straight_bar = try grid.render_grid_cells(garden, &atlas, frame.cells[0..], view.frame_cols, view.frame_rows, fgpal, bgpal);
+        assert(bar.same_bytes(&straight_bar));
+
+        const cell_h: u32 = atlas.cell_h;
+
+        // The status row is a real BAR, not merely colored letters: walk row 0's whole pixel band and prove no pixel
+        // stays the old white ground (the blue bar covers the band), and at least one pixel is pure blue (the ground
+        // shows between the header glyphs). This is exactly what render_channel_fg could NOT do -- there the header band
+        // stayed white between the letters.
+        {
+            var seen_blue = false;
+            var y: u32 = 0;
+            while (y < cell_h) : (y += 1) {
+                var x: u32 = 0;
+                while (x < bar.width) : (x += 1) {
+                    const bi = (@as(usize, y) * @as(usize, bar.width) + @as(usize, x)) * 4;
+                    const is_white = bar.pixels[bi] == 255 and bar.pixels[bi + 1] == 255 and bar.pixels[bi + 2] == 255;
+                    // invariant: the header band is a filled bar -- no pixel of row 0 is the old white page.
+                    assert(!is_white);
+                    if (bar.pixels[bi] == 0 and bar.pixels[bi + 1] == 0 and bar.pixels[bi + 2] == 255) seen_blue = true;
+                }
+            }
+            // invariant: the blue ground shows through the header's daylight, so the bar is truly a ground per cell.
+            assert(seen_blue);
+        }
+
+        // Below the bar the conversation body is untouched by the coloring: the body reads black-on-white, exactly
+        // as the single-ink face does, so every pixel from the first body row down is byte-for-byte identical between
+        // the bar and face. The colored bar is confined to the status row; the reading area is left as it was.
+        {
+            var bi: usize = @as(usize, cell_h) * @as(usize, bar.width) * 4;
+            // invariant: the compared span is the whole body region, a whole number of RGBA pixels within both buffers.
+            assert(bi <= bar.pixels.len);
+            assert(bar.pixels.len == face.pixels.len);
+            while (bi < bar.pixels.len) : (bi += 1) {
+                // invariant: a body pixel of the colored bar equals the same pixel of the single-ink face.
+                assert(bar.pixels[bi] == face.pixels[bi]);
+            }
+        }
+
+        // Determinism: the same channel and colors render the same colored-bar image every time.
+        const bar2 = try render_channel_bar(garden, &atlas, &ch, yellow, blue, black, white);
+        assert(bar2.same_bytes(&bar));
+
+        // The colored-bar conversation is a real portable image -- it round-trips through the open QOI codec byte-for-byte.
+        const bcap = qoi.encoded_bound(bar.width * bar.height);
+        const bdst = try garden.alloc(u8, bcap);
+        const benc = try qoi.encode(&bar, bdst);
+        const bback = try qoi.decode(garden, bdst[0..benc.len]);
+        assert(bback.same_bytes(&bar));
+
+        // A mis-sized background palette refuses GridBgMismatch by name (the painter's own guard), before any pixel moves.
+        const good_fg = try garden.alloc(color.Rgba, frame_cells);
+        i = 0;
+        while (i < frame_cells) : (i += 1) good_fg[i] = black;
+        const short_bg = try garden.alloc(color.Rgba, frame_cells - 1);
+        if (paint_frame_cells(garden, &atlas, &frame, good_fg, short_bg)) |_| {
+            return error.BgMismatchSlipped;
+        } else |e| if (e != error.GridBgMismatch) return error.WrongBgMismatch;
+    }
+
+    // The drawn caret on a LIVE composing session: a member types a line, and render_session paints the prompt with a
+    // visible block CURSOR at the caret cell -- inverse video, the classic terminal cursor. (This block builds its own
+    // session and frames, so it does not disturb the folded `frame` the poke below still needs clean.)
+    {
+        const col_pitch: u32 = grid.col_pitch;
+        const cell_h: u32 = atlas.cell_h;
+
+        var s = compose.Session.open(&ch, host_key);
+        try s.prompt().type_str("draft");
+        // The caret sits after the "> " prefix and the five typed bytes -- over the space beyond "draft", so the caret
+        // cell is a blank the cursor fills SOLID, the cleanest proof a cursor is a visible block.
+        const cc: u32 = s.caret_col();
+        assert(cc == compose.prompt_cols + 5);
+        const cr: u32 = compose.prompt_row;
+
+        const frame_s = s.frame();
+        // The plain painted session (no caret) is the reference the drawn face must equal everywhere but one cell.
+        const plain = try paint_frame(garden, &atlas, &frame_s, black, white);
+        const drawn = try render_session(garden, &atlas, &s, black, white);
+        assert(drawn.width == plain.width);
+        assert(drawn.height == plain.height);
+
+        // The cursor is a visible block: over the caret cell's whole pixel block, the drawn face is solid INK (black)
+        // where the plain face is solid GROUND (white) -- the cell flipped to inverse video.
+        {
+            var y: u32 = cr * cell_h;
+            const y_end: u32 = (cr + 1) * cell_h;
+            while (y < y_end) : (y += 1) {
+                var x: u32 = cc * col_pitch;
+                const x_end: u32 = (cc + 1) * col_pitch;
+                while (x < x_end) : (x += 1) {
+                    const bi = (@as(usize, y) * @as(usize, drawn.width) + @as(usize, x)) * 4;
+                    // invariant: the caret cell reads solid ink on the drawn face -- a filled cursor block.
+                    assert(pixel_is(drawn.pixels, bi, black));
+                    // invariant: the same cell reads solid ground on the plain face -- the cursor is what flipped it.
+                    assert(pixel_is(plain.pixels, bi, white));
+                }
+            }
+        }
+
+        // Confined to one cell (values apart, never braided): every pixel OUTSIDE the caret cell is byte-for-byte the
+        // plain face -- the cursor touches its own cell and nothing of the conversation.
+        {
+            assert(drawn.pixels.len == plain.pixels.len);
+            const cx0: u32 = cc * col_pitch;
+            const cx1: u32 = (cc + 1) * col_pitch;
+            const cy0: u32 = cr * cell_h;
+            const cy1: u32 = (cr + 1) * cell_h;
+            var p: usize = 0;
+            const px_count: usize = @as(usize, drawn.width) * @as(usize, drawn.height);
+            while (p < px_count) : (p += 1) {
+                const x: u32 = @intCast(p % @as(usize, drawn.width));
+                const y: u32 = @intCast(p / @as(usize, drawn.width));
+                const in_caret = x >= cx0 and x < cx1 and y >= cy0 and y < cy1;
+                if (in_caret) continue;
+                const bi = p * 4;
+                // invariant: a pixel outside the caret cell is untouched -- identical to the plain painted session.
+                assert(drawn.pixels[bi] == plain.pixels[bi]);
+                assert(drawn.pixels[bi + 1] == plain.pixels[bi + 1]);
+                assert(drawn.pixels[bi + 2] == plain.pixels[bi + 2]);
+                assert(drawn.pixels[bi + 3] == plain.pixels[bi + 3]);
+            }
+        }
+
+        // Determinism: the same session renders the same drawn image every time.
+        const drawn2 = try render_session(garden, &atlas, &s, black, white);
+        assert(drawn2.same_bytes(&drawn));
+
+        // The drawn conversation is a real portable image -- it round-trips through the open QOI codec byte-for-byte.
+        const scap = qoi.encoded_bound(drawn.width * drawn.height);
+        const sdst = try garden.alloc(u8, scap);
+        const senc = try qoi.encode(&drawn, sdst);
+        const sback = try qoi.decode(garden, sdst[0..senc.len]);
+        assert(sback.same_bytes(&drawn));
+
+        // The cursor MOVES: walk the caret home (to just past the prefix) and render again. The two faces differ, and
+        // the old caret cell (the space beyond "draft") reverts to solid ground -- the cursor cleared and followed the keeper.
+        s.prompt().move_home();
+        assert(s.caret_col() == compose.prompt_cols);
+        const home = try render_session(garden, &atlas, &s, black, white);
+        assert(!home.same_bytes(&drawn));
+        {
+            var y: u32 = cr * cell_h;
+            const y_end: u32 = (cr + 1) * cell_h;
+            while (y < y_end) : (y += 1) {
+                var x: u32 = cc * col_pitch;
+                const x_end: u32 = (cc + 1) * col_pitch;
+                while (x < x_end) : (x += 1) {
+                    const bi = (@as(usize, y) * @as(usize, home.width) + @as(usize, x)) * 4;
+                    // invariant: with the caret moved home, the old caret cell is solid ground again -- one moving mark.
+                    assert(pixel_is(home.pixels, bi, white));
+                }
+            }
+        }
+    }
+
+    // The honest edge, refused by name: a frame cell carrying a byte the font cannot draw refuses
+    // ScooterFrameUnpaintable, having painted nothing. Copy the good frame and poke one high byte.
+    {
+        var bad = frame;
+        bad.cells[0] = 0x80; // a high byte no printable-ASCII glyph covers
+        // invariant: the poked frame is no longer wholly paintable.
+        assert(!frame_is_paintable(&bad));
+        if (paint_frame(garden, &atlas, &bad, black, white)) |_| {
+            return error.UnpaintableSlipped;
+        } else |e| if (e != error.ScooterFrameUnpaintable) return error.WrongUnpaintable;
+    }
+
+    print("GREEN scooter-paint: a real 2-post channel folded to a {d}x{d} frame and painted into a {d}x{d} image, byte-for-byte what text_grid paints from the same cells, deterministic, round-trips through QOI; a colored face paints the status header red and the body black while inking the same pixels; a colored BAR paints the whole status band yellow-on-blue (no header pixel stays white, the body page below untouched), byte-for-byte text_grid's per-cell render, deterministic, round-trips through QOI, a mis-sized bg refusing GridBgMismatch by name; a composing session's DRAWN CARET fills its caret cell a solid inverse-video block (solid ink where the plain face is solid ground), confined byte-for-byte to that one cell, clearing and following the keeper when the caret walks home, round-trips through QOI; and an unpaintable frame refuses ScooterFrameUnpaintable by name\n", .{
+        view.frame_cols, view.frame_rows, face.width, face.height,
+    });
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    const garden = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(garden);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "selftest")) {
+        return run_selftest(garden);
+    }
+    print("usage: scooter-paint selftest\n", .{});
+    return 1;
+}

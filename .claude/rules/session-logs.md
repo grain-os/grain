@@ -1,0 +1,68 @@
+# Session Logs
+
+At the end of **every** response -- before finishing the turn -- write a session log to `session-logs/`. The log captures the step-by-step reasoning followed before and during any prose writing, repository update, or code implementation, together with the changes made. It is a record kept for years.
+
+## Format -- Kyri (living law; molted from Bron `20260810`)
+
+**New logs are `.kyri`** -- the notation formerly named **Bron**, molted to Kyri on the maintainer's word (`20260810`): the same immutable-value format (key-value, one field per line, `#` comments, no quotes, no braces), a warmer name from the favorites list. Spec: `active-designing/yonder/20260621-063912_bron-notation.md` (bannered as the Kyri notation; kept readable) and counsel `20260707-222500`. The **2,163 existing `.bron` logs are never renamed** -- the one-clock law and accrete-never-break protect every dated artifact, and tools read both extensions. A full sweep of the remaining living Bron references to Kyri, and teaching the fold/align tools `.kyri`, follow as their own rounds.
+
+Historical Markdown logs live under `session-logs/date/YYYYMMDD/` (folded by day). Do not create new `.md` session logs.
+
+## Filename
+
+`YYYYMMDD-HHMMSS_short-slug.kyri` -- hyphen stamp in the filename; body field `stamp YYYYMMDD.HHMMSS` (dot form). New logs are `.kyri` (the notation molted from Bron `20260810`); the `.bron` logs already on disk are never renamed and tools read both.
+
+**No countdown prefix** (`99999_`, etc.) -- retired. One clock only.
+
+Full naming law: `context/specs/20260627-102012_one-clock-naming-law.md` (extension is `.bron` for this stream). Files sort ascending by stamp; the living index in `session-logs/README.md` reads newest first.
+
+When two logs share a second, add `_short-slug` from `title` (or from `prompt` when titles match). Derive a missing stamp from the file's first-commit date per the naming law.
+
+## Index
+
+After each new log, prepend a newest-first row to `session-logs/README.md`: stamp, linked title (`.bron` path), and one line of meaning drawn from `title` / `obs`.
+
+Batch hygiene for **archived Markdown** only: `rye run tools/align_session_logs.rye`. Living Bron logs are indexed by hand (or a future Bron-aware aligner).
+
+## Contents (Bron fields)
+
+Minimum shape (`format session-log-v1`):
+
+```kyri
+format session-log-v1
+stamp YYYYMMDD.HHMMSS
+editor Claude Code
+model claude-opus-4-8
+voice Kyri
+host a cloud region NixOS VPS ai-jail pier (a tablet hand) -- Eastern (EDT)
+title short title
+prompt what the maintainer asked
+think step of reasoning
+think another step
+obs observation or trade-off
+loom metric=value ... -- optional; Loom / performance metrics for the round (see below)
+file path why-one-line
+recommend keep-going|check-in what and why
+```
+
+- **editor** / **model** / **voice** -- which editor and model produced this log. The standing writing voice is **Kyri** (molted from Riyo `20260810` -- the maintainer's word; Riyo had been seated `20260729.205200`; full identity `context/KYRI.md`); record `voice Kyri` on new logs, and never rewrite the voice on earlier dated logs (including logs that correctly recorded `voice Riyo` or `voice Quin` while each held the writing seat). **Quin** keeps the fifth OS variant and the inference Q-vane (`context/QUIN.md`). **Per host:** the macOS clone's recent arc was Fable 5 1M Max -> Opus 4.8 1M Max -> Sonnet 5 1M Medium; **this pier host, from `20260815.191048` on the maintainer's word, is Claude Code (`claude-opus-4-8`) on the a cloud region NixOS VPS ai-jail, with the a tablet as the hand device** (the earlier a laptop / Cursor Grok 4.5 note is retired for this clone). Record the model that actually produced each log, verbatim. Do not rewrite correctly attributed dated logs. When a `model` field was recorded wrong, the maintainer may ask to correct those specific lines to the truth -- that is a factual fix, not a style rewrite. The single source of truth for "current model on this clone" is `GLOW_PROFILE.bron`'s `model` field.
+- **host** -- optional; names the editor/OS/chip combination for this specific machine, anonymized (no serial, hardware UUID, hostname, or username -- see `context/specs/20260713-211800_local-host-system-hardware-anonymized.md` for what stays out and why). Omit on hosts where this has never mattered; add it wherever a log's meaning depends on knowing which machine produced it (a sandbox-adaptation session, a hardware-specific witness).
+- **think** -- repeatable; step-by-step reasoning.
+- **obs** -- decisions and trade-offs.
+- **loom** -- optional, repeatable; **Loom / performance metrics** captured when the round touched a measured path -- **Loom**, **Caravan**, **Tally**, the **Shuttle** (the io_uring horizon), a witness whose wall-time matters, or any hot loop where throughput or allocation is load-bearing. **Auto-add it whenever the round produced a measurement**, so performance is recorded as it happens rather than reconstructed later. Write plain `key=value` pairs, one metric family per `loom` line, from real measurement (never guessed): e.g. `loom witness=mandate_store_witness wall_ms=42 records=64 blob_bytes=196`, or `loom caravan=subscribe_poll ops=1000 wall_ms=310 allocs=0`. Bound each number to what was actually run; when nothing was measured this round, omit the field entirely (measurement beats memory -- an absent `loom` is honest, a fabricated one is a red). The metric names are free-form yet stable within a module, so a future Loom-aware reader can trend them across logs.
+- **file** -- repeatable; `path` then why.
+- **recommend** -- one close line: `keep-going ...` when mechanical and policy-written; `check-in ...` when seams, Rishi/value-model, unruled design, or horizon facts.
+
+**Stamp timezone, per host -- one CLOCK, not one hand.** The invariant is a single canonical clock (later is always larger). Any agent may produce a stamp when it reads that clock; Cursor's automated stamping is welcome. On this Framework / cloud bench the zone is **`America/New_York`** by name (`context/specs/20260627-102012_one-clock-naming-law.md` addendum `20260724.205009` - `context/specs/20260722-125845_edt-framework-host-convention.md`). The macOS clone keeps Pacific (`context/specs/20260713-201910_pacific-time-local-clone-convention.md`). A zone change is itself a seated decision. Existing dated stamps are never rewritten. Witness: `tools/one_clock_witness.rish` (shape - mono - zone - blocking). `GLOW_PROFILE.bron`'s `timezone` field is the machine-local pointer.
+
+## Archive fold
+
+Prior (and closed) days' logs live under `session-logs/date/YYYYMMDD/` -- the destination molted from `archive/` on `20260821.161758` with the mark law ([`stamp-and-name.md`](stamp-and-name.md)), since ORGANIZING defines archive as finished-and-historical while a log from nine days ago is the live record. **Preview:** `rishi/bin/rishi run tools/session_logs_archive_preview.rish`. **Fold:** `rishi/bin/rishi run tools/session_logs_archive.rish` -- folds `.kyri`, `.bron`, and historical `.md`; today's stamp stays flat, and the index is repointed in the same pass. Run fold on the maintainer's word.
+
+**The room is bounded at 256 flat files**, enforced by `rishi/bin/rishi run tools/room_bound_witness.rish` -- because at roughly a hundred and eight logs a day an emptied room refills past GitHub's 1,000-entry listing cap in nine days, so the bound is the fix and the fold is only how it is met. **A stale reference is resolved, never rewritten:** `rishi/bin/rishi run tools/dated_path_resolve.rish <reference> [<citing-file>]`.
+
+Bron session logs prefer `product_nib` - `suite_nib` - `git_nib` (or `nib <hash>`) over legacy `tip` fields.
+
+## Spirit
+
+Write it plainly and honestly, in Radiant Style, so a future self or another agent can follow the work home. **Commit the log in the same commit as the work it records** whenever possible; a log-only follow-up commit is a last resort.

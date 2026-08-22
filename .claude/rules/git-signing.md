@@ -1,0 +1,51 @@
+# Git Commit Signing
+
+All commits MUST be GPG-signed. The global config already sets `commit.gpgsign=true` and names the signing key. Never bypass this:
+
+- Never use `--no-gpg-sign` or `-c commit.gpgsign=false`
+- Never skip hooks with `--no-verify`
+- If a commit fails due to GPG, investigate and fix — do not disable signing
+
+After pushing, remind the user to upload their public GPG key to GitHub if commits show as "Unverified".
+
+## The one exception — the depersonalized public seed (`seed/` → `grain-os/grain`)
+
+The private field's commits are always signed, above. The **public seed is the deliberate exception**: `seed/` is its own gitignored repo that projects the depersonalized public seed (custody gate %1, force-pushed to `grain-os/grain`), committed as the anonymous **`Grain OS <grain-os@users.noreply.github.com>`** identity with a **single Option-B commit**.
+
+That identity **has no secret key on purpose.** Signing the public seed with the maintainer's own GPG key would cryptographically **link the anonymous seed back to the maintainer** — defeating the whole point of depersonalization (`tools/sow_witness.rish` proves `IDENT_CLEAN`/`NO_PERSONAL`; a signature would undo it). So the seed commit is **unsigned**, by design, on the maintainer's word (`20260817`).
+
+Concretely, the seed repo sets `commit.gpgsign false` in its **own** `seed/.git/config` (never the private field's), and the projection commits + force-pushes unsigned:
+
+```
+cd ~/grain/seed
+git config commit.gpgsign false          # local to seed/ only
+git add -A
+git commit --amend -m "Grain OS -- the initial public seed"
+git push --force origin main             # origin here IS grain-os/grain
+```
+
+This is the **only** place `commit.gpgsign` is false anywhere in the tree, and it is a privacy safeguard, not a lapse.
+
+**Living remotes** (`20260730.030553` — the maintainer's word): always push **both** `origin` (GitHub `acme-owner/grain`) and `acme-owner` (GitHub `acme-owner/grain`). Codeberg stays retired from living push. Canonical count: `context/REMOTE_ROSTER.md`.
+
+## Our own record numbers wear `%`, never `#` -- seated `20260820.005250`
+
+**`%` is the sigil for a number this tree assigns itself.** Write **`REDS %89`**, `gate %1`, `errata %75`, `OQ %4`, `study %24`, `rows %1, %2`. Reserve **`#`** for a genuine GitHub issue or pull request -- `PR #76` keeps its hash, because there it is telling the truth.
+
+GitHub's commit-message renderer turns any `#<number>` into a link to the issue or PR of that number, exactly as it does for `@name` above. This is **not** a hypothetical: `acme-owner/grain` carries pull requests numbered into the eighties, so `REDS %80` in a commit body has been rendering as a link to an unrelated equinox PR. A reader following it lands somewhere the sentence never meant.
+
+**Where it bites, and where it does not.** GitHub's own documentation is explicit -- *"Autolinked references are not created in wikis or files in a repository."* So `REDS %89` inside `crux/REDS.md` was never a broken link; only **commit messages** (and issue, PR, and release text) linkify. The convention is nonetheless written the same way everywhere, because a ledger row quoted out of a file and into a commit message must already be safe when it arrives.
+
+**Why `%` and not a plain hyphen.** In Glow, as in the Hoon it descends from, `%` marks a **constant term** -- a value that is exactly itself and never varies. A REDS row number is precisely that: an immutable name for a fact recorded once and never edited, which is the ledger's own first law. So the sigil is not an arbitrary dodge of a renderer; it says what the number is. It also resolves an ambiguity a bare space would leave, where *REDS 89* could be read as eighty-nine reds rather than the eighty-ninth. The modulo `%` of Rye and Zig is no collision: that form is `x%8`, bound tight to an expression, never `REDS %89`.
+
+**The wall, not just the habit.** Both this rule and the `@name` clause below are enforced by [`../../tools/hooks/commit-msg`](../../tools/hooks/commit-msg), armed on a clone by `rishi/bin/rishi run tools/install_hooks.rish` (which points `core.hooksPath` at the tree's own tracked hooks, so they travel with it rather than living in one machine's untracked `.git/hooks`). The hook refuses the commit and leaves the message untouched on disk. It welcomes `PR #76`, `issue #12`, and Urbit's own `Resolves #34.` form, and never mistakes an email's `@` for a mention. Proven by [`../../tools/commit_message_guard_witness.rish`](../../tools/commit_message_guard_witness.rish) over 18 planted cases -- both the refusals and, just as hard, the welcomes -- and sung by the era suite. The **public seed arms the same wall**: `publish-seed.sh` deletes and re-creates `seed/.git` on every publish, so the arming lives in the script rather than in a config a fresh init would wipe -- and the witness proves it by doing, arming a throwaway repository the publisher's way, watching it refuse a forbidden message and welcome a clean one, and feeding the hook the message `publish-seed.sh` actually ships. There is no bypass: `--no-verify` is already forbidden above, and a wall with a door beside it is a habit again.
+
+**Accrete-never-break.** Dated testimony -- session logs, counsel, waymarks, dated design notes -- keeps every `#` it ever wrote. This governs living surfaces and everything written from here forward.
+
+## Commit message hygiene — no bare `@name` in subject or body
+
+GitHub's commit-message renderer linkifies any `@word` that happens to match a real username or org, regardless of backticks — this is different from file content, issue bodies, and comments, where full Markdown correctly treats a backtick-wrapped `@word` as code. Zig builtins are the live risk here: `@memcpy`, `@import`, `@intCast`, `@sizeOf`, `@typeInfo`, `@bitSizeOf`, `@offsetOf`, `@field`, `@This`, and any other `@`-prefixed builtin can coincidentally match a real GitHub account, as `@memcpy` confirmed on this repo.
+
+**In commit subject and body text specifically:** write the builtin's name without the leading `@` — "the memcpy builtin," "migrate memcpy sites," "import sites" — never a bare `@memcpy`. **In file content, counsel, and documentation:** keep the `@` and the backticks exactly as TAME's own style already does (`` `@memcpy` ``); this is correct there and needs no change, since GitHub's file-content and Markdown rendering already handles it properly.
+
+GitHub removed the *notification* side-effect of commit-message mentions in November 2025 — no one is actually being pinged — so this is a clarity fix, not an urgent one, and it applies going forward. Existing commit messages are dated artifacts and are not rewritten to fix this; the one-clock law already protects them.

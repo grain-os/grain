@@ -1,0 +1,1435 @@
+//! glow/lower_bartis.rye — lower a thin `|=` bartis gate to runnable `.rye` (STOA100–107).
+//!
+//! Identity gate: `|=  sample=@u32` / `sample` — takes u32 and returns it.
+//! Call body: `|=  sample=@u32` / `%-  <gate>  sample` — closed demos:
+//!   double → *% 2 (STOA103) · inc → +% 1 · dec → -% 1 (STOA104).
+//! STOA100: baked demo sample 5; identity exits 0 when bartis_gate(5) == 5.
+//! STOA101: argv sample path — main reads one decimal `@u32` and checks the body result.
+//! STOA105: TAME tidy — assert · u32 · append_print · split emitters.
+//! STOA107: nest/type surface — non-`@u32` sample refuses `SampleDoesNotNest`.
+//! STOA109 / STOA122: named molds `amount-mold` · `count-mold` lower as `@u32`.
+//! STOA123: `kind-mold` identity lowers as `KindShape` enum · baked `.mint`.
+//! STOA124: `xact-mold` identity lowers as `XactShape` union · baked `.mint` amount 5.
+//! STOA125: `xfer-mold` identity lowers as `XferShape` union · baked `.mint` from 5 amount 3.
+//! STOA126: `pair-mold` identity lowers as `PairShape` struct · baked from 5 amount 3.
+//! STOA134: `triple-mold` identity lowers as `TripleShape` struct · baked from 5 amount 3 fee 1.
+//! STOA135: `quad-mold` identity lowers as `QuadShape` struct · baked from 5 amount 3 fee 1 nonce 2.
+//! STOA136: `triple-mold` call body `%-  flip` → TripleShape swap · baked 5/3/1 → 3/5/1.
+//! STOA137: `quad-mold` call body `%-  flip` → QuadShape swap · baked 5/3/1/2 → 3/5/1/2.
+//! STOA138: `penta-mold` identity lowers as `PentaShape` struct · baked from 5 amount 3 fee 1 nonce 2 memo 7.
+//! STOA139: `penta-mold` call body `%-  flip` → PentaShape swap · baked 5/3/1/2/7 → 3/5/1/2/7.
+//! STOA140: `hexa-mold` identity lowers as `HexaShape` struct · baked from 5 amount 3 fee 1 nonce 2 memo 7 tag 4.
+//! STOA141: `hexa-mold` call body `%-  flip` → HexaShape swap · baked 5/3/1/2/7/4 → 3/5/1/2/7/4.
+//! STOA142: `hepta-mold` identity lowers as `HeptaShape` struct · baked from 5 amount 3 fee 1 nonce 2 memo 7 tag 4 to 6.
+//! STOA143: `hepta-mold` call body `%-  flip` → HeptaShape swap · baked 5/3/1/2/7/4/6 → 3/5/1/2/7/4/6.
+//! STOA144: `octa-mold` identity lowers as `OctaShape` struct · baked from 5 amount 3 fee 1 nonce 2 memo 7 tag 4 to 6 via 8.
+//! STOA145: `octa-mold` call body `%-  flip` → OctaShape swap · baked 5/3/1/2/7/4/6/8 → 3/5/1/2/7/4/6/8.
+//! STOA146: `nona-mold` identity lowers as `NonaShape` struct · baked from 5 amount 3 fee 1 nonce 2 memo 7 tag 4 to 6 via 8 ref 9.
+//! STOA147: `nona-mold` call body `%-  flip` → NonaShape swap · baked 5/3/1/2/7/4/6/8/9 → 3/5/1/2/7/4/6/8/9.
+//! STOA253: pair…nona identity emit collapses through `emit_n_field_identity`
+//! (faces · demos shared).
+//! STOA259: pair…nona flip call-body collapses through `emit_n_field_flip_call_body`
+//! (same faces · demos; from↔amount swap).
+//! STOA127: `kind-mold` call body `%-  flip` → KindShape switch · baked `.mint` → `.send`.
+//! STOA128: `xact-mold` call body `%-  flip` → XactShape switch · baked mint/5 → `.send`.
+//! STOA129: `xfer-mold` call body `%-  flip` → XferShape switch · baked mint/5/3 → `.send`.
+//! STOA293: xact+xfer flip call-body collapses through `emit_tagged_payload_flip_call_body`
+//!   (mint_faces 1|2). Kind unit flip stays its own family.
+//! STOA297: kind flip call-body collapses through `emit_tagged_unit_flip_call_body`.
+//! STOA131: `pair-mold` call body `%-  flip` → PairShape swap · baked 5/3 → 3/5.
+//! STOA132: `amount-mold` argv identity — generator beside fixture (u32-shaped named mold).
+//! STOA133: `count-mold` argv identity — twin generator beside fixture.
+//! STOA300: `kind-mold` argv identity — unit-tag reader (`mint`/`send`).
+//! STOA303: `xact-mold` argv identity — payload tag + amount (`mint <u32>` / `send`).
+//! STOA305: `xfer-mold` argv identity — payload tag + two mint faces (`mint <from> <amount>` / `send`).
+//! STOA307–321: pair…nona `$:` argv readers (survey).
+//! STOA324: `$:` argv dispatch collapses — shape → N → `emit_n_field_argv` (sameness).
+//! STOA326: `$:` welcome dispatch collapses — shape → N → identity / flip (sameness).
+//! STOA328: N-path reads `nest_type.closed_tuple_field_count`; living locals say shape.
+//! STOA338a: pair-faces parse seats; lower answers PairNotYetLowered until 338b.
+//! Gate function named `bartis_gate` to avoid collisions with the sample face.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const rb = @import("rune_bartis.rye");
+const nest_type = @import("nest_type.rye");
+
+pub const LowerError = rb.ParseError || error{Overflow};
+
+/// Baked welcome sample for fixture desks (matches STOA6 call demo sample).
+pub const bartis_demo_sample: u32 = 5;
+/// Expected result for identity body with baked sample.
+pub const bartis_identity_expect: u32 = 5;
+/// Baked multi-face xfer mint (matches mold-xfer welcome · STOA125).
+pub const bartis_xfer_demo_from: u32 = 5;
+pub const bartis_xfer_demo_amount: u32 = 3;
+/// Baked multi-field pair (matches mold-pair welcome · STOA126).
+pub const bartis_pair_demo_from: u32 = 5;
+pub const bartis_pair_demo_amount: u32 = 3;
+pub const bartis_triple_demo_from: u32 = 5;
+pub const bartis_triple_demo_amount: u32 = 3;
+pub const bartis_triple_demo_fee: u32 = 1;
+pub const bartis_quad_demo_from: u32 = 5;
+pub const bartis_quad_demo_amount: u32 = 3;
+pub const bartis_quad_demo_fee: u32 = 1;
+pub const bartis_quad_demo_nonce: u32 = 2;
+pub const bartis_penta_demo_from: u32 = 5;
+pub const bartis_penta_demo_amount: u32 = 3;
+pub const bartis_penta_demo_fee: u32 = 1;
+pub const bartis_penta_demo_nonce: u32 = 2;
+pub const bartis_penta_demo_memo: u32 = 7;
+pub const bartis_hexa_demo_from: u32 = 5;
+pub const bartis_hexa_demo_amount: u32 = 3;
+pub const bartis_hexa_demo_fee: u32 = 1;
+pub const bartis_hexa_demo_nonce: u32 = 2;
+pub const bartis_hexa_demo_memo: u32 = 7;
+pub const bartis_hexa_demo_tag: u32 = 4;
+pub const bartis_hepta_demo_from: u32 = 5;
+pub const bartis_hepta_demo_amount: u32 = 3;
+pub const bartis_hepta_demo_fee: u32 = 1;
+pub const bartis_hepta_demo_nonce: u32 = 2;
+pub const bartis_hepta_demo_memo: u32 = 7;
+pub const bartis_hepta_demo_tag: u32 = 4;
+pub const bartis_hepta_demo_to: u32 = 6;
+pub const bartis_octa_demo_from: u32 = 5;
+pub const bartis_octa_demo_amount: u32 = 3;
+pub const bartis_octa_demo_fee: u32 = 1;
+pub const bartis_octa_demo_nonce: u32 = 2;
+pub const bartis_octa_demo_memo: u32 = 7;
+pub const bartis_octa_demo_tag: u32 = 4;
+pub const bartis_octa_demo_to: u32 = 6;
+pub const bartis_octa_demo_via: u32 = 8;
+pub const bartis_nona_demo_from: u32 = 5;
+pub const bartis_nona_demo_amount: u32 = 3;
+pub const bartis_nona_demo_fee: u32 = 1;
+pub const bartis_nona_demo_nonce: u32 = 2;
+pub const bartis_nona_demo_memo: u32 = 7;
+pub const bartis_nona_demo_tag: u32 = 4;
+pub const bartis_nona_demo_to: u32 = 6;
+pub const bartis_nona_demo_via: u32 = 8;
+pub const bartis_nona_demo_ref: u32 = 9;
+
+fn zig_safe_ident(face: []const u8, out: *[rb.max_face_len]u8) LowerError!u32 {
+    assert(face.len <= rb.max_face_len); // precondition: face within name budget
+    if (face.len == 0 or face.len > rb.max_face_len) return error.MissingFace;
+    const n: u32 = @intCast(face.len);
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        const c = face[@as(usize, @intCast(i))];
+        const mapped: u8 = if (c == '-') '_' else c;
+        if (i == 0) {
+            if (!((mapped >= 'a' and mapped <= 'z') or (mapped >= 'A' and mapped <= 'Z') or mapped == '_'))
+                return error.MissingFace;
+        } else {
+            if (!((mapped >= 'a' and mapped <= 'z') or (mapped >= 'A' and mapped <= 'Z') or (mapped >= '0' and mapped <= '9') or mapped == '_'))
+                return error.MissingFace;
+        }
+        out[@as(usize, @intCast(i))] = mapped;
+    }
+    return n;
+}
+
+fn append_print(out: []u8, used: *u32, comptime fmt: []const u8, args: anytype) LowerError!void {
+    assert(used.* <= out.len); // invariant: cursor inside buffer
+    const slice = out[@as(usize, @intCast(used.*))..];
+    const written = std.fmt.bufPrint(slice, fmt, args) catch return error.Overflow;
+    const n: u32 = @intCast(written.len);
+    assert(used.* + n <= out.len); // postcondition: write fits
+    used.* += n;
+}
+
+/// Zig expression fragment after `return {zface}` for a closed call-body gate.
+fn call_op_expr(gate: []const u8) LowerError![]const u8 {
+    if (std.mem.eql(u8, gate, "double")) return " *% 2";
+    if (std.mem.eql(u8, gate, "inc")) return " +% 1";
+    if (std.mem.eql(u8, gate, "dec")) return " -% 1";
+    return error.BodyGateNotYetLowered;
+}
+
+pub const max_sumto_call: u32 = 65535; // STOA339: triangular fits u32; beyond folds to 0 (fold-family law)
+
+/// STOA341: an arm is a literal, the first face, or the second face.
+fn pair_arm_value(spec: *const rb.GateSpec, hit: bool) u32 {
+    const sel = if (hit) spec.then_face else spec.else_face;
+    const val = if (hit) spec.cond_then else spec.cond_else;
+    return switch (sel) {
+        1 => bartis_pair_demo_from,
+        2 => bartis_pair_demo_amount,
+        else => val,
+    };
+}
+
+fn pair_arm_expr(sel: u8, value: u32, zfa: []const u8, zfb: []const u8, buf: []u8) LowerError![]const u8 {
+    return switch (sel) {
+        1 => zfa,
+        2 => zfb,
+        else => std.fmt.bufPrint(buf, "{d}", .{value}) catch return error.Overflow,
+    };
+}
+
+/// STOA339: full body expression for gates that reference the face more than once.
+fn call_body_expr(gate: []const u8, zface: []const u8, buf: []u8) LowerError![]const u8 {
+    if (std.mem.eql(u8, gate, "sumto")) {
+        return std.fmt.bufPrint(buf, "if ({s} > {d}) 0 else ({s} *% ({s} +% 1)) / 2", .{ zface, max_sumto_call, zface, zface }) catch return error.Overflow;
+    }
+    if (std.mem.eql(u8, gate, "prodto")) {
+        return std.fmt.bufPrint(buf, "if ({s} > {d}) 0 else if ({s} == 0) 1 else blk: {{ var acc: u32 = 1; var i: u32 = 2; while (i <= {s}) : (i += 1) acc *%= i; break :blk acc; }}", .{ zface, rb.max_prodto_bound, zface, zface }) catch return error.Overflow;
+    }
+    if (std.mem.eql(u8, gate, "sumto_lawful")) {
+        return std.fmt.bufPrint(buf, "if ({s} <= {d}) 1 else 0", .{ zface, max_sumto_call }) catch return error.Overflow;
+    }
+    if (std.mem.eql(u8, gate, "prodto_lawful")) {
+        return std.fmt.bufPrint(buf, "if ({s} <= {d}) 1 else 0", .{ zface, rb.max_prodto_bound }) catch return error.Overflow;
+    }
+    if (std.mem.eql(u8, gate, "gardens_lawful")) {
+        // STOA344 · O3: the check reads the vane's own constant through the plant's import.
+        return std.fmt.bufPrint(buf, "if ({s} <= gardens.max_gardens) 1 else 0", .{zface}) catch return error.Overflow;
+    }
+    if (std.mem.eql(u8, gate, "caps_lawful")) {
+        return std.fmt.bufPrint(buf, "if ({s} <= caravan.max_caps_per_dependent) 1 else 0", .{zface}) catch return error.Overflow;
+    }
+    if (std.mem.eql(u8, gate, "dependents_lawful")) {
+        return std.fmt.bufPrint(buf, "if ({s} <= caravan.max_dependents) 1 else 0", .{zface}) catch return error.Overflow;
+    }
+    const op = try call_op_expr(gate);
+    return std.fmt.bufPrint(buf, "{s}{s}", .{ zface, op }) catch return error.Overflow;
+}
+
+/// STOA345: the import each vane-decide plant carries; null for every other gate.
+fn vane_decide_import(gate: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, gate, "gardens_lawful")) return "const gardens = @import(\"tally_gardens.rye\");\n\n";
+    if (std.mem.eql(u8, gate, "caps_lawful") or std.mem.eql(u8, gate, "dependents_lawful")) return "const caravan = @import(\"caravan/capabilities.rye\");\n\n";
+    return null;
+}
+
+fn call_expect(gate: []const u8, sample: u32) LowerError!u32 {
+    if (std.mem.eql(u8, gate, "sumto")) return fold_sumto_expect(sample, max_sumto_call);
+    if (std.mem.eql(u8, gate, "prodto")) return fold_prodto_expect(sample, rb.max_prodto_bound);
+    if (std.mem.eql(u8, gate, "sumto_lawful")) return if (sample <= max_sumto_call) 1 else 0;
+    if (std.mem.eql(u8, gate, "prodto_lawful")) return if (sample <= rb.max_prodto_bound) 1 else 0;
+    if (std.mem.eql(u8, gate, "gardens_lawful")) return 0; // STOA344 · O3: expect lives in-plant beside the import
+    if (std.mem.eql(u8, gate, "caps_lawful")) return 0; // STOA345: in-plant
+    if (std.mem.eql(u8, gate, "dependents_lawful")) return 0; // STOA345: in-plant
+    if (std.mem.eql(u8, gate, "double")) return sample *% 2;
+    if (std.mem.eql(u8, gate, "inc")) return sample +% 1;
+    if (std.mem.eql(u8, gate, "dec")) return sample -% 1;
+    return error.BodyGateNotYetLowered;
+}
+
+fn fold_sumto_expect(n: u32, bound: u32) u32 {
+    if (n == 0 or n > bound) return 0;
+    // Triangular number 1..n — closed form, width named.
+    return (n *% (n +% 1)) / 2;
+}
+
+/// STOA334: product 1..n within bound; empty n=0 folds to the product identity, 1.
+fn fold_prodto_expect(n: u32, bound: u32) u32 {
+    if (n > bound) return 0;
+    if (n == 0) return 1;
+    var acc: u32 = 1;
+    var i: u32 = 2;
+    while (i <= n) : (i += 1) {
+        acc *%= i;
+    }
+    return acc;
+}
+
+fn expect_for(spec: *const rb.GateSpec) LowerError!u32 {
+    return switch (spec.body) {
+        .identity => bartis_identity_expect,
+        .call_one => try call_expect(rb.gate_slice(spec), bartis_demo_sample),
+        .cond_gth => return error.SampleDoesNotNest,
+        .cond_eq => return error.SampleDoesNotNest,
+        .cond_eq_faces => pair_arm_value(spec, bartis_pair_demo_from == bartis_pair_demo_amount),
+        .cond_gth_faces => pair_arm_value(spec, bartis_pair_demo_from > bartis_pair_demo_amount),
+        .fold_sumto => fold_sumto_expect(bartis_demo_sample, spec.fold_bound),
+        .fold_sum => try fold_sum_n_expect(spec),
+        .fold_prodto => fold_prodto_expect(bartis_demo_sample, spec.fold_bound),
+        .fold_prod => try fold_prod_n_expect(spec),
+    };
+}
+
+/// STOA333/335: welcome-path expect for `|+ sum` — sum of closed-tuple demos for the sample's N.
+fn fold_sum_n_expect(spec: *const rb.GateSpec) LowerError!u32 {
+    const sn = rb.shape_name_slice(spec);
+    const n = nest_type.closed_tuple_field_count(sn) orelse return error.SampleDoesNotNest;
+    var acc: u32 = 0;
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        acc +%= closed_tuple_demos[@as(usize, @intCast(i))];
+    }
+    return acc;
+}
+
+/// STOA336: product expect over the same demo fields — identity 1, not 0.
+fn fold_prod_n_expect(spec: *const rb.GateSpec) LowerError!u32 {
+    const sn = rb.shape_name_slice(spec);
+    const n = nest_type.closed_tuple_field_count(sn) orelse return error.SampleDoesNotNest;
+    var acc: u32 = 1;
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        acc *%= closed_tuple_demos[@as(usize, @intCast(i))];
+    }
+    return acc;
+}
+
+fn emit_fold_sumto_gate_fn(out: []u8, used: *u32, zface: []const u8, bound: u32, comment: []const u8) LowerError!void {
+    try append_print(out, used, "/// {s}\n", .{comment});
+    try append_print(out, used, "fn bartis_gate({s}: u32) u32 {{\n", .{zface});
+    try append_print(out, used, "    if ({s} == 0 or {s} > {d}) return 0;\n", .{ zface, zface, bound });
+    try append_print(out, used, "    var acc: u32 = 0;\n", .{});
+    try append_print(out, used, "    var i: u32 = 1;\n", .{});
+    try append_print(out, used, "    while (i <= {s}) : (i += 1) {{\n", .{zface});
+    try append_print(out, used, "        acc +%= i;\n", .{});
+    try append_print(out, used, "    }}\n", .{});
+    try append_print(out, used, "    return acc;\n", .{});
+    try append_print(out, used, "}}\n\n", .{});
+}
+
+
+
+fn emit_fold_prodto_gate_fn(out: []u8, used: *u32, zface: []const u8, bound: u32, comment: []const u8) LowerError!void {
+    try append_print(out, used, "/// {s}\n", .{comment});
+    try append_print(out, used, "fn bartis_gate({s}: u32) u32 {{\n", .{zface});
+    try append_print(out, used, "    if ({s} > {d}) return 0;\n", .{ zface, bound });
+    try append_print(out, used, "    var acc: u32 = 1;\n", .{});
+    try append_print(out, used, "    var i: u32 = 2;\n", .{});
+    try append_print(out, used, "    while (i <= {s}) : (i += 1) {{\n", .{zface});
+    try append_print(out, used, "        acc *%= i;\n", .{});
+    try append_print(out, used, "    }}\n", .{});
+    try append_print(out, used, "    return acc;\n", .{});
+    try append_print(out, used, "}}\n\n", .{});
+}
+
+
+/// STOA333: pair list-fold welcome — seated elder bytes; STOA335 delegates here at n=2.
+
+/// STOA336: list fold by product — welcome path. Operator *%; identity of none is 1.
+fn emit_fold_prod_n_welcome(out: []u8, field_count: u32, zface: []const u8, comment: []const u8) LowerError!u32 {
+    assert(field_count >= 2);
+    assert(field_count <= 9);
+    const zig_type = closed_tuple_type_name(field_count);
+    var expect: u32 = 1;
+    var i: u32 = 0;
+    while (i < field_count) : (i += 1) {
+        expect *%= closed_tuple_demos[@as(usize, @intCast(i))];
+    }
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const {s} = struct {{\n", .{zig_type});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    {s}: u32 = 0,\n", .{closed_tuple_faces[@as(usize, @intCast(i))]});
+    }
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: {s}) u32 {{\n", .{ zface, zig_type });
+    try append_print(out, &used, "    return ", .{});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, " *% ", .{});
+        try append_print(out, &used, "{s}.{s}", .{ zface, closed_tuple_faces[@as(usize, @intCast(i))] });
+    }
+    try append_print(out, &used, ";\n", .{});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: {s} = .{{ ", .{ zface, zig_type });
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, ", ", .{});
+        try append_print(out, &used, ".{s} = {d}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_demos[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, " }};\n", .{});
+    try append_print(out, &used, "    return if (bartis_gate({s}) == {d}) 0 else 1;\n", .{ zface, expect });
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA336: list fold by product — argv path; answer spoken; wraps with *%.
+fn emit_fold_prod_n_argv(out: []u8, field_count: u32, zface: []const u8, comment: []const u8) LowerError!u32 {
+    assert(field_count >= 2);
+    assert(field_count <= 9);
+    const zig_type = closed_tuple_type_name(field_count);
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const {s} = struct {{\n", .{zig_type});
+    var i: u32 = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    {s}: u32 = 0,\n", .{closed_tuple_faces[@as(usize, @intCast(i))]});
+    }
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: {s}) u32 {{\n", .{ zface, zig_type });
+    try append_print(out, &used, "    return ", .{});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, " *% ", .{});
+        try append_print(out, &used, "{s}.{s}", .{ zface, closed_tuple_faces[@as(usize, @intCast(i))] });
+    }
+    try append_print(out, &used, ";\n", .{});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, &used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, &used, "    if (argv.len < {d}) return 2;\n", .{field_count + 1});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    const {s} = std.fmt.parseInt(u32, argv[{d}], 10) catch return 2;\n", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            i + 1,
+        });
+    }
+    try append_print(out, &used, "    const {s}: {s} = .{{ ", .{ zface, zig_type });
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, ", ", .{});
+        try append_print(out, &used, ".{s} = {s}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_faces[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, " }};\n", .{});
+    try append_print(out, &used, "    const answer: u32 = bartis_gate({s});\n", .{zface});
+    try append_print(out, &used, "    var buf: [12]u8 = undefined;\n", .{});
+    try append_print(out, &used, "    const line = std.fmt.bufPrint(&buf, \"{{d}}\\n\", .{{answer}}) catch return 2;\n", .{});
+    try append_print(out, &used, "    const io = init.io;\n", .{});
+    try append_print(out, &used, "    std.Io.File.stdout().writeStreamingAll(io, line) catch return 2;\n", .{});
+    try append_print(out, &used, "    return 0;\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+
+fn emit_fold_sum_pair_welcome(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    const expect: u32 = bartis_pair_demo_from +% bartis_pair_demo_amount;
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const PairShape = struct {{\n", .{});
+    try append_print(out, &used, "    from: u32 = 0,\n", .{});
+    try append_print(out, &used, "    amount: u32 = 0,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: PairShape) u32 {{\n", .{zface});
+    try append_print(out, &used, "    return {s}.from +% {s}.amount;\n", .{ zface, zface });
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: PairShape = .{{ .from = {d}, .amount = {d} }};\n", .{ zface, bartis_pair_demo_from, bartis_pair_demo_amount });
+    try append_print(out, &used, "    return if (bartis_gate({s}) == {d}) 0 else 1;\n", .{ zface, expect });
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA333: pair list-fold argv — seated elder bytes; STOA335 delegates here at n=2.
+fn emit_fold_sum_pair_argv(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const PairShape = struct {{\n", .{});
+    try append_print(out, &used, "    from: u32 = 0,\n", .{});
+    try append_print(out, &used, "    amount: u32 = 0,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: PairShape) u32 {{\n", .{zface});
+    try append_print(out, &used, "    return {s}.from +% {s}.amount;\n", .{ zface, zface });
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, &used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, &used, "    if (argv.len < 3) return 2;\n", .{});
+    try append_print(out, &used, "    const from = std.fmt.parseInt(u32, argv[1], 10) catch return 2;\n", .{});
+    try append_print(out, &used, "    const amount = std.fmt.parseInt(u32, argv[2], 10) catch return 2;\n", .{});
+    try append_print(out, &used, "    const {s}: PairShape = .{{ .from = from, .amount = amount }};\n", .{zface});
+    try append_print(out, &used, "    const answer: u32 = bartis_gate({s});\n", .{zface});
+    try append_print(out, &used, "    var buf: [12]u8 = undefined;\n", .{});
+    try append_print(out, &used, "    const line = std.fmt.bufPrint(&buf, \"{{d}}\\n\", .{{answer}}) catch return 2;\n", .{});
+    try append_print(out, &used, "    const io = init.io;\n", .{});
+    try append_print(out, &used, "    std.Io.File.stdout().writeStreamingAll(io, line) catch return 2;\n", .{});
+    try append_print(out, &used, "    return 0;\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA335: `|+ sum` over closed `$:` pair…nona — at n=2 delegates to the elder pair emitter.
+fn emit_fold_sum_n_welcome(out: []u8, field_count: u32, zface: []const u8, comment: []const u8) LowerError!u32 {
+    assert(field_count >= 2);
+    assert(field_count <= 9);
+    if (field_count == 2) return emit_fold_sum_pair_welcome(out, zface, comment);
+    const zig_type = closed_tuple_type_name(field_count);
+    var expect: u32 = 0;
+    var i: u32 = 0;
+    while (i < field_count) : (i += 1) {
+        expect +%= closed_tuple_demos[@as(usize, @intCast(i))];
+    }
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const {s} = struct {{\n", .{zig_type});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    {s}: u32 = 0,\n", .{closed_tuple_faces[@as(usize, @intCast(i))]});
+    }
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: {s}) u32 {{\n", .{ zface, zig_type });
+    try append_print(out, &used, "    return ", .{});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, " +% ", .{});
+        try append_print(out, &used, "{s}.{s}", .{ zface, closed_tuple_faces[@as(usize, @intCast(i))] });
+    }
+    try append_print(out, &used, ";\n", .{});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: {s} = .{{ ", .{ zface, zig_type });
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, ", ", .{});
+        try append_print(out, &used, ".{s} = {d}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_demos[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, " }};\n", .{});
+    try append_print(out, &used, "    return if (bartis_gate({s}) == {d}) 0 else 1;\n", .{ zface, expect });
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA335: `|+ sum` argv — at n=2 delegates to the elder pair emitter.
+fn emit_fold_sum_n_argv(out: []u8, field_count: u32, zface: []const u8, comment: []const u8) LowerError!u32 {
+    assert(field_count >= 2);
+    assert(field_count <= 9);
+    if (field_count == 2) return emit_fold_sum_pair_argv(out, zface, comment);
+    const zig_type = closed_tuple_type_name(field_count);
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const {s} = struct {{\n", .{zig_type});
+    var i: u32 = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    {s}: u32 = 0,\n", .{closed_tuple_faces[@as(usize, @intCast(i))]});
+    }
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: {s}) u32 {{\n", .{ zface, zig_type });
+    try append_print(out, &used, "    return ", .{});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, " +% ", .{});
+        try append_print(out, &used, "{s}.{s}", .{ zface, closed_tuple_faces[@as(usize, @intCast(i))] });
+    }
+    try append_print(out, &used, ";\n", .{});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, &used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, &used, "    if (argv.len < {d}) return 2;\n", .{field_count + 1});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    const {s} = std.fmt.parseInt(u32, argv[{d}], 10) catch return 2;\n", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            i + 1,
+        });
+    }
+    try append_print(out, &used, "    const {s}: {s} = .{{ ", .{ zface, zig_type });
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, ", ", .{});
+        try append_print(out, &used, ".{s} = {s}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_faces[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, " }};\n", .{});
+    try append_print(out, &used, "    const answer: u32 = bartis_gate({s});\n", .{zface});
+    try append_print(out, &used, "    var buf: [12]u8 = undefined;\n", .{});
+    try append_print(out, &used, "    const line = std.fmt.bufPrint(&buf, \"{{d}}\\n\", .{{answer}}) catch return 2;\n", .{});
+    try append_print(out, &used, "    const io = init.io;\n", .{});
+    try append_print(out, &used, "    std.Io.File.stdout().writeStreamingAll(io, line) catch return 2;\n", .{});
+    try append_print(out, &used, "    return 0;\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+
+fn emit_prelude(out: []u8, used: *u32) LowerError!void {
+    try append_print(out, used, "const std = @import(\"std\");\n\n", .{});
+}
+
+fn emit_gate_fn(out: []u8, used: *u32, face: []const u8, zface: []const u8, body_return: []const u8, comment: []const u8) LowerError!void {
+    try append_print(out, used, "/// {s}\n", .{comment});
+    try append_print(out, used, "fn bartis_gate({s}: u32) u32 {{\n", .{zface});
+    try append_print(out, used, "    return {s};\n", .{body_return});
+    try append_print(out, used, "}}\n\n", .{});
+    _ = face;
+}
+
+fn emit_welcome_main(out: []u8, used: *u32, zface: []const u8, expect: u32) LowerError!void {
+    try append_print(out, used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, used, "    const {s}: u32 = {d};\n", .{ zface, bartis_demo_sample });
+    try append_print(out, used, "    return if (bartis_gate({s}) == {d}) 0 else 1;\n", .{ zface, expect });
+    try append_print(out, used, "}}\n", .{});
+}
+
+fn emit_argv_main(out: []u8, used: *u32, zface: []const u8, expect_expr: []const u8) LowerError!void {
+    try append_print(out, used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, used, "    if (argv.len < 2) return 2;\n", .{});
+    try append_print(out, used, "    const {s} = std.fmt.parseInt(u32, argv[1], 10) catch return 2;\n", .{zface});
+    try append_print(out, used, "    const expect: u32 = {s};\n", .{expect_expr});
+    try append_print(out, used, "    return if (bartis_gate({s}) == expect) 0 else 1;\n", .{zface});
+    try append_print(out, used, "}}\n", .{});
+}
+
+/// PLEAC 1.2 — the speaking argv main: the gate's answer reaches stdout.
+/// say is argv-only; the welcome road refuses it honestly at expect_for.
+fn emit_argv_speaking_main(out: []u8, used: *u32, zface: []const u8) LowerError!void {
+    try append_print(out, used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, used, "    if (argv.len < 2) return 2;\n", .{});
+    try append_print(out, used, "    const {s} = std.fmt.parseInt(u32, argv[1], 10) catch return 2;\n", .{zface});
+    try append_print(out, used, "    const answer: u32 = bartis_gate({s});\n", .{zface});
+    try append_print(out, used, "    var buf: [12]u8 = undefined;\n", .{});
+    try append_print(out, used, "    const line = std.fmt.bufPrint(&buf, \"{{d}}\\n\", .{{answer}}) catch return 2;\n", .{});
+    try append_print(out, used, "    const io = init.io;\n", .{});
+    try append_print(out, used, "    std.Io.File.stdout().writeStreamingAll(io, line) catch return 2;\n", .{});
+    try append_print(out, used, "    return 0;\n", .{});
+    try append_print(out, used, "}}\n", .{});
+}
+
+fn sample_shape_label(spec: *const rb.GateSpec) []const u8 {
+    if (spec.shape_name_len == 0) return "@u32";
+    return rb.shape_name_slice(spec);
+}
+
+fn is_kind_sample(spec: *const rb.GateSpec) bool {
+    if (spec.shape_name_len == 0) return false;
+    return nest_type.is_kind_named_shape(rb.shape_name_slice(spec));
+}
+
+fn is_xact_sample(spec: *const rb.GateSpec) bool {
+    if (spec.shape_name_len == 0) return false;
+    return nest_type.is_xact_named_shape(rb.shape_name_slice(spec));
+}
+
+fn is_xfer_sample(spec: *const rb.GateSpec) bool {
+    if (spec.shape_name_len == 0) return false;
+    return nest_type.is_xfer_named_shape(rb.shape_name_slice(spec));
+}
+
+/// STOA123: closed unit `$%` kind-mold identity → KindShape enum · baked `.mint`.
+fn emit_kind_identity(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const KindShape = enum(u8) {{\n", .{});
+    try append_print(out, &used, "    mint,\n", .{});
+    try append_print(out, &used, "    send,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: KindShape) KindShape {{\n", .{zface});
+    try append_print(out, &used, "    return {s};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: KindShape = .mint;\n", .{zface});
+    try append_print(out, &used, "    return if (bartis_gate({s}) == .mint) 0 else 1;\n", .{zface});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA300: closed unit `$%` kind-mold argv identity → KindShape · tag word from argv.
+fn emit_kind_argv(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const KindShape = enum(u8) {{\n", .{});
+    try append_print(out, &used, "    mint,\n", .{});
+    try append_print(out, &used, "    send,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: KindShape) KindShape {{\n", .{zface});
+    try append_print(out, &used, "    return {s};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, &used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, &used, "    if (argv.len < 2) return 2;\n", .{});
+    try append_print(out, &used, "    const tag = argv[1];\n", .{});
+    try append_print(out, &used, "    const {s}: KindShape = if (std.mem.eql(u8, tag, \"mint\")) .mint else if (std.mem.eql(u8, tag, \"send\")) .send else return 2;\n", .{zface});
+    try append_print(out, &used, "    return if (bartis_gate({s}) == {s}) 0 else 1;\n", .{ zface, zface });
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA303: closed payload `$%` xact-mold argv identity → XactShape · tag + amount from argv.
+/// `mint <u32>` → `.mint { .amount }` · `send` → `.send`. Distinct from kind unit tags and u32 parseInt-only.
+fn emit_xact_argv(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const XactShape = union(enum) {{\n", .{});
+    try append_print(out, &used, "    mint: struct {{ amount: u32 = 0 }},\n", .{});
+    try append_print(out, &used, "    send,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: XactShape) XactShape {{\n", .{zface});
+    try append_print(out, &used, "    return {s};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, &used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, &used, "    if (argv.len < 2) return 2;\n", .{});
+    try append_print(out, &used, "    const tag = argv[1];\n", .{});
+    try append_print(out, &used, "    if (std.mem.eql(u8, tag, \"send\")) {{\n", .{});
+    try append_print(out, &used, "        const {s}: XactShape = .send;\n", .{zface});
+    try append_print(out, &used, "        return switch (bartis_gate({s})) {{ .send => 0, .mint => 1 }};\n", .{zface});
+    try append_print(out, &used, "    }}\n", .{});
+    try append_print(out, &used, "    if (!std.mem.eql(u8, tag, \"mint\")) return 2;\n", .{});
+    try append_print(out, &used, "    if (argv.len < 3) return 2;\n", .{});
+    try append_print(out, &used, "    const amount = std.fmt.parseInt(u32, argv[2], 10) catch return 2;\n", .{});
+    try append_print(out, &used, "    const {s}: XactShape = .{{ .mint = .{{ .amount = amount }} }};\n", .{zface});
+    try append_print(out, &used, "    return switch (bartis_gate({s})) {{\n", .{zface});
+    try append_print(out, &used, "        .mint => |m| if (m.amount == amount) 0 else 1,\n", .{});
+    try append_print(out, &used, "        .send => 1,\n", .{});
+    try append_print(out, &used, "    }};\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA305: closed multi-face payload `$%` xfer-mold argv identity → XferShape · tag + from/amount.
+/// `mint <from> <amount>` / `send`. Distinct from xact (one mint face) and kind unit tags.
+fn emit_xfer_argv(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const XferShape = union(enum) {{\n", .{});
+    try append_print(out, &used, "    mint: struct {{ from: u32 = 0, amount: u32 = 0 }},\n", .{});
+    try append_print(out, &used, "    send,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: XferShape) XferShape {{\n", .{zface});
+    try append_print(out, &used, "    return {s};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, &used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, &used, "    if (argv.len < 2) return 2;\n", .{});
+    try append_print(out, &used, "    const tag = argv[1];\n", .{});
+    try append_print(out, &used, "    if (std.mem.eql(u8, tag, \"send\")) {{\n", .{});
+    try append_print(out, &used, "        const {s}: XferShape = .send;\n", .{zface});
+    try append_print(out, &used, "        return switch (bartis_gate({s})) {{ .send => 0, .mint => 1 }};\n", .{zface});
+    try append_print(out, &used, "    }}\n", .{});
+    try append_print(out, &used, "    if (!std.mem.eql(u8, tag, \"mint\")) return 2;\n", .{});
+    try append_print(out, &used, "    if (argv.len < 4) return 2;\n", .{});
+    try append_print(out, &used, "    const from = std.fmt.parseInt(u32, argv[2], 10) catch return 2;\n", .{});
+    try append_print(out, &used, "    const amount = std.fmt.parseInt(u32, argv[3], 10) catch return 2;\n", .{});
+    try append_print(out, &used, "    const {s}: XferShape = .{{ .mint = .{{ .from = from, .amount = amount }} }};\n", .{zface});
+    try append_print(out, &used, "    return switch (bartis_gate({s})) {{\n", .{zface});
+    try append_print(out, &used, "        .mint => |m| if (m.from == from and m.amount == amount) 0 else 1,\n", .{});
+    try append_print(out, &used, "        .send => 1,\n", .{});
+    try append_print(out, &used, "    }};\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA127 / STOA297: closed unit `$%` kind-mold call body → KindShape flip (via unit helper).
+fn emit_kind_call_body(out: []u8, zface: []const u8, gate: []const u8, comment: []const u8) LowerError!u32 {
+    assert(rb.is_kind_call_gate(gate)); // parse/lower pin — flip only today
+    return emit_tagged_unit_flip_call_body(out, zface, comment);
+}
+
+/// STOA297: one tagged-unit `$%` flip call-body emit for kind (KindShape enum).
+/// mint ↔ send. Distinct from payload union flip and from `$:` N-field.
+fn emit_tagged_unit_flip_call_body(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const KindShape = enum(u8) {{\n", .{});
+    try append_print(out, &used, "    mint,\n", .{});
+    try append_print(out, &used, "    send,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: KindShape) KindShape {{\n", .{zface});
+    try append_print(out, &used, "    return switch ({s}) {{ .mint => .send, .send => .mint }};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: KindShape = .mint;\n", .{zface});
+    try append_print(out, &used, "    return if (bartis_gate({s}) == .send) 0 else 1;\n", .{zface});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA124: closed payload `$%` xact-mold identity → XactShape union · baked mint/5.
+fn emit_xact_identity(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const XactShape = union(enum) {{\n", .{});
+    try append_print(out, &used, "    mint: struct {{ amount: u32 = 0 }},\n", .{});
+    try append_print(out, &used, "    send,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: XactShape) XactShape {{\n", .{zface});
+    try append_print(out, &used, "    return {s};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: XactShape = .{{ .mint = .{{ .amount = {d} }} }};\n", .{ zface, bartis_demo_sample });
+    try append_print(out, &used, "    return switch (bartis_gate({s})) {{\n", .{zface});
+    try append_print(out, &used, "        .mint => |m| if (m.amount == {d}) 0 else 1,\n", .{bartis_demo_sample});
+    try append_print(out, &used, "        .send => 1,\n", .{});
+    try append_print(out, &used, "    }};\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA128 / STOA293: closed payload `$%` xact-mold call body → XactShape flip (via payload helper).
+fn emit_xact_call_body(out: []u8, zface: []const u8, gate: []const u8, comment: []const u8) LowerError!u32 {
+    assert(rb.is_xact_call_gate(gate)); // parse/lower pin — flip only today
+    return emit_tagged_payload_flip_call_body(out, 1, zface, comment);
+}
+
+/// STOA125: closed multi-face payload `$%` xfer-mold → XferShape · baked mint/5/3.
+fn emit_xfer_identity(out: []u8, zface: []const u8, comment: []const u8) LowerError!u32 {
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const XferShape = union(enum) {{\n", .{});
+    try append_print(out, &used, "    mint: struct {{ from: u32 = 0, amount: u32 = 0 }},\n", .{});
+    try append_print(out, &used, "    send,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: XferShape) XferShape {{\n", .{zface});
+    try append_print(out, &used, "    return {s};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: XferShape = .{{ .mint = .{{ .from = {d}, .amount = {d} }} }};\n", .{ zface, bartis_xfer_demo_from, bartis_xfer_demo_amount });
+    try append_print(out, &used, "    return switch (bartis_gate({s})) {{\n", .{zface});
+    try append_print(out, &used, "        .mint => |m| if (m.from == {d} and m.amount == {d}) 0 else 1,\n", .{ bartis_xfer_demo_from, bartis_xfer_demo_amount });
+    try append_print(out, &used, "        .send => 1,\n", .{});
+    try append_print(out, &used, "    }};\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA129 / STOA293: closed multi-face payload `$%` xfer-mold call body → XferShape flip (via payload helper).
+fn emit_xfer_call_body(out: []u8, zface: []const u8, gate: []const u8, comment: []const u8) LowerError!u32 {
+    assert(rb.is_xfer_call_gate(gate)); // parse/lower pin — flip only today
+    return emit_tagged_payload_flip_call_body(out, 2, zface, comment);
+}
+
+/// STOA293: one tagged-payload `$%` flip call-body emit for xact (1 mint face) and xfer (2).
+/// mint → .send; send → empty mint. Distinct from KindShape unit-enum flip and from `$:` N-field.
+fn emit_tagged_payload_flip_call_body(out: []u8, mint_faces: u32, zface: []const u8, comment: []const u8) LowerError!u32 {
+    assert(mint_faces == 1 or mint_faces == 2);
+    const zig_type: []const u8 = if (mint_faces == 1) "XactShape" else "XferShape";
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const {s} = union(enum) {{\n", .{zig_type});
+    if (mint_faces == 1) {
+        try append_print(out, &used, "    mint: struct {{ amount: u32 = 0 }},\n", .{});
+    } else {
+        try append_print(out, &used, "    mint: struct {{ from: u32 = 0, amount: u32 = 0 }},\n", .{});
+    }
+    try append_print(out, &used, "    send,\n", .{});
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: {s}) {s} {{\n", .{ zface, zig_type, zig_type });
+    if (mint_faces == 1) {
+        try append_print(out, &used, "    return switch ({s}) {{ .mint => .send, .send => .{{ .mint = .{{ .amount = 0 }} }} }};\n", .{zface});
+    } else {
+        try append_print(out, &used, "    return switch ({s}) {{ .mint => .send, .send => .{{ .mint = .{{ .from = 0, .amount = 0 }} }} }};\n", .{zface});
+    }
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    if (mint_faces == 1) {
+        try append_print(out, &used, "    const {s}: {s} = .{{ .mint = .{{ .amount = {d} }} }};\n", .{ zface, zig_type, bartis_demo_sample });
+    } else {
+        try append_print(out, &used, "    const {s}: {s} = .{{ .mint = .{{ .from = {d}, .amount = {d} }} }};\n", .{ zface, zig_type, bartis_xfer_demo_from, bartis_xfer_demo_amount });
+    }
+    try append_print(out, &used, "    return switch (bartis_gate({s})) {{\n", .{zface});
+    try append_print(out, &used, "        .send => 0,\n", .{});
+    try append_print(out, &used, "        .mint => 1,\n", .{});
+    try append_print(out, &used, "    }};\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// Closed `$:` face order for pair…nona identity emit (STOA253).
+const closed_tuple_faces = [_][]const u8{ "from", "amount", "fee", "nonce", "memo", "tag", "to", "via", "ref" };
+
+/// Closed `$:` demo vals for pair…nona identity emit (STOA253) — matches seated pins.
+const closed_tuple_demos = [_]u32{ 5, 3, 1, 2, 7, 4, 6, 8, 9 };
+
+fn closed_tuple_type_name(field_count: u32) []const u8 {
+    return switch (field_count) {
+        2 => "PairShape",
+        3 => "TripleShape",
+        4 => "QuadShape",
+        5 => "PentaShape",
+        6 => "HexaShape",
+        7 => "HeptaShape",
+        8 => "OctaShape",
+        9 => "NonaShape",
+        else => unreachable,
+    };
+}
+
+/// STOA307 / STOA324: N-field `$:` argv identity — parse N decimals from argv[1..N].
+/// Distinct from tagged `$%` argv and from single-u32 parseInt.
+fn emit_n_field_argv(out: []u8, field_count: u32, zface: []const u8, comment: []const u8) LowerError!u32 {
+    assert(field_count >= 2);
+    assert(field_count <= 9);
+    const zig_type = closed_tuple_type_name(field_count);
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const {s} = struct {{\n", .{zig_type});
+    var i: u32 = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    {s}: u32 = 0,\n", .{closed_tuple_faces[@as(usize, @intCast(i))]});
+    }
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: {s}) {s} {{\n", .{ zface, zig_type, zig_type });
+    try append_print(out, &used, "    return {s};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const alloc = init.arena.allocator();\n", .{});
+    try append_print(out, &used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+    try append_print(out, &used, "    if (argv.len < {d}) return 2;\n", .{field_count + 1});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    const {s} = std.fmt.parseInt(u32, argv[{d}], 10) catch return 2;\n", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            i + 1,
+        });
+    }
+    try append_print(out, &used, "    const {s}: {s} = .{{ ", .{ zface, zig_type });
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, ", ", .{});
+        try append_print(out, &used, ".{s} = {s}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_faces[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, " }};\n", .{});
+    try append_print(out, &used, "    const got = bartis_gate({s});\n", .{zface});
+    try append_print(out, &used, "    return if (", .{});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, " and ", .{});
+        try append_print(out, &used, "got.{s} == {s}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_faces[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, ") 0 else 1;\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA253: one N-field identity emit for closed `$:` pair…nona (N = 2…9).
+fn emit_n_field_identity(out: []u8, field_count: u32, zface: []const u8, comment: []const u8) LowerError!u32 {
+    assert(field_count >= 2);
+    assert(field_count <= 9);
+    const zig_type = closed_tuple_type_name(field_count);
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const {s} = struct {{\n", .{zig_type});
+    var i: u32 = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    {s}: u32 = 0,\n", .{closed_tuple_faces[@as(usize, @intCast(i))]});
+    }
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: {s}) {s} {{\n", .{ zface, zig_type, zig_type });
+    try append_print(out, &used, "    return {s};\n", .{zface});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: {s} = .{{ ", .{ zface, zig_type });
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, ", ", .{});
+        try append_print(out, &used, ".{s} = {d}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_demos[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, " }};\n", .{});
+    try append_print(out, &used, "    const got = bartis_gate({s});\n", .{zface});
+    try append_print(out, &used, "    return if (", .{});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, " and ", .{});
+        try append_print(out, &used, "got.{s} == {d}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_demos[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, ") 0 else 1;\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+/// STOA259: one N-field flip call-body emit for closed `$:` pair…nona (N = 2…9).
+/// Swaps from↔amount; remaining faces pass through. Demo pins match closed_tuple_demos.
+fn emit_n_field_flip_call_body(out: []u8, field_count: u32, zface: []const u8, comment: []const u8) LowerError!u32 {
+    assert(field_count >= 2);
+    assert(field_count <= 9);
+    const zig_type = closed_tuple_type_name(field_count);
+    var used: u32 = 0;
+    try append_print(out, &used, "const std = @import(\"std\");\n\n", .{});
+    try append_print(out, &used, "pub const {s} = struct {{\n", .{zig_type});
+    var i: u32 = 0;
+    while (i < field_count) : (i += 1) {
+        try append_print(out, &used, "    {s}: u32 = 0,\n", .{closed_tuple_faces[@as(usize, @intCast(i))]});
+    }
+    try append_print(out, &used, "}};\n\n", .{});
+    try append_print(out, &used, "/// {s}\n", .{comment});
+    try append_print(out, &used, "fn bartis_gate({s}: {s}) {s} {{\n", .{ zface, zig_type, zig_type });
+    try append_print(out, &used, "    return .{{ ", .{});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, ", ", .{});
+        const face = closed_tuple_faces[@as(usize, @intCast(i))];
+        if (i == 0) {
+            try append_print(out, &used, ".{s} = {s}.amount", .{ face, zface });
+        } else if (i == 1) {
+            try append_print(out, &used, ".{s} = {s}.from", .{ face, zface });
+        } else {
+            try append_print(out, &used, ".{s} = {s}.{s}", .{ face, zface, face });
+        }
+    }
+    try append_print(out, &used, " }};\n", .{});
+    try append_print(out, &used, "}}\n\n", .{});
+    try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n", .{});
+    try append_print(out, &used, "    const {s}: {s} = .{{ ", .{ zface, zig_type });
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, ", ", .{});
+        try append_print(out, &used, ".{s} = {d}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            closed_tuple_demos[@as(usize, @intCast(i))],
+        });
+    }
+    try append_print(out, &used, " }};\n", .{});
+    try append_print(out, &used, "    const got = bartis_gate({s});\n", .{zface});
+    try append_print(out, &used, "    return if (", .{});
+    i = 0;
+    while (i < field_count) : (i += 1) {
+        if (i > 0) try append_print(out, &used, " and ", .{});
+        const expect: u32 = if (i == 0)
+            closed_tuple_demos[1]
+        else if (i == 1)
+            closed_tuple_demos[0]
+        else
+            closed_tuple_demos[@as(usize, @intCast(i))];
+        try append_print(out, &used, "got.{s} == {d}", .{
+            closed_tuple_faces[@as(usize, @intCast(i))],
+            expect,
+        });
+    }
+    try append_print(out, &used, ") 0 else 1;\n", .{});
+    try append_print(out, &used, "}}\n", .{});
+    return used;
+}
+
+fn emit(spec: *const rb.GateSpec, out: []u8) LowerError!u32 {
+    const face = rb.face_slice(spec);
+    assert(face.len > 0); // invariant: spec carries a non-empty face
+    const shape = sample_shape_label(spec);
+    var zig_face_buf: [rb.max_face_len]u8 = undefined;
+    const zn = try zig_safe_ident(face, &zig_face_buf);
+    const zface = zig_face_buf[0..@as(usize, @intCast(zn))];
+
+    if (is_kind_sample(spec)) {
+        switch (spec.body) {
+            .identity => {
+                var comment_buf: [160]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis — KindShape identity (STOA123).", .{ face, shape }) catch return error.Overflow;
+                return emit_kind_identity(out, zface, comment);
+            },
+            .call_one => {
+                const gate = rb.gate_slice(spec);
+                if (!rb.is_kind_call_gate(gate)) return error.BodyGateNotYetLowered;
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `%-  {s}  {s}` — KindShape call body (STOA127).", .{ face, shape, gate, face }) catch return error.Overflow;
+                return emit_kind_call_body(out, zface, gate, comment);
+            },
+            .cond_gth => return error.SampleDoesNotNest,
+            .cond_eq => return error.SampleDoesNotNest,
+            .cond_eq_faces => return error.PairNotYetLowered,
+            .cond_gth_faces => return error.PairNotYetLowered,
+            .fold_sumto => return error.SampleDoesNotNest,
+            .fold_sum => return error.SampleDoesNotNest,
+            .fold_prodto => return error.SampleDoesNotNest,
+            .fold_prod => return error.SampleDoesNotNest,
+        }
+    }
+
+    if (is_xact_sample(spec)) {
+        switch (spec.body) {
+            .identity => {
+                var comment_buf: [160]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis — XactShape identity (STOA124).", .{ face, shape }) catch return error.Overflow;
+                return emit_xact_identity(out, zface, comment);
+            },
+            .call_one => {
+                const gate = rb.gate_slice(spec);
+                if (!rb.is_xact_call_gate(gate)) return error.BodyGateNotYetLowered;
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `%-  {s}  {s}` — XactShape call body (STOA128).", .{ face, shape, gate, face }) catch return error.Overflow;
+                return emit_xact_call_body(out, zface, gate, comment);
+            },
+            .cond_gth => return error.SampleDoesNotNest,
+            .cond_eq => return error.SampleDoesNotNest,
+            .cond_eq_faces => return error.PairNotYetLowered,
+            .cond_gth_faces => return error.PairNotYetLowered,
+            .fold_sumto => return error.SampleDoesNotNest,
+            .fold_sum => return error.SampleDoesNotNest,
+            .fold_prodto => return error.SampleDoesNotNest,
+            .fold_prod => return error.SampleDoesNotNest,
+        }
+    }
+
+    if (is_xfer_sample(spec)) {
+        switch (spec.body) {
+            .identity => {
+                var comment_buf: [160]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis — XferShape identity (STOA125).", .{ face, shape }) catch return error.Overflow;
+                return emit_xfer_identity(out, zface, comment);
+            },
+            .call_one => {
+                const gate = rb.gate_slice(spec);
+                if (!rb.is_xfer_call_gate(gate)) return error.BodyGateNotYetLowered;
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `%-  {s}  {s}` — XferShape call body (STOA129).", .{ face, shape, gate, face }) catch return error.Overflow;
+                return emit_xfer_call_body(out, zface, gate, comment);
+            },
+            .cond_gth => return error.SampleDoesNotNest,
+            .cond_eq => return error.SampleDoesNotNest,
+            .cond_eq_faces => return error.PairNotYetLowered,
+            .cond_gth_faces => return error.PairNotYetLowered,
+            .fold_sumto => return error.SampleDoesNotNest,
+            .fold_sum => return error.SampleDoesNotNest,
+            .fold_prodto => return error.SampleDoesNotNest,
+            .fold_prod => return error.SampleDoesNotNest,
+        }
+    }
+
+    // STOA326: closed `$:` pair…nona welcome — one path (shape → N → identity / flip).
+    if (nest_type.closed_tuple_field_count(shape)) |n| {
+        switch (spec.body) {
+            .identity => {
+                const zig_type = closed_tuple_type_name(n);
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis — {s} identity (STOA326).", .{ face, shape, zig_type }) catch return error.Overflow;
+                return emit_n_field_identity(out, n, zface, comment);
+            },
+            .call_one => {
+                const gate = rb.gate_slice(spec);
+                if (!rb.is_n_field_call_gate(gate)) return error.BodyGateNotYetLowered;
+                const zig_type = closed_tuple_type_name(n);
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `%-  {s}  {s}` — {s} call body (STOA326).", .{ face, shape, gate, face, zig_type }) catch return error.Overflow;
+                return emit_n_field_flip_call_body(out, n, zface, comment);
+            },
+            .cond_gth => return error.SampleDoesNotNest,
+            .cond_eq => return error.SampleDoesNotNest,
+            .cond_eq_faces => return error.PairNotYetLowered,
+            .cond_gth_faces => return error.PairNotYetLowered,
+            .fold_sumto => return error.SampleDoesNotNest,
+            .fold_sum => {
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `|+  sum  {s}` — N-field fold (STOA333/335).", .{ face, shape, face }) catch return error.Overflow;
+                return emit_fold_sum_n_welcome(out, n, zface, comment);
+            },
+            .fold_prodto => return error.SampleDoesNotNest,
+            .fold_prod => {
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `|+  prod  {s}` — N-field fold (STOA336).", .{ face, shape, face }) catch return error.Overflow;
+                return emit_fold_prod_n_welcome(out, n, zface, comment);
+            },
+        }
+    }
+
+    const expect = try expect_for(spec);
+    var used: u32 = 0;
+
+    try emit_prelude(out, &used);
+    switch (spec.body) {
+        .identity => {
+            var comment_buf: [160]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis gate — identity (STOA100/109).", .{ face, shape }) catch return error.Overflow;
+            try emit_gate_fn(out, &used, face, zface, zface, comment);
+            try emit_welcome_main(out, &used, zface, expect);
+        },
+        .call_one => {
+            const gate = rb.gate_slice(spec);
+            assert(rb.is_closed_call_gate(gate)); // parse pin
+            if (vane_decide_import(gate)) |imp| {
+                // STOA344/345 · O3: the plant imports its vane; the expect lives in-plant.
+                try append_print(out, &used, "{s}", .{imp});
+                var body_buf: [160]u8 = undefined;
+                const body_return = try call_body_expr(gate, zface, &body_buf);
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `%-  {s}  {s}` — vane decide through the import door.", .{ gate, face }) catch return error.Overflow;
+                try emit_gate_fn(out, &used, face, zface, body_return, comment);
+                var db: [160]u8 = undefined;
+                const expr_d = try call_body_expr(gate, "d", &db);
+                try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n    const d: u32 = {d};\n    return if (bartis_gate(d) == ({s})) 0 else 1;\n}}\n", .{ bartis_demo_sample, expr_d });
+            } else {
+                var body_buf: [160]u8 = undefined;
+                const body_return = try call_body_expr(gate, zface, &body_buf);
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `%-  {s}  {s}` — call body (STOA103–104 · 339).", .{ face, shape, gate, face }) catch return error.Overflow;
+                try emit_gate_fn(out, &used, face, zface, body_return, comment);
+                try emit_welcome_main(out, &used, zface, expect);
+            }
+        },
+        .cond_gth => {
+            // STOA331: welcome bakes sample 5; expected decided at lower time.
+            var body_buf: [96]u8 = undefined;
+            const body_return = std.fmt.bufPrint(&body_buf, "if ({s} > {d}) {d} else {d}", .{ zface, spec.cond_rhs, spec.cond_then, spec.cond_else }) catch return error.Overflow;
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `?:  (gth {s} {d})  {d}  {d}` — cond body (STOA331).", .{ face, shape, face, spec.cond_rhs, spec.cond_then, spec.cond_else }) catch return error.Overflow;
+            try emit_gate_fn(out, &used, face, zface, body_return, comment);
+            try emit_welcome_main(out, &used, zface, expect);
+        },
+        .cond_eq => {
+            // STOA337: exact match; welcome bakes sample 5.
+            var body_buf: [96]u8 = undefined;
+            const body_return = std.fmt.bufPrint(&body_buf, "if ({s} == {d}) {d} else {d}", .{ zface, spec.cond_rhs, spec.cond_then, spec.cond_else }) catch return error.Overflow;
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `?:  (eq {s} {d})  {d}  {d}` — cond body (STOA337).", .{ face, shape, face, spec.cond_rhs, spec.cond_then, spec.cond_else }) catch return error.Overflow;
+            try emit_gate_fn(out, &used, face, zface, body_return, comment);
+            try emit_welcome_main(out, &used, zface, expect);
+        },
+        .cond_eq_faces, .cond_gth_faces => {
+            var zb: [rb.max_face_len]u8 = undefined;
+            const bn = try zig_safe_ident(rb.face2_slice(spec), &zb);
+            const zfb = zb[0..bn];
+            const op: []const u8 = if (spec.body == .cond_eq_faces) "==" else ">";
+            var tb: [rb.max_face_len + 12]u8 = undefined;
+            var eb: [rb.max_face_len + 12]u8 = undefined;
+            const then_expr = try pair_arm_expr(spec.then_face, spec.cond_then, zface, zfb, &tb);
+            const else_expr = try pair_arm_expr(spec.else_face, spec.cond_else, zface, zfb, &eb);
+            try append_print(out, &used, "/// Lowered from Glow pair-faces cond — STOA338b.\n", .{});
+            try append_print(out, &used, "fn bartis_pair({s}: u32, {s}: u32) u32 {{\n    return if ({s} {s} {s}) {s} else {s};\n}}\n\n", .{ zface, zfb, zface, op, zfb, then_expr, else_expr });
+            try append_print(out, &used, "pub fn main(_: std.process.Init) !u8 {{\n    return if (bartis_pair({d}, {d}) == {d}) 0 else 1;\n}}\n", .{ bartis_pair_demo_from, bartis_pair_demo_amount, expect });
+        },
+        .fold_sumto => {
+            // STOA332: welcome bakes sample 5; triangular expect at lower time.
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `|+  sumto  {s}  {d}` — fold body (STOA332).", .{ face, shape, face, spec.fold_bound }) catch return error.Overflow;
+            try emit_fold_sumto_gate_fn(out, &used, zface, spec.fold_bound, comment);
+            try emit_welcome_main(out, &used, zface, expect);
+        },
+        .fold_prodto => {
+            // STOA334: welcome bakes sample 5; product expect at lower time.
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `|+  prodto  {s}  {d}` — fold body (STOA334).", .{ face, shape, face, spec.fold_bound }) catch return error.Overflow;
+            try emit_fold_prodto_gate_fn(out, &used, zface, spec.fold_bound, comment);
+            try emit_welcome_main(out, &used, zface, expect);
+        },
+        .fold_sum => return error.SampleDoesNotNest,
+        .fold_prod => return error.SampleDoesNotNest,
+    }
+    return used;
+}
+
+fn emit_argv(spec: *const rb.GateSpec, out: []u8) LowerError!u32 {
+    const face = rb.face_slice(spec);
+    assert(face.len > 0); // invariant: spec carries a non-empty face
+    const shape = sample_shape_label(spec);
+    var zig_face_buf: [rb.max_face_len]u8 = undefined;
+    const zn = try zig_safe_ident(face, &zig_face_buf);
+    const zface = zig_face_buf[0..@as(usize, @intCast(zn))];
+
+    // STOA300: kind unit-tag argv identity — distinct from u32 parseInt reader.
+    if (is_kind_sample(spec)) {
+        switch (spec.body) {
+            .identity => {
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis — KindShape argv tag (STOA300).", .{ face, shape }) catch return error.Overflow;
+                return emit_kind_argv(out, zface, comment);
+            },
+            .call_one => return error.SampleDoesNotNest,
+            .cond_gth => return error.SampleDoesNotNest,
+            .cond_eq => return error.SampleDoesNotNest,
+            .cond_eq_faces => return error.PairNotYetLowered,
+            .cond_gth_faces => return error.PairNotYetLowered,
+            .fold_sumto => return error.SampleDoesNotNest,
+            .fold_sum => return error.SampleDoesNotNest,
+            .fold_prodto => return error.SampleDoesNotNest,
+            .fold_prod => return error.SampleDoesNotNest,
+        }
+    }
+
+    // STOA303: xact payload argv identity — tag + amount; distinct from kind and u32-only.
+    if (is_xact_sample(spec)) {
+        switch (spec.body) {
+            .identity => {
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis — XactShape argv payload (STOA303).", .{ face, shape }) catch return error.Overflow;
+                return emit_xact_argv(out, zface, comment);
+            },
+            .call_one => return error.SampleDoesNotNest,
+            .cond_gth => return error.SampleDoesNotNest,
+            .cond_eq => return error.SampleDoesNotNest,
+            .cond_eq_faces => return error.PairNotYetLowered,
+            .cond_gth_faces => return error.PairNotYetLowered,
+            .fold_sumto => return error.SampleDoesNotNest,
+            .fold_sum => return error.SampleDoesNotNest,
+            .fold_prodto => return error.SampleDoesNotNest,
+            .fold_prod => return error.SampleDoesNotNest,
+        }
+    }
+
+    // STOA305: xfer payload argv identity — tag + from/amount.
+    if (is_xfer_sample(spec)) {
+        switch (spec.body) {
+            .identity => {
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis — XferShape argv payload (STOA305).", .{ face, shape }) catch return error.Overflow;
+                return emit_xfer_argv(out, zface, comment);
+            },
+            .call_one => return error.SampleDoesNotNest,
+            .cond_gth => return error.SampleDoesNotNest,
+            .cond_eq => return error.SampleDoesNotNest,
+            .cond_eq_faces => return error.PairNotYetLowered,
+            .cond_gth_faces => return error.PairNotYetLowered,
+            .fold_sumto => return error.SampleDoesNotNest,
+            .fold_sum => return error.SampleDoesNotNest,
+            .fold_prodto => return error.SampleDoesNotNest,
+            .fold_prod => return error.SampleDoesNotNest,
+        }
+    }
+
+    // STOA324: closed `$:` pair…nona argv — one path (shape → N → emit_n_field_argv).
+    if (nest_type.closed_tuple_field_count(shape)) |n| {
+        switch (spec.body) {
+            .identity => {
+                const zig_type = closed_tuple_type_name(n);
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis — {s} argv fields (STOA324).", .{ face, shape, zig_type }) catch return error.Overflow;
+                return emit_n_field_argv(out, n, zface, comment);
+            },
+            .call_one => return error.SampleDoesNotNest,
+            .cond_gth => return error.SampleDoesNotNest,
+            .cond_eq => return error.SampleDoesNotNest,
+            .cond_eq_faces => return error.PairNotYetLowered,
+            .cond_gth_faces => return error.PairNotYetLowered,
+            .fold_sumto => return error.SampleDoesNotNest,
+            .fold_sum => {
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `|+  sum  {s}` — N-field fold argv (STOA333/335).", .{ face, shape, face }) catch return error.Overflow;
+                return emit_fold_sum_n_argv(out, n, zface, comment);
+            },
+            .fold_prodto => return error.SampleDoesNotNest,
+            .fold_prod => {
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `|+  prod  {s}` — N-field fold argv (STOA336).", .{ face, shape, face }) catch return error.Overflow;
+                return emit_fold_prod_n_argv(out, n, zface, comment);
+            },
+        }
+    }
+
+    var used: u32 = 0;
+
+    try emit_prelude(out, &used);
+    switch (spec.body) {
+        .identity => {
+            var comment_buf: [160]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` bartis gate — argv sample (STOA101/109).", .{ face, shape }) catch return error.Overflow;
+            try emit_gate_fn(out, &used, face, zface, zface, comment);
+            try emit_argv_main(out, &used, zface, zface);
+        },
+        .call_one => {
+            const gate = rb.gate_slice(spec);
+            assert(rb.is_closed_call_gate(gate)); // parse pin
+            if (std.mem.eql(u8, gate, "say")) {
+                var comment_buf: [192]u8 = undefined;
+                const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `%-  say  {s}` — the speaking gate (PLEAC 1.2).", .{ face, shape, face }) catch return error.Overflow;
+                try emit_gate_fn(out, &used, face, zface, zface, comment);
+                try emit_argv_speaking_main(out, &used, zface);
+                return used;
+            }
+            if (vane_decide_import(gate)) |imp| {
+                // STOA344/345 · O3: the argv plant imports its vane; body and expect share one expression.
+                try append_print(out, &used, "{s}", .{imp});
+            }
+            var body_buf: [160]u8 = undefined;
+            const body_return = try call_body_expr(gate, zface, &body_buf);
+            var expect_buf: [160]u8 = undefined;
+            const expect_expr = try call_body_expr(gate, zface, &expect_buf);
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `%-  {s}  {s}` — argv call body (STOA103–104 · 339).", .{ face, shape, gate, face }) catch return error.Overflow;
+            try emit_gate_fn(out, &used, face, zface, body_return, comment);
+            try emit_argv_main(out, &used, zface, expect_expr);
+        },
+        .cond_gth => {
+            // STOA331: the deciding gate speaks its answer; EXIT:0 + the spoken digit prove it.
+            var body_buf: [96]u8 = undefined;
+            const body_return = std.fmt.bufPrint(&body_buf, "if ({s} > {d}) {d} else {d}", .{ zface, spec.cond_rhs, spec.cond_then, spec.cond_else }) catch return error.Overflow;
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `?:  (gth {s} {d})  {d}  {d}` — cond argv body (STOA331).", .{ face, shape, face, spec.cond_rhs, spec.cond_then, spec.cond_else }) catch return error.Overflow;
+            try emit_gate_fn(out, &used, face, zface, body_return, comment);
+            try emit_argv_speaking_main(out, &used, zface);
+        },
+        .cond_eq => {
+            // STOA337: exact match speaks; pedestals gth cannot name.
+            var body_buf: [96]u8 = undefined;
+            const body_return = std.fmt.bufPrint(&body_buf, "if ({s} == {d}) {d} else {d}", .{ zface, spec.cond_rhs, spec.cond_then, spec.cond_else }) catch return error.Overflow;
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `?:  (eq {s} {d})  {d}  {d}` — cond argv body (STOA337).", .{ face, shape, face, spec.cond_rhs, spec.cond_then, spec.cond_else }) catch return error.Overflow;
+            try emit_gate_fn(out, &used, face, zface, body_return, comment);
+            try emit_argv_speaking_main(out, &used, zface);
+        },
+        .cond_eq_faces, .cond_gth_faces => {
+            var zb: [rb.max_face_len]u8 = undefined;
+            const bn = try zig_safe_ident(rb.face2_slice(spec), &zb);
+            const zfb = zb[0..bn];
+            const op: []const u8 = if (spec.body == .cond_eq_faces) "==" else ">";
+            var tb: [rb.max_face_len + 12]u8 = undefined;
+            var eb: [rb.max_face_len + 12]u8 = undefined;
+            const then_expr = try pair_arm_expr(spec.then_face, spec.cond_then, zface, zfb, &tb);
+            const else_expr = try pair_arm_expr(spec.else_face, spec.cond_else, zface, zfb, &eb);
+            try append_print(out, &used, "/// Lowered from Glow pair-faces cond — STOA338b.\n", .{});
+            try append_print(out, &used, "fn bartis_pair({s}: u32, {s}: u32) u32 {{\n    return if ({s} {s} {s}) {s} else {s};\n}}\n\n", .{ zface, zfb, zface, op, zfb, then_expr, else_expr });
+            try append_print(out, &used, "pub fn main(init: std.process.Init) !u8 {{\n", .{});
+            try append_print(out, &used, "    const alloc = init.arena.allocator();\n", .{});
+            try append_print(out, &used, "    const argv = try init.minimal.args.toSlice(alloc);\n", .{});
+            try append_print(out, &used, "    if (argv.len < 3) return 2;\n", .{});
+            try append_print(out, &used, "    const {s} = std.fmt.parseInt(u32, argv[1], 10) catch return 2;\n", .{zface});
+            try append_print(out, &used, "    const {s} = std.fmt.parseInt(u32, argv[2], 10) catch return 2;\n", .{zfb});
+            try append_print(out, &used, "    const expect: u32 = if ({s} {s} {s}) {s} else {s};\n", .{ zface, op, zfb, then_expr, else_expr });
+            try append_print(out, &used, "    return if (bartis_pair({s}, {s}) == expect) 0 else 1;\n", .{ zface, zfb });
+            try append_print(out, &used, "}}\n", .{});
+        },
+        .fold_sumto => {
+            // STOA332: the folding gate speaks its accumulator; EXIT:0 + spoken answer prove it.
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `|+  sumto  {s}  {d}` — fold argv body (STOA332).", .{ face, shape, face, spec.fold_bound }) catch return error.Overflow;
+            try emit_fold_sumto_gate_fn(out, &used, zface, spec.fold_bound, comment);
+            try emit_argv_speaking_main(out, &used, zface);
+        },
+        .fold_prodto => {
+            // STOA334: the product fold speaks its accumulator; the identity is 1, not 0.
+            var comment_buf: [192]u8 = undefined;
+            const comment = std.fmt.bufPrint(&comment_buf, "Lowered from Glow `|=  {s}={s}` / `|+  prodto  {s}  {d}` — fold argv body (STOA334).", .{ face, shape, face, spec.fold_bound }) catch return error.Overflow;
+            try emit_fold_prodto_gate_fn(out, &used, zface, spec.fold_bound, comment);
+            try emit_argv_speaking_main(out, &used, zface);
+        },
+        .fold_sum => return error.SampleDoesNotNest,
+        .fold_prod => return error.SampleDoesNotNest,
+    }
+    return used;
+}
+
+/// Parse a bartis source and emit a welcome-path program (baked sample 5).
+pub fn lower_source_welcome(src: []const u8, out: []u8) LowerError!u32 {
+    const spec = try rb.parse_source(src);
+    return emit(&spec, out);
+}
+
+/// Parse a bartis source and emit an argv-sample program (`@u32` or kind unit tag).
+pub fn lower_source_argv_sample(src: []const u8, out: []u8) LowerError!u32 {
+    const spec = try rb.parse_source(src);
+    return emit_argv(&spec, out);
+}

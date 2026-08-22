@@ -1,0 +1,273 @@
+//! glow/lower_core_witness.rye — proves thin `|%` core lowers to Rye.
+//!
+//!   rye build glow/lower_core_witness.rye -femit-bin=glow/bin/lower_core_witness
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const lower = @import("lower_core.rye");
+
+const witness_version = "20260718.235700";
+
+const one_src =
+    \\::  Thin core — one arm double (STOA14).
+    \\|%
+    \\++  double
+    \\--
+;
+
+const open_src =
+    \\::  Open arm body — sample face (STOA25).
+    \\|%
+    \\++  id  sample
+    \\--
+;
+
+const nest_src =
+    \\::  Open arm nest body — jam (STOA27).
+    \\|%
+    \\++  pack  (jam sample sample)
+    \\--
+;
+
+const jam_nest_src =
+    \\::  Open arm nest jam body (STOA35).
+    \\|%
+    \\++  nest  (jam (mix sample sample) sample)
+    \\--
+;
+
+const jam_right_nest_src =
+    \\::  Open arm nest jam right (STOA36).
+    \\|%
+    \\++  nest  (jam sample (mix sample sample))
+    \\--
+;
+
+const jam_both_nest_src =
+    \\::  Open arm nest jam both (STOA37).
+    \\|%
+    \\++  nest  (jam (mix sample sample) (mix sample sample))
+    \\--
+;
+
+const cue_jam_src =
+    \\::  Open arm cue-of-jam (STOA38).
+    \\|%
+    \\++  unpack  (cue (jam sample sample))
+    \\--
+;
+
+const cue_jam_nest_src =
+    \\::  Open arm cue nest jam left (STOA40).
+    \\|%
+    \\++  unpack  (cue (jam (mix sample sample) sample))
+    \\--
+;
+
+const cue_jam_right_nest_src =
+    \\::  Open arm cue nest jam right (STOA41).
+    \\|%
+    \\++  unpack  (cue (jam sample (mix sample sample)))
+    \\--
+;
+
+const cue_jam_both_nest_src =
+    \\::  Open arm cue nest jam both (STOA42).
+    \\|%
+    \\++  unpack  (cue (jam (mix sample sample) (mix sample sample)))
+    \\--
+;
+
+const two_src =
+    \\::  Two-arm core (STOA15).
+    \\|%
+    \\++  double
+    \\++  inc
+    \\--
+;
+
+const three_src =
+    \\::  Three-arm core (STOA20).
+    \\|%
+    \\++  double
+    \\++  inc
+    \\++  dec
+    \\--
+;
+
+const payload_src =
+    \\::  Core with payload (STOA17).
+    \\|%
+    \\=/  amount  5
+    \\++  double
+    \\--
+;
+
+const typed_payload_src =
+    \\::  Core with typed payload (STOA21).
+    \\|%
+    \\=/  amount=@u32  5
+    \\++  double
+    \\--
+;
+
+fn run_selftest(init: std.process.Init) !u8 {
+    const io = init.io;
+    const a = init.arena.allocator();
+    const cwd = std.Io.Dir.cwd();
+    var buf: [4096]u8 = undefined;
+
+    const n1 = try lower.lower_source_welcome(one_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n1], "Core.double(amount) == 10") != null);
+    print("core: one-arm welcome builds Core.double -- GREEN\n", .{});
+
+    const n2 = try lower.lower_source_welcome(two_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n2], "Core.double(amount) == 10 and Core.inc(amount) == 6") != null);
+    print("core: two-arm welcome builds double+inc -- GREEN\n", .{});
+
+    const n3 = try lower.lower_source_welcome(three_src, &buf);
+    const rye3 = buf[0..n3];
+    assert(std.mem.indexOf(u8, rye3, "pub fn dec(sample: u32) u32") != null);
+    assert(std.mem.indexOf(u8, rye3, "Core.double(amount) == 10 and Core.inc(amount) == 6 and Core.dec(amount) == 4") != null);
+    print("core: three-arm welcome builds double+inc+dec -- GREEN\n", .{});
+
+    const n4 = try lower.lower_source_welcome(payload_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n4], "core.double() == 10") != null);
+    print("core: payload welcome builds self.amount double -- GREEN\n", .{});
+
+    const n5 = try lower.lower_source_welcome(typed_payload_src, &buf);
+    const rye5 = buf[0..n5];
+    assert(std.mem.indexOf(u8, rye5, "Glow payload mold `@u32`") != null);
+    assert(std.mem.indexOf(u8, rye5, "amount: u32 = 5") != null);
+    assert(std.mem.indexOf(u8, rye5, "core.double() == 10") != null);
+    print("core: typed @u32 payload welcome builds self.amount -- GREEN\n", .{});
+
+    const n6 = try lower.lower_source_unwelcome(typed_payload_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n6], "core.double() == 11") != null);
+    print("core: typed payload unwelcome expects mismatch -- GREEN\n", .{});
+
+    const n7 = try lower.lower_source_unwelcome(three_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n7], "Core.dec(amount) == 5") != null);
+    print("core: three-arm unwelcome expects mismatch -- GREEN\n", .{});
+
+    if (lower.lower_source_welcome("|%\n++  mystery\n--\n", &buf)) |_| {
+        return error.UnknownArmNotCaught;
+    } else |err| {
+        if (err != lower.LowerError.UnknownArm) return err;
+    }
+    print("core: unknown arm refused UnknownArm -- GREEN\n", .{});
+
+    const n8 = try lower.lower_source_welcome(open_src, &buf);
+    const rye_open = buf[0..n8];
+    assert(std.mem.indexOf(u8, rye_open, "return sample;") != null);
+    assert(std.mem.indexOf(u8, rye_open, "Core.id(amount) == 5") != null);
+    print("core: open arm welcome builds return sample -- GREEN\n", .{});
+
+    const n9 = try lower.lower_source_unwelcome(open_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n9], "Core.id(amount) == 6") != null);
+    print("core: open arm unwelcome expects mismatch -- GREEN\n", .{});
+
+    const n_nest = try lower.lower_source_welcome(nest_src, &buf);
+    const rye_nest = buf[0..n_nest];
+    assert(std.mem.indexOf(u8, rye_nest, "return (sample << 16) | sample;") != null);
+    assert(std.mem.indexOf(u8, rye_nest, "Core.pack(amount) == 327685") != null);
+    print("core: nest jam welcome builds pack -- GREEN\n", .{});
+
+    const n_jn = try lower.lower_source_welcome(jam_nest_src, &buf);
+    const rye_jn = buf[0..n_jn];
+    assert(std.mem.indexOf(u8, rye_jn, "return ((sample ^ sample) << 16) | sample;") != null);
+    assert(std.mem.indexOf(u8, rye_jn, "Core.nest(amount) == 5") != null);
+    print("core: nest jam-of-mix welcome builds nest -- GREEN\n", .{});
+
+    const n_rn = try lower.lower_source_welcome(jam_right_nest_src, &buf);
+    const rye_rn = buf[0..n_rn];
+    assert(std.mem.indexOf(u8, rye_rn, "return (sample << 16) | (sample ^ sample);") != null);
+    assert(std.mem.indexOf(u8, rye_rn, "Core.nest(amount) == 327680") != null);
+    print("core: nest jam-right-mix welcome builds nest -- GREEN\n", .{});
+
+    const n_both = try lower.lower_source_welcome(jam_both_nest_src, &buf);
+    const rye_both = buf[0..n_both];
+    assert(std.mem.indexOf(u8, rye_both, "return ((sample ^ sample) << 16) | (sample ^ sample);") != null);
+    assert(std.mem.indexOf(u8, rye_both, "Core.nest(amount) == 0") != null);
+    print("core: nest jam-both-mix welcome builds nest -- GREEN\n", .{});
+
+    const n_cj = try lower.lower_source_welcome(cue_jam_src, &buf);
+    const rye_cj = buf[0..n_cj];
+    assert(std.mem.indexOf(u8, rye_cj, "return ((sample << 16) | sample) & 0xffff;") != null);
+    assert(std.mem.indexOf(u8, rye_cj, "Core.unpack(amount) == 5") != null);
+    print("core: cue-of-jam welcome builds unpack -- GREEN\n", .{});
+
+    const n_cjn = try lower.lower_source_welcome(cue_jam_nest_src, &buf);
+    const rye_cjn = buf[0..n_cjn];
+    assert(std.mem.indexOf(u8, rye_cjn, "return (((sample ^ sample) << 16) | sample) & 0xffff;") != null);
+    assert(std.mem.indexOf(u8, rye_cjn, "Core.unpack(amount) == 5") != null);
+    print("core: cue nest jam welcome builds unpack -- GREEN\n", .{});
+
+    const n_cjr = try lower.lower_source_welcome(cue_jam_right_nest_src, &buf);
+    const rye_cjr = buf[0..n_cjr];
+    assert(std.mem.indexOf(u8, rye_cjr, "return ((sample << 16) | (sample ^ sample)) & 0xffff;") != null);
+    assert(std.mem.indexOf(u8, rye_cjr, "Core.unpack(amount) == 0") != null);
+    print("core: cue nest jam right welcome builds unpack -- GREEN\n", .{});
+
+    const n_cjb = try lower.lower_source_welcome(cue_jam_both_nest_src, &buf);
+    const rye_cjb = buf[0..n_cjb];
+    assert(std.mem.indexOf(u8, rye_cjb, "return (((sample ^ sample) << 16) | (sample ^ sample)) & 0xffff;") != null);
+    assert(std.mem.indexOf(u8, rye_cjb, "Core.unpack(amount) == 0") != null);
+    print("core: cue nest jam both welcome builds unpack -- GREEN\n", .{});
+
+    try cwd.createDirPath(io, "glow/.cache");
+    const n10 = try lower.lower_source_welcome(typed_payload_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_payload_typed_welcome.rye", .data = buf[0..n10] });
+    const n11 = try lower.lower_source_unwelcome(typed_payload_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_payload_typed_unwelcome.rye", .data = buf[0..n11] });
+    const n12 = try lower.lower_source_welcome(three_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_three_welcome.rye", .data = buf[0..n12] });
+    const n13 = try lower.lower_source_unwelcome(three_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_three_unwelcome.rye", .data = buf[0..n13] });
+    const n14 = try lower.lower_source_welcome(payload_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_payload_welcome.rye", .data = buf[0..n14] });
+    const n15 = try lower.lower_source_welcome(two_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_two_welcome.rye", .data = buf[0..n15] });
+    const n16 = try lower.lower_source_welcome(one_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_double_welcome.rye", .data = buf[0..n16] });
+    const n17 = try lower.lower_source_welcome(open_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_open_welcome.rye", .data = buf[0..n17] });
+    const n18 = try lower.lower_source_welcome(nest_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_nest_welcome.rye", .data = buf[0..n18] });
+    const n19 = try lower.lower_source_welcome(jam_nest_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/core_jam_nest_welcome.rye", .data = buf[0..n19] });
+    print("core: wrote typed-payload three-arm open nest and battery caches -- GREEN\n", .{});
+
+    const gen_three = try cwd.readFileAlloc(io, "glow/gen/core-three.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_three, "++  dec") != null);
+    const gen_typed = try cwd.readFileAlloc(io, "glow/gen/core-payload-typed.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_typed, "=/  amount=@u32  5") != null);
+    const gen_open = try cwd.readFileAlloc(io, "glow/gen/core-open.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_open, "++  id  sample") != null);
+    const gen_nest = try cwd.readFileAlloc(io, "glow/gen/core-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_nest, "(jam sample sample)") != null);
+    const gen_jn = try cwd.readFileAlloc(io, "glow/gen/core-jam-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_jn, "(jam (mix sample sample) sample)") != null);
+    const gen_rn = try cwd.readFileAlloc(io, "glow/gen/core-jam-right-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_rn, "(jam sample (mix sample sample))") != null);
+    const gen_both = try cwd.readFileAlloc(io, "glow/gen/core-jam-both-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_both, "(jam (mix sample sample) (mix sample sample))") != null);
+    const gen_cj = try cwd.readFileAlloc(io, "glow/gen/core-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_cj, "(cue (jam sample sample))") != null);
+    const gen_cjn = try cwd.readFileAlloc(io, "glow/gen/core-cue-jam-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_cjn, "(cue (jam (mix sample sample) sample))") != null);
+    const gen_cjr = try cwd.readFileAlloc(io, "glow/gen/core-cue-jam-right-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_cjr, "(cue (jam sample (mix sample sample)))") != null);
+    const gen_cjb = try cwd.readFileAlloc(io, "glow/gen/core-cue-jam-both-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_cjb, "(cue (jam (mix sample sample) (mix sample sample)))") != null);
+    print("core: desks core-three core-payload-typed core-open core-nest core-jam-* core-cue-jam* carry batteries -- GREEN\n", .{});
+
+    print("core: version {s}\n", .{witness_version});
+    print("GREEN: `|%` thin core lowers closed arms, open and nest bodies, bare or typed @u32 payload (STOA14/15/17/20/21/25/27/35/36/37/38/40/41/42).\n", .{});
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    return run_selftest(init);
+}

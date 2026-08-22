@@ -1,0 +1,299 @@
+//! glow/rune_core_witness.rye — proves the thin `|%` core shape.
+//!
+//!   rye build glow/rune_core_witness.rye -femit-bin=glow/bin/rune_core_witness
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const rk = @import("rune_core.rye");
+const expr = @import("expr.rye");
+
+const witness_version = "20260718.235700";
+
+const one_src =
+    \\::  Thin core — one arm double (STOA14).
+    \\|%
+    \\++  double
+    \\--
+;
+
+const open_src =
+    \\::  Open arm body — sample face (STOA25).
+    \\|%
+    \\++  id  sample
+    \\--
+;
+
+const open_lit_src =
+    \\::  Open arm body — literal (STOA25).
+    \\|%
+    \\++  five  5
+    \\--
+;
+
+const nest_src =
+    \\::  Open arm nest body — jam (STOA27).
+    \\|%
+    \\++  pack  (jam sample sample)
+    \\--
+;
+
+const jam_nest_src =
+    \\::  Open arm nest jam body (STOA35).
+    \\|%
+    \\++  nest  (jam (mix sample sample) sample)
+    \\--
+;
+
+const jam_right_nest_src =
+    \\::  Open arm nest jam right (STOA36).
+    \\|%
+    \\++  nest  (jam sample (mix sample sample))
+    \\--
+;
+
+const jam_both_nest_src =
+    \\::  Open arm nest jam both (STOA37).
+    \\|%
+    \\++  nest  (jam (mix sample sample) (mix sample sample))
+    \\--
+;
+
+const cue_jam_src =
+    \\::  Open arm cue-of-jam (STOA38).
+    \\|%
+    \\++  unpack  (cue (jam sample sample))
+    \\--
+;
+
+const cue_jam_nest_src =
+    \\::  Open arm cue nest jam left (STOA40).
+    \\|%
+    \\++  unpack  (cue (jam (mix sample sample) sample))
+    \\--
+;
+
+const cue_jam_right_nest_src =
+    \\::  Open arm cue nest jam right (STOA41).
+    \\|%
+    \\++  unpack  (cue (jam sample (mix sample sample)))
+    \\--
+;
+
+const cue_jam_both_nest_src =
+    \\::  Open arm cue nest jam both (STOA42).
+    \\|%
+    \\++  unpack  (cue (jam (mix sample sample) (mix sample sample)))
+    \\--
+;
+
+const mix_src =
+    \\::  Open arm nest body — mix (STOA27).
+    \\|%
+    \\++  fold  (mix sample sample)
+    \\--
+;
+
+const two_src =
+    \\::  Two-arm core (STOA15).
+    \\|%
+    \\++  double
+    \\++  inc
+    \\--
+;
+
+const three_src =
+    \\::  Three-arm core (STOA20).
+    \\|%
+    \\++  double
+    \\++  inc
+    \\++  dec
+    \\--
+;
+
+const payload_src =
+    \\::  Core with payload (STOA17).
+    \\|%
+    \\=/  amount  5
+    \\++  double
+    \\--
+;
+
+const typed_payload_src =
+    \\::  Core with typed payload (STOA21).
+    \\|%
+    \\=/  amount=@u32  5
+    \\++  double
+    \\--
+;
+
+fn run_selftest() !u8 {
+    const one = try rk.parse_source(one_src);
+    assert(one.count == 1);
+    assert(!rk.has_payload(&one));
+    assert(std.mem.eql(u8, rk.arm_at(&one, 0), "double"));
+    print("core: one-arm double parses -- GREEN\n", .{});
+
+    const two = try rk.parse_source(two_src);
+    assert(two.count == 2);
+    assert(!rk.has_payload(&two));
+    assert(std.mem.eql(u8, rk.arm_at(&two, 0), "double"));
+    assert(std.mem.eql(u8, rk.arm_at(&two, 1), "inc"));
+    print("core: two-arm double+inc parses -- GREEN\n", .{});
+
+    const three = try rk.parse_source(three_src);
+    assert(three.count == 3);
+    assert(!rk.has_payload(&three));
+    assert(std.mem.eql(u8, rk.arm_at(&three, 0), "double"));
+    assert(std.mem.eql(u8, rk.arm_at(&three, 1), "inc"));
+    assert(std.mem.eql(u8, rk.arm_at(&three, 2), "dec"));
+    print("core: three-arm double+inc+dec parses -- GREEN\n", .{});
+
+    const pay = try rk.parse_source(payload_src);
+    assert(pay.count == 1);
+    assert(rk.has_payload(&pay));
+    assert(!pay.payload_typed);
+    assert(std.mem.eql(u8, rk.payload_face_at(&pay), "amount"));
+    assert(pay.payload_value == 5);
+    assert(std.mem.eql(u8, rk.arm_at(&pay, 0), "double"));
+    print("core: payload amount+double parses -- GREEN\n", .{});
+
+    const typed = try rk.parse_source(typed_payload_src);
+    assert(typed.count == 1);
+    assert(rk.has_payload(&typed));
+    assert(typed.payload_typed);
+    assert(std.mem.eql(u8, rk.payload_face_at(&typed), "amount"));
+    assert(typed.payload_value == 5);
+    print("core: typed @u32 payload parses -- GREEN\n", .{});
+
+    const open = try rk.parse_source(open_src);
+    assert(open.count == 1);
+    assert(rk.arm_has_body(&open, 0));
+    assert(std.mem.eql(u8, rk.arm_at(&open, 0), "id"));
+    assert(rk.arm_body_at(&open, 0).kind == .face);
+    assert(std.mem.eql(u8, expr.face_slice(rk.arm_body_at(&open, 0)), "sample"));
+    print("core: open arm id sample parses -- GREEN\n", .{});
+
+    const open_lit = try rk.parse_source(open_lit_src);
+    assert(open_lit.count == 1);
+    assert(rk.arm_has_body(&open_lit, 0));
+    assert(rk.arm_body_at(&open_lit, 0).kind == .literal);
+    assert(rk.arm_body_at(&open_lit, 0).lit == 5);
+    print("core: open arm literal parses -- GREEN\n", .{});
+
+    const nest = try rk.parse_source(nest_src);
+    assert(nest.count == 1);
+    assert(rk.arm_has_body(&nest, 0));
+    assert(rk.arm_body_at(&nest, 0).kind == .jam_of);
+    print("core: nest jam arm parses -- GREEN\n", .{});
+
+    const jam_nest = try rk.parse_source(jam_nest_src);
+    assert(jam_nest.count == 1);
+    assert(rk.arm_has_body(&jam_nest, 0));
+    assert(rk.arm_body_at(&jam_nest, 0).kind == .jam_of);
+    assert(rk.arm_body_at(&jam_nest, 0).left_arg == .mix_of);
+    print("core: nest jam-of-mix arm parses -- GREEN\n", .{});
+
+    const jam_rn = try rk.parse_source(jam_right_nest_src);
+    assert(jam_rn.count == 1);
+    assert(rk.arm_body_at(&jam_rn, 0).kind == .jam_of);
+    assert(rk.arm_body_at(&jam_rn, 0).right_arg == .mix_of);
+    print("core: nest jam-right-mix arm parses -- GREEN\n", .{});
+
+    const jam_both = try rk.parse_source(jam_both_nest_src);
+    assert(jam_both.count == 1);
+    assert(rk.arm_body_at(&jam_both, 0).kind == .jam_of);
+    assert(rk.arm_body_at(&jam_both, 0).left_arg == .mix_of);
+    assert(rk.arm_body_at(&jam_both, 0).right_arg == .mix_of);
+    print("core: nest jam-both-mix arm parses -- GREEN\n", .{});
+
+    const cue_jam = try rk.parse_source(cue_jam_src);
+    assert(cue_jam.count == 1);
+    assert(rk.arm_body_at(&cue_jam, 0).kind == .cue_of);
+    assert(expr.cue_is_jam(rk.arm_body_at(&cue_jam, 0)));
+    print("core: cue-of-jam arm parses -- GREEN\n", .{});
+
+    const cue_jam_nest = try rk.parse_source(cue_jam_nest_src);
+    assert(cue_jam_nest.count == 1);
+    assert(rk.arm_body_at(&cue_jam_nest, 0).kind == .cue_of);
+    assert(expr.cue_jam_is_nest_left(rk.arm_body_at(&cue_jam_nest, 0)));
+    print("core: cue nest jam arm parses -- GREEN\n", .{});
+
+    const cue_jam_rn = try rk.parse_source(cue_jam_right_nest_src);
+    assert(cue_jam_rn.count == 1);
+    assert(rk.arm_body_at(&cue_jam_rn, 0).kind == .cue_of);
+    assert(expr.cue_jam_is_nest_right(rk.arm_body_at(&cue_jam_rn, 0)));
+    print("core: cue nest jam right arm parses -- GREEN\n", .{});
+
+    const cue_jam_both = try rk.parse_source(cue_jam_both_nest_src);
+    assert(cue_jam_both.count == 1);
+    assert(rk.arm_body_at(&cue_jam_both, 0).kind == .cue_of);
+    assert(expr.cue_jam_is_nest_both(rk.arm_body_at(&cue_jam_both, 0)));
+    print("core: cue nest jam both arm parses -- GREEN\n", .{});
+
+    const mix = try rk.parse_source(mix_src);
+    assert(mix.count == 1);
+    assert(rk.arm_body_at(&mix, 0).kind == .mix_of);
+    print("core: nest mix arm parses -- GREEN\n", .{});
+
+    if (rk.parse_source(
+        \\|%
+        \\++  id  other
+        \\--
+    )) |_| {
+        return error.BadBodyFaceNotCaught;
+    } else |err| {
+        if (err != rk.ParseError.BadBodyFace) return err;
+    }
+    print("core: bad body face refused BadBodyFace -- GREEN\n", .{});
+
+    if (rk.parse_source(
+        \\|%
+        \\++  fold  (mix sample other)
+        \\--
+    )) |_| {
+        return error.BadNestFaceNotCaught;
+    } else |err| {
+        if (err != rk.ParseError.BadBodyFace) return err;
+    }
+    print("core: nest bad face refused BadBodyFace -- GREEN\n", .{});
+
+    if (rk.parse_source(
+        \\|%
+        \\=/  amount=@u8  5
+        \\++  double
+        \\--
+    )) |_| {
+        return error.AuraNotYetLoweredNotCaught;
+    } else |err| {
+        if (err != rk.ParseError.AuraNotYetLowered) return err;
+    }
+    print("core: @u8 payload refused AuraNotYetLowered -- GREEN\n", .{});
+
+    if (rk.parse_source(
+        \\|%
+        \\++  double
+        \\=/  amount  5
+        \\--
+    )) |_| {
+        return error.PayloadAfterArmNotCaught;
+    } else |err| {
+        if (err != rk.ParseError.PayloadAfterArm) return err;
+    }
+    print("core: payload after arm refused PayloadAfterArm -- GREEN\n", .{});
+
+    if (rk.parse_source("=/  amount  5\n=/  note  3\n")) |_| {
+        return error.NotACoreNotCaught;
+    } else |err| {
+        if (err != rk.ParseError.NotACore) return err;
+    }
+    print("core: face desk refused NotACore -- GREEN\n", .{});
+
+    print("core: version {s}\n", .{witness_version});
+    print("GREEN: `|%` thin core parses closed arms, open and nest bodies, bare or typed @u32 payload (STOA14/15/17/20/21/25/27).\n", .{});
+    return 0;
+}
+
+pub fn main(_: std.process.Init) !u8 {
+    return run_selftest();
+}

@@ -1,0 +1,34 @@
+# tools/gen/season/sundial.rish — sundial · recursion-prompt confidence 0–100.
+# NAME NOTE (`20260821.175633`). This meter is named **Plumb** -- a plumb line tells you whether a
+# thing is true, which is what this reads of a recursion prompt. It wore the word `sundial` until
+# the vocabulary pruning found two live meters under one name, told apart only by a capital
+# letter: the health face `sundial/sundial.rye` keeps **Sundial**, and this one became Plumb.
+# The FILE keeps its elder name because seven living files call it by that path, and a promise
+# kept is worth more than a tidy filename -- the same reason tools/session_logs_archive.rye kept
+# its name when its destination molted.
+#
+# Lexicon shortcut: measure how well the session recursion printout still
+# carries checkpoints from recent rounds. High green · low red.
+#   rishi/bin/rishi run tools/gen/season/sundial.rish
+#   rishi/bin/rishi run tools/sundial.rish            # accrete shim
+#   prin sundial
+
+say "sundial: Language EN — recursion confidence meter (percent · color band)."
+say "sundial: Style Radiant — GREEN after measure; refuse shred/deploy."
+say "sundial: Lens TAME — indicator only; never seats extend_or_return."
+
+let verb = ""
+if length args != 0 then let verb = args[0]
+
+let m = run ["sh" "tools/fixtures/sundial.sh" verb]
+assert m.ok else "sundial REFUSE or measure failed — see stderr"
+assert m.out contains "GREEN: sundial" else "sundial missing GREEN line"
+assert m.out contains "sundial=" else "sundial missing score"
+assert m.out contains "band=" else "sundial missing color band"
+assert m.out contains "witness:sundial GREEN" else "sundial witness missing"
+say m.out
+
+let refuse = run ["sh" "tools/fixtures/sundial.sh" "shred"]
+assert (refuse.ok == false) else "sundial refuse-walk broken: shred must exit RED"
+
+say "GREEN: sundial — confidence measured; shred refuse post-fold RED."

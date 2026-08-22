@@ -1,0 +1,62 @@
+# tools/gen/season/fascia_metric_v0.rish — fascia metric (i4–i9).
+#
+# Difficulty-style connective-tissue grade 0–100 from four clutter signals.
+# i5: Amphora manifest entry · softer weights · window mean.
+# i6: Amphora laps 1–3 folded; weights unchanged (window like-to-like).
+# i7: Class A exclude trial · window_min baseline.
+# i8: Class A HOLD disclosed · window_min kept · exclusion refuses silence.
+# i9: window carry across revisions · arc seed 100/85/92 · fall stays visible.
+# Measure only — shred / breach / deploy refuse by name.
+#
+#   rishi/bin/rishi run tools/gen/season/fascia_metric_v0.rish
+#   rishi/bin/rishi run tools/fascia_metric_v0.rish          # accrete shim
+
+
+say "fascia-metric-v0: Language EN — fascia grade from measurable clutter."
+say "fascia-metric-v0: Style Radiant -- GREEN when four signals and the window read; the meter reports its own reading and gates on nothing else."
+say "fascia-metric-v0: Lens TAME -- an instrument no more braided than the thing it measures; measure only, no live shred."
+
+let verb = ""
+if length args != 0 then let verb = args[0]
+
+# UNBRAIDED `20260821.180613`, closing REDS %112. Three Amphora laps used to run as a GATE here,
+# and this meter could not report a fascia grade unless all three passed. Lap 2 was failing on this
+# pier because `openssl` was not installed -- an ENVIRONMENTAL absence in an unrelated module -- so
+# the meter that reports the tree's connective-tissue health had been silent for an unknown span,
+# and no surface said so. (Lap 2 was itself repaired later the same day, REDS %116, by giving the
+# Amphora path this tree's own SHA3-256 instead of openssl. The unbraid stands regardless: it was
+# never right for a health meter to gate on another module's laps, and a fix to those laps does not
+# make the gate correct again.)
+#
+# An instrument must be no more braided than the thing it measures. A meter gated behind three
+# unrelated laps has three ways to go silent and no way to say which, and it will spend most of
+# its life reporting nothing. The laps are not lost: eight Amphora witnesses already prove that
+# stack (`tools/amphora_*_witness.rish`), which is where a claim about Amphora belongs.
+#
+# The meter now takes its reading directly.
+
+let metric = run ["sh" "tools/fixtures/fascia_metric_v0.sh" verb]
+assert metric.ok else "fascia-metric-v0 REFUSE or measure failed — see stderr"
+assert metric.out contains "GREEN: fascia-metric-v0" else "fascia-metric-v0 missing GREEN line"
+assert metric.out contains "metric_rev=i9" else "fascia-metric-v0 missing i9 metric_rev"
+assert metric.out contains "fascia=" else "fascia-metric-v0 missing fascia grade"
+assert metric.out contains "signal:superseded=" else "fascia-metric-v0 missing superseded signal"
+assert metric.out contains "signal:ratchet_outstanding=" else "fascia-metric-v0 missing ratchet signal"
+assert metric.out contains "signal:target_class_a=" else "fascia-metric-v0 missing target-class signal"
+assert metric.out contains "signal:class_a_held_disclosed=" else "fascia-metric-v0 missing held-disclosed count"
+assert metric.out contains "law=hold_not_exclude" else "fascia-metric-v0 missing hold law"
+assert metric.out contains "signal:over70=" else "fascia-metric-v0 missing over70 signal"
+assert metric.out contains "window_mean=" else "fascia-metric-v0 missing window_mean"
+assert metric.out contains "baseline_kind=window_min" else "fascia-metric-v0 missing window_min baseline"
+assert metric.out contains "window_carry=honored" else "fascia-metric-v0 missing window carry"
+assert metric.out contains "window_arc_fall=-15" else "fascia-metric-v0 missing arc fall"
+assert metric.out contains "delta_vs_mean=" else "fascia-metric-v0 missing delta_vs_mean"
+assert metric.out contains "weight=half" else "fascia-metric-v0 missing i5 half-weight on superseded"
+assert metric.out contains "refuse: shred" else "fascia-metric-v0 missing refuse line"
+say metric.out
+
+# Refuse-walk post-fold: shred must exit RED
+let refuse = run ["sh" "tools/fixtures/fascia_metric_v0.sh" "shred"]
+assert (refuse.ok == false) else "fascia-metric-v0 refuse-walk broken: shred must exit RED"
+
+say "GREEN: fascia-metric-v0 -- the grade above is measured and reported; window carry, hold disclosed, window_min baseline, shred refuse RED, and nothing unrelated standing between the reading and the reader."

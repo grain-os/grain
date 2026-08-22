@@ -1,0 +1,1877 @@
+//! image/photos.rye — HUNK3: the first Photos verb, a crop over the decoded grid.
+//!
+//! Season A (Hardware & Right-to-Repair) · waymark HUNK · opening journey Open Image · rung HUNK3 (quest close).
+//! Design read: active-designing/date/20260813/20260813-144218_hunk-season-a-open-image-exploration.md (the HUNK0–HUNK3 quest).
+//! Teacher, thanked clean-room: the common iCloud Photos / Google Photos crop gesture (concept only, siloed).
+//!
+//! HUNK0 decoded an image, HUNK1 gave it a content address, HUNK2 painted it. This rung gives a keeper the
+//! first thing a Photos app is *for*: a crop. A crop is a pure, bounded function over the decoded RGBA grid —
+//! it reads a rectangle of an image and returns a fresh, smaller image, leaving the source untouched. Nothing
+//! proprietary underneath: the verb stands on the open module the whole quest built, so a cropped image is
+//! still an open image that re-encodes and round-trips byte-for-byte. An out-of-bounds or empty rectangle
+//! refuses by name rather than reading past the grid. No network, no key, no funds.
+//!
+//!   env RYE_ZIG=vendor/zig-toolchain/zig rye/bin/rye run image/photos.rye selftest
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const qoi = @import("qoi.rye");
+const tally_copy = @import("tally_copy.rye");
+
+pub const photos_version = "20260813.173146";
+
+pub const PhotosError = error{
+    EmptyRect,
+    OutOfBounds,
+    EmptyImage,
+    BadContrast,
+    BadBrightness,
+    BadSaturation,
+    NotDownscale,
+    BadKernel,
+};
+
+/// A brightness delta never needs to exceed a full channel range in either direction.
+pub const adjust_brightness_max: i32 = 255;
+/// A contrast ratio's numerator and denominator ceiling — bounds the affine map so no product can wrap: the
+/// largest deviation a channel carries is 127, and 127·(1<<16) stays far inside i64.
+pub const adjust_contrast_max: u32 = 1 << 16;
+/// A saturation ratio's numerator and denominator ceiling — bounds the luma-preserving map so no product can
+/// wrap: the largest chroma a channel carries from its luma is 255, and 255·(1<<16) stays far inside i64.
+pub const saturate_max: u32 = 1 << 16;
+/// A convolution weight and divisor magnitude ceiling — bounds the 3×3 accumulation so no term can wrap in i64:
+/// the largest single term is 255·(1<<16), and nine of them plus a bias stay far inside i64.
+pub const kernel_weight_max: i32 = 1 << 16;
+
+/// Rec.601 luma weights scaled to sum exactly 256, so a gray pixel (r == g == b == v) maps to luma v with no
+/// rounding drift: 77 + 150 + 29 == 256. A right shift by 8 divides by that 256 exactly.
+const luma_r: u32 = 77;
+const luma_g: u32 = 150;
+const luma_b: u32 = 29;
+
+/// The Rec.601 luma of one RGB pixel, 0..255 — the gray a channel is pulled toward as saturation falls. Computed
+/// in u32 (max 255·256 = 65280, far inside u32) and shifted by 8 to divide by the weight sum exactly.
+fn luma_of(r: u8, g: u8, b: u8) u8 {
+    // invariant: the weights sum to exactly 256, so a gray pixel maps to its own value with no drift.
+    assert(luma_r + luma_g + luma_b == 256);
+    const sum = @as(u32, r) * luma_r + @as(u32, g) * luma_g + @as(u32, b) * luma_b;
+    // invariant: the weighted sum stays within the byte range once divided by 256.
+    assert((sum >> 8) <= 255);
+    return @intCast(sum >> 8);
+}
+
+/// Crop the rectangle at (x, y) of size (w, h) out of a decoded RGBA image, returning a fresh Pixmap. Pure:
+/// the source is never mutated. Refuses an empty rectangle (`EmptyRect`) and any rectangle that reaches past
+/// the image (`OutOfBounds`) — a crop reads only pixels the image actually holds.
+pub fn crop(
+    allocator: std.mem.Allocator,
+    pm: *const qoi.Pixmap,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
+) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (w == 0 or h == 0) return error.EmptyRect;
+    // The right and bottom edges must land within the image — checked in u64 so a large x+w cannot wrap.
+    if (@as(u64, x) + @as(u64, w) > pm.width) return error.OutOfBounds;
+    if (@as(u64, y) + @as(u64, h) > pm.height) return error.OutOfBounds;
+
+    const total = @as(u64, w) * @as(u64, h);
+    if (total > qoi.qoi_max_pixels) return error.OutOfBounds;
+    // invariant: the crop fits the codec's own pixel ceiling.
+    assert(total <= qoi.qoi_max_pixels);
+
+    const out = try allocator.alloc(u8, @as(usize, @intCast(total)) * 4);
+    // invariant: the output buffer is exactly four bytes per cropped pixel.
+    assert(out.len == @as(usize, @intCast(total)) * 4);
+
+    var row: u32 = 0;
+    while (row < h) : (row += 1) {
+        // Copy one source row's slice of the rectangle into the matching output row — bounded by w and h.
+        const src_off = (@as(usize, y + row) * @as(usize, pm.width) + @as(usize, x)) * 4;
+        const dst_off = @as(usize, row) * @as(usize, w) * 4;
+        const span = @as(usize, w) * 4;
+        tally_copy.copy_disjoint(u8, out[dst_off .. dst_off + span], pm.pixels[src_off .. src_off + span]);
+    }
+
+    return qoi.Pixmap{
+        .width = w,
+        .height = h,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Mirror an image left-to-right, returning a fresh Pixmap: pixel (x, y) moves to (w-1-x, y). Pure — the source
+/// is never mutated. Refuses a degenerate image with a zero dimension (`EmptyImage`).
+pub fn flip_h(allocator: std.mem.Allocator, pm: *const qoi.Pixmap) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+    var y: u32 = 0;
+    while (y < pm.height) : (y += 1) {
+        var x: u32 = 0;
+        while (x < pm.width) : (x += 1) {
+            const src_off = (@as(usize, y) * @as(usize, pm.width) + @as(usize, x)) * 4;
+            const dst_off = (@as(usize, y) * @as(usize, pm.width) + @as(usize, pm.width - 1 - x)) * 4;
+            tally_copy.copy_disjoint(u8, out[dst_off .. dst_off + 4], pm.pixels[src_off .. src_off + 4]);
+        }
+    }
+
+    // invariant: a mirror keeps the pixel count exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = pm.width,
+        .height = pm.height,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Mirror an image top-to-bottom, returning a fresh Pixmap: pixel (x, y) moves to (x, h-1-y). Pure. Refuses a
+/// degenerate image with a zero dimension (`EmptyImage`). Copies a whole row at a time — the row order flips,
+/// each row's own pixels stay in place.
+pub fn flip_v(allocator: std.mem.Allocator, pm: *const qoi.Pixmap) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+    const span = @as(usize, pm.width) * 4;
+    var y: u32 = 0;
+    while (y < pm.height) : (y += 1) {
+        const src_off = @as(usize, y) * span;
+        const dst_off = @as(usize, pm.height - 1 - y) * span;
+        tally_copy.copy_disjoint(u8, out[dst_off .. dst_off + span], pm.pixels[src_off .. src_off + span]);
+    }
+
+    // invariant: a mirror keeps the pixel count exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = pm.width,
+        .height = pm.height,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Rotate an image clockwise by `turns mod 4` quarter turns, returning a fresh Pixmap. A 90° or 270° turn swaps
+/// width and height; a 180° turn keeps them; a 0-turn is an identity copy. Pure — the source is never mutated.
+/// Refuses a degenerate image with a zero dimension (`EmptyImage`).
+pub fn rotate_quarter(allocator: std.mem.Allocator, pm: *const qoi.Pixmap, turns: u32) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+
+    const q = turns % 4;
+    // A quarter or three-quarter turn transposes the grid; a half or whole turn keeps its shape.
+    const swap = (q == 1 or q == 3);
+    const ow: u32 = if (swap) pm.height else pm.width;
+    const oh: u32 = if (swap) pm.width else pm.height;
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+    var y: u32 = 0;
+    while (y < pm.height) : (y += 1) {
+        var x: u32 = 0;
+        while (x < pm.width) : (x += 1) {
+            // Clockwise destination of source (x, y) in an ow×oh grid, one turn per branch.
+            var nx: u32 = x;
+            var ny: u32 = y;
+            switch (q) {
+                1 => { // 90° clockwise: (x, y) -> (h-1-y, x)
+                    nx = pm.height - 1 - y;
+                    ny = x;
+                },
+                2 => { // 180°: (x, y) -> (w-1-x, h-1-y)
+                    nx = pm.width - 1 - x;
+                    ny = pm.height - 1 - y;
+                },
+                3 => { // 270° clockwise: (x, y) -> (y, w-1-x)
+                    nx = y;
+                    ny = pm.width - 1 - x;
+                },
+                else => {}, // 0: identity
+            }
+            const src_off = (@as(usize, y) * @as(usize, pm.width) + @as(usize, x)) * 4;
+            const dst_off = (@as(usize, ny) * @as(usize, ow) + @as(usize, nx)) * 4;
+            tally_copy.copy_disjoint(u8, out[dst_off .. dst_off + 4], pm.pixels[src_off .. src_off + 4]);
+        }
+    }
+
+    // invariant: a rotation keeps the pixel count exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = ow,
+        .height = oh,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Resize an image to new_w×new_h by nearest-neighbor sampling, returning a fresh Pixmap: output pixel (nx, ny)
+/// takes the source pixel at (nx·w/new_w, ny·h/new_h). Pure — the source is never mutated. Refuses a degenerate
+/// source or target with a zero dimension (`EmptyImage`) and a target past the codec's pixel ceiling
+/// (`OutOfBounds`). An identity resize (same dimensions) recovers the source byte-for-byte.
+pub fn scale(
+    allocator: std.mem.Allocator,
+    pm: *const qoi.Pixmap,
+    new_w: u32,
+    new_h: u32,
+) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0 or new_w == 0 or new_h == 0) return error.EmptyImage;
+
+    const total = @as(u64, new_w) * @as(u64, new_h);
+    if (total > qoi.qoi_max_pixels) return error.OutOfBounds;
+    // invariant: the target fits the codec's own pixel ceiling.
+    assert(total <= qoi.qoi_max_pixels);
+
+    const out = try allocator.alloc(u8, @as(usize, @intCast(total)) * 4);
+    var ny: u32 = 0;
+    while (ny < new_h) : (ny += 1) {
+        // Source row for this output row — computed in u64 so ny·height cannot wrap; sy stays below height.
+        const sy: u32 = @intCast((@as(u64, ny) * @as(u64, pm.height)) / @as(u64, new_h));
+        var nx: u32 = 0;
+        while (nx < new_w) : (nx += 1) {
+            const sx: u32 = @intCast((@as(u64, nx) * @as(u64, pm.width)) / @as(u64, new_w));
+            const src_off = (@as(usize, sy) * @as(usize, pm.width) + @as(usize, sx)) * 4;
+            const dst_off = (@as(usize, ny) * @as(usize, new_w) + @as(usize, nx)) * 4;
+            tally_copy.copy_disjoint(u8, out[dst_off .. dst_off + 4], pm.pixels[src_off .. src_off + 4]);
+        }
+    }
+
+    // invariant: the output buffer is exactly four bytes per resized pixel.
+    assert(out.len == @as(usize, @intCast(total)) * 4);
+    return qoi.Pixmap{
+        .width = new_w,
+        .height = new_h,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Resize a decoded image DOWN to new_w×new_h by area averaging, returning a fresh Pixmap: each output pixel is
+/// the exact integer mean, over all four channels, of the source pixels its cell covers. Unlike nearest-neighbor
+/// `scale`, an area downscale reads every source pixel exactly once, so a constant image stays constant with no
+/// drift and fine detail averages rather than drops. The source column band for output column ox is
+/// [ox·w/new_w, (ox+1)·w/new_w); rows likewise — a partition that tiles the source with no gap or overlap, so
+/// every band is non-empty whenever new_w ≤ width and new_h ≤ height. Pure — the source is never mutated. An
+/// identity size recovers the source byte-for-byte. Refuses a zero dimension (`EmptyImage`) and any target larger
+/// than the source in either axis (`NotDownscale` — nearest-neighbor `scale` handles upscales).
+pub fn scale_area(
+    allocator: std.mem.Allocator,
+    pm: *const qoi.Pixmap,
+    new_w: u32,
+    new_h: u32,
+) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0 or new_w == 0 or new_h == 0) return error.EmptyImage;
+    // Area averaging is a downscale (or identity); an upscale would leave source pixels unread. Refuse it by name.
+    if (new_w > pm.width or new_h > pm.height) return error.NotDownscale;
+
+    const total = @as(u64, new_w) * @as(u64, new_h);
+    // invariant: the target never exceeds the source, so it fits the codec ceiling the source already met.
+    assert(total <= qoi.qoi_max_pixels);
+
+    const out = try allocator.alloc(u8, @as(usize, @intCast(total)) * 4);
+
+    var oy: u32 = 0;
+    while (oy < new_h) : (oy += 1) {
+        // The source row band [y0, y1) this output row averages — computed in u64 so oy·height cannot wrap.
+        const y0: u32 = @intCast((@as(u64, oy) * @as(u64, pm.height)) / @as(u64, new_h));
+        const y1: u32 = @intCast((@as(u64, oy + 1) * @as(u64, pm.height)) / @as(u64, new_h));
+        var ox: u32 = 0;
+        while (ox < new_w) : (ox += 1) {
+            const x0: u32 = @intCast((@as(u64, ox) * @as(u64, pm.width)) / @as(u64, new_w));
+            const x1: u32 = @intCast((@as(u64, ox + 1) * @as(u64, pm.width)) / @as(u64, new_w));
+            // invariant: the column band is non-empty — new_w ≤ width forces a band width of at least one.
+            assert(x1 > x0);
+            // invariant: the row band is non-empty — new_h ≤ height forces a band height of at least one.
+            assert(y1 > y0);
+            const area = (x1 - x0) * (y1 - y0);
+            // invariant: the block covers at least one pixel and never exceeds the codec's pixel ceiling.
+            assert(area >= 1);
+            // invariant: the block area stays inside the ceiling, so a channel sum stays in u32 (255·2^20 < 2^32).
+            assert(area <= qoi.qoi_max_pixels);
+
+            var sum_r: u32 = 0;
+            var sum_g: u32 = 0;
+            var sum_b: u32 = 0;
+            var sum_a: u32 = 0;
+            var sy: u32 = y0;
+            while (sy < y1) : (sy += 1) {
+                var sx: u32 = x0;
+                while (sx < x1) : (sx += 1) {
+                    const s_off = (@as(usize, sy) * @as(usize, pm.width) + @as(usize, sx)) * 4;
+                    sum_r += pm.pixels[s_off];
+                    sum_g += pm.pixels[s_off + 1];
+                    sum_b += pm.pixels[s_off + 2];
+                    sum_a += pm.pixels[s_off + 3];
+                }
+            }
+            // invariant: each channel sum is at most 255 per covered pixel, still inside u32.
+            assert(sum_r <= 255 * area);
+            // invariant: the alpha sum obeys the same per-pixel byte bound.
+            assert(sum_a <= 255 * area);
+
+            const d_off = (@as(usize, oy) * @as(usize, new_w) + @as(usize, ox)) * 4;
+            out[d_off] = @intCast(sum_r / area);
+            out[d_off + 1] = @intCast(sum_g / area);
+            out[d_off + 2] = @intCast(sum_b / area);
+            out[d_off + 3] = @intCast(sum_a / area);
+        }
+    }
+
+    // invariant: the output buffer is exactly four bytes per resized pixel.
+    assert(out.len == @as(usize, @intCast(total)) * 4);
+    return qoi.Pixmap{
+        .width = new_w,
+        .height = new_h,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Fixed-point fraction bits for bilinear resampling — a source coordinate carries 8 bits of fraction, so the
+/// four-corner weights each fit in [0, 256] and their product pair sums to exactly 256·256.
+const bilinear_frac: u6 = 8;
+/// The fixed-point unit (2^bilinear_frac) — one whole source pixel measured in fraction units.
+const bilinear_unit: i64 = 1 << bilinear_frac;
+
+/// Map an output index to its half-pixel-center source coordinate in fixed point: pos = S·((2n+1)·src − dst)/(2·dst),
+/// where S = bilinear_unit. Computed in i64 so no product wraps and an edge coordinate may go honestly negative.
+/// At an identity size (src == dst) the coordinate lands exactly on the integer pixel n with zero fraction, which is
+/// what makes a same-size bilinear resize byte-identical.
+fn bilinear_pos(n: u32, src: u32, dst: u32) i64 {
+    // invariant: the target axis is non-empty — the caller refuses a zero dimension before mapping.
+    assert(dst > 0);
+    const numer = bilinear_unit * ((2 * @as(i64, n) + 1) * @as(i64, src) - @as(i64, dst));
+    return @divFloor(numer, 2 * @as(i64, dst));
+}
+
+/// Resize an image to new_w×new_h by BILINEAR sampling, returning a fresh Pixmap: each output pixel is the weighted
+/// blend of the four source pixels around the real coordinate it lands on, per channel and alpha. Bilinear is the
+/// smooth resampler between HUNK9's nearest-neighbor `scale` (blocky up) and HUNK22's area-average `scale_area`
+/// (down only): it grows and shrinks, blending rather than dropping or repeating. The source coordinate uses the
+/// half-pixel-center map (`bilinear_pos`) in fixed point, so an identity resize recovers the source byte-for-byte,
+/// and the edge samples clamp to the nearest real pixel. The four blend weights sum to exactly bilinear_unit², so a
+/// solid color stays that exact color at any size with no drift. Each channel sum stays in u32 (255·256² < 2^32) and
+/// divides by the constant weight total with round-to-nearest — no float, no wrap. Pure — the source is never
+/// mutated. Refuses a degenerate source or target with a zero dimension (`EmptyImage`) and a target past the codec's
+/// pixel ceiling (`OutOfBounds`).
+pub fn scale_bilinear(
+    allocator: std.mem.Allocator,
+    pm: *const qoi.Pixmap,
+    new_w: u32,
+    new_h: u32,
+) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0 or new_w == 0 or new_h == 0) return error.EmptyImage;
+
+    const total = @as(u64, new_w) * @as(u64, new_h);
+    if (total > qoi.qoi_max_pixels) return error.OutOfBounds;
+    // invariant: the target fits the codec's own pixel ceiling.
+    assert(total <= qoi.qoi_max_pixels);
+
+    const unit = bilinear_unit;
+    const half = unit * unit >> 1; // round-to-nearest bias, added before the divide by unit².
+    const out = try allocator.alloc(u8, @as(usize, @intCast(total)) * 4);
+
+    var ny: u32 = 0;
+    while (ny < new_h) : (ny += 1) {
+        const py = bilinear_pos(ny, pm.height, new_h);
+        const iy = @divFloor(py, unit);
+        const fy = py - iy * unit; // fractional row weight in [0, unit)
+        // invariant: the fractional part is non-negative (floor division keeps it so even for a negative coordinate).
+        assert(fy >= 0);
+        // invariant: the fractional part is below one whole source pixel.
+        assert(fy < unit);
+        // Clamp the two source rows into the image — an edge coordinate samples the nearest real row.
+        const y0: u32 = @intCast(clamp_index(iy, pm.height));
+        const y1: u32 = @intCast(clamp_index(iy + 1, pm.height));
+
+        var nx: u32 = 0;
+        while (nx < new_w) : (nx += 1) {
+            const px = bilinear_pos(nx, pm.width, new_w);
+            const ix = @divFloor(px, unit);
+            const fx = px - ix * unit; // fractional column weight in [0, unit)
+            // invariant: the fractional part is non-negative (floor division keeps it so even for a negative coordinate).
+            assert(fx >= 0);
+            // invariant: the fractional part is below one whole source pixel.
+            assert(fx < unit);
+            const x0: u32 = @intCast(clamp_index(ix, pm.width));
+            const x1: u32 = @intCast(clamp_index(ix + 1, pm.width));
+
+            // The four corner weights sum to exactly unit²; each channel blend divides by that total.
+            const w_tl: i64 = (unit - fx) * (unit - fy);
+            const w_tr: i64 = fx * (unit - fy);
+            const w_bl: i64 = (unit - fx) * fy;
+            const w_br: i64 = fx * fy;
+            // invariant: the four bilinear weights sum to exactly one whole pixel of weight (unit²).
+            assert(w_tl + w_tr + w_bl + w_br == unit * unit);
+
+            const tl = (@as(usize, y0) * @as(usize, pm.width) + @as(usize, x0)) * 4;
+            const tr = (@as(usize, y0) * @as(usize, pm.width) + @as(usize, x1)) * 4;
+            const bl = (@as(usize, y1) * @as(usize, pm.width) + @as(usize, x0)) * 4;
+            const br = (@as(usize, y1) * @as(usize, pm.width) + @as(usize, x1)) * 4;
+            const d_off = (@as(usize, ny) * @as(usize, new_w) + @as(usize, nx)) * 4;
+
+            var c: usize = 0;
+            while (c < 4) : (c += 1) {
+                const blend = w_tl * @as(i64, pm.pixels[tl + c]) + w_tr * @as(i64, pm.pixels[tr + c]) +
+                    w_bl * @as(i64, pm.pixels[bl + c]) + w_br * @as(i64, pm.pixels[br + c]);
+                // invariant: the weighted channel sum is non-negative (weights and channel bytes are non-negative).
+                assert(blend >= 0);
+                // invariant: the weighted channel sum stays within a byte's worth of the weight total (255·unit²).
+                assert(blend <= 255 * unit * unit);
+                out[d_off + c] = @intCast(@divFloor(blend + half, unit * unit));
+            }
+        }
+    }
+
+    // invariant: the output buffer is exactly four bytes per resized pixel.
+    assert(out.len == @as(usize, @intCast(total)) * 4);
+    return qoi.Pixmap{
+        .width = new_w,
+        .height = new_h,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Clamp a possibly-off-edge source index into [0, len − 1], so a bilinear edge coordinate samples the nearest real
+/// pixel rather than reading out of bounds. len is a positive image dimension.
+fn clamp_index(i: i64, len: u32) i64 {
+    // invariant: an image dimension is never zero at a sampling call.
+    assert(len > 0);
+    if (i < 0) return 0;
+    if (i > @as(i64, len - 1)) return @as(i64, len - 1);
+    return i;
+}
+
+/// Adjust brightness and contrast over the three color channels of a decoded image, leaving alpha untouched,
+/// returning a fresh Pixmap. Each color channel takes the affine map out = (v - 128)·contrast_num/contrast_den
+/// + 128 + brightness, then clamps into 0..255 — contrast pivots around the 128 midpoint, brightness shifts the
+/// whole channel. A neutral adjust (brightness 0, contrast_num == contrast_den) recovers the source
+/// byte-for-byte. Pure — the source is never mutated. Refuses a degenerate image (`EmptyImage`), a brightness
+/// past full range (`BadBrightness`), and a zero or over-ceiling contrast term (`BadContrast`).
+pub fn adjust(
+    allocator: std.mem.Allocator,
+    pm: *const qoi.Pixmap,
+    brightness: i32,
+    contrast_num: u32,
+    contrast_den: u32,
+) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+    if (brightness < -adjust_brightness_max or brightness > adjust_brightness_max) return error.BadBrightness;
+    // The denominator must be a real divisor; both terms stay under the ceiling so the map cannot wrap in i64.
+    if (contrast_den == 0 or contrast_den > adjust_contrast_max) return error.BadContrast;
+    if (contrast_num > adjust_contrast_max) return error.BadContrast;
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+
+    const num = @as(i64, contrast_num);
+    const den = @as(i64, contrast_den);
+    const bright = @as(i64, brightness);
+
+    var i: usize = 0;
+    while (i < pm.pixels.len) : (i += 4) {
+        // The three color channels take the affine map; alpha passes through untouched.
+        var c: usize = 0;
+        while (c < 3) : (c += 1) {
+            const v = @as(i64, pm.pixels[i + c]);
+            // Computed in i64 so no product wraps; then clamped into the byte range.
+            const mapped = @divTrunc((v - 128) * num, den) + 128 + bright;
+            const clamped: i64 = if (mapped < 0) 0 else if (mapped > 255) 255 else mapped;
+            out[i + c] = @intCast(clamped);
+        }
+        out[i + 3] = pm.pixels[i + 3];
+    }
+
+    // invariant: an adjust changes no pixel count — the output length matches the source exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = pm.width,
+        .height = pm.height,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Scale each pixel's color toward or away from its own Rec.601 luma, leaving alpha untouched, returning a fresh
+/// Pixmap. Each color channel takes the luma-preserving map out = L + (c - L)·sat_num/sat_den, clamped into
+/// 0..255, where L is the pixel's gray — so sat_num == sat_den recovers the source, sat_num == 0 flattens every
+/// pixel to its own gray (a true grayscale), and sat_num > sat_den pushes colors apart. A gray pixel (r == g == b)
+/// is a fixed point at every saturation, since its chroma c - L is zero. Pure — the source is never mutated.
+/// Refuses a degenerate image (`EmptyImage`) and a zero or over-ceiling saturation term (`BadSaturation`).
+pub fn saturate(
+    allocator: std.mem.Allocator,
+    pm: *const qoi.Pixmap,
+    sat_num: u32,
+    sat_den: u32,
+) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+    // The denominator must be a real divisor; both terms stay under the ceiling so the map cannot wrap in i64.
+    if (sat_den == 0 or sat_den > saturate_max) return error.BadSaturation;
+    if (sat_num > saturate_max) return error.BadSaturation;
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+
+    const num = @as(i64, sat_num);
+    const den = @as(i64, sat_den);
+
+    var i: usize = 0;
+    while (i < pm.pixels.len) : (i += 4) {
+        const l = @as(i64, luma_of(pm.pixels[i], pm.pixels[i + 1], pm.pixels[i + 2]));
+        // The three color channels take the luma-preserving map; alpha passes through untouched.
+        var c: usize = 0;
+        while (c < 3) : (c += 1) {
+            const v = @as(i64, pm.pixels[i + c]);
+            // Computed in i64 so no product wraps; then clamped into the byte range.
+            const mapped = l + @divTrunc((v - l) * num, den);
+            const clamped: i64 = if (mapped < 0) 0 else if (mapped > 255) 255 else mapped;
+            out[i + c] = @intCast(clamped);
+        }
+        out[i + 3] = pm.pixels[i + 3];
+    }
+
+    // invariant: a saturation change keeps the pixel count exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = pm.width,
+        .height = pm.height,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Rotate every pixel's hue by exactly 120°·thirds around the color wheel, leaving alpha and the pixel count
+/// untouched, returning a fresh Pixmap. Pure: the source is never mutated. The 120° thirds are the color wheel's
+/// three exactly-integer stops — a hue turn by a third is a cyclic permutation of the three color channels, no
+/// trig and no rounding: thirds % 3 == 1 maps (r,g,b) → (b,r,g) (+120°), thirds % 3 == 2 maps (r,g,b) → (g,b,r)
+/// (+240°), and a multiple of 3 is the identity. Because it only permutes the color channels, each pixel's max and
+/// min channel are unchanged — HSV value (= max) and chroma (= max − min) are preserved exactly; only hue turns.
+/// A gray pixel (r == g == b) is a fixed point at every turn. Any thirds is valid (the modulo is total, as
+/// rotate_quarter's turns are); only a degenerate image refuses (`EmptyImage`).
+pub fn hue_turn(allocator: std.mem.Allocator, pm: *const qoi.Pixmap, thirds: u32) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+
+    const t = thirds % 3;
+    // invariant: the reduced turn names exactly one of the three exact stops on the wheel.
+    assert(t < 3);
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+
+    var i: usize = 0;
+    while (i < pm.pixels.len) : (i += 4) {
+        const r = pm.pixels[i];
+        const g = pm.pixels[i + 1];
+        const b = pm.pixels[i + 2];
+        // The channel permutation is the whole turn: a +120° step advances (r,g,b) → (b,r,g); a +240° step
+        // advances it twice, to (g,b,r). A third of 0 is the identity. Alpha never moves.
+        if (t == 1) {
+            out[i] = b;
+            out[i + 1] = r;
+            out[i + 2] = g;
+        } else if (t == 2) {
+            out[i] = g;
+            out[i + 1] = b;
+            out[i + 2] = r;
+        } else {
+            out[i] = r;
+            out[i + 1] = g;
+            out[i + 2] = b;
+        }
+        out[i + 3] = pm.pixels[i + 3];
+    }
+
+    // invariant: a hue turn keeps the pixel count exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = pm.width,
+        .height = pm.height,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Convolve a decoded image with a 3×3 kernel over the three color channels, leaving alpha untouched, returning
+/// a fresh Pixmap. Each output color channel is the kernel-weighted sum of the pixel's 3×3 neighborhood divided
+/// by `divisor`, plus `bias`, then clamped into 0..255. Edges extend: a neighbor past a border clamps to the
+/// nearest real pixel, so no read wraps and no black halo forms. The identity kernel {0,0,0,0,1,0,0,0,0} with
+/// divisor 1 and bias 0 recovers the source byte-for-byte; a box-blur kernel (all ones, divisor 9) leaves a
+/// solid color exactly unchanged. Pure — the source is never mutated. This is the primitive the filter family
+/// stands on: blur, sharpen, and any future edge verb is one kernel over it. Refuses a degenerate image
+/// (`EmptyImage`), a zero or over-ceiling divisor (`BadKernel`), and any over-ceiling weight (`BadKernel`).
+pub fn convolve(
+    allocator: std.mem.Allocator,
+    pm: *const qoi.Pixmap,
+    kernel: *const [9]i32,
+    divisor: i32,
+    bias: i32,
+) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+    // The divisor must be a real, bounded divisor — a zero divides by nothing, and an over-ceiling magnitude
+    // could let the i64 accumulation wrap.
+    if (divisor == 0 or divisor > kernel_weight_max or divisor < -kernel_weight_max) return error.BadKernel;
+    {
+        var k: usize = 0;
+        while (k < 9) : (k += 1) {
+            if (kernel[k] > kernel_weight_max or kernel[k] < -kernel_weight_max) return error.BadKernel;
+        }
+    }
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+
+    const div = @as(i64, divisor);
+    const b = @as(i64, bias);
+    const w = pm.width;
+    const h = pm.height;
+
+    var y: u32 = 0;
+    while (y < h) : (y += 1) {
+        var x: u32 = 0;
+        while (x < w) : (x += 1) {
+            const dst_off = (@as(usize, y) * @as(usize, w) + @as(usize, x)) * 4;
+            // Each color channel accumulates the 3×3 weighted sum in i64 so no term wraps; alpha passes through.
+            var c: usize = 0;
+            while (c < 3) : (c += 1) {
+                var acc: i64 = 0;
+                var ky: i64 = -1;
+                while (ky <= 1) : (ky += 1) {
+                    var kx: i64 = -1;
+                    while (kx <= 1) : (kx += 1) {
+                        const sx = clamp_index(@as(i64, x) + kx, w);
+                        const sy = clamp_index(@as(i64, y) + ky, h);
+                        const s_off = (@as(usize, @intCast(sy)) * @as(usize, w) + @as(usize, @intCast(sx))) * 4;
+                        const weight = @as(i64, kernel[@as(usize, @intCast((ky + 1) * 3 + (kx + 1)))]);
+                        acc += weight * @as(i64, pm.pixels[s_off + c]);
+                    }
+                }
+                const mapped = @divTrunc(acc, div) + b;
+                const clamped: i64 = if (mapped < 0) 0 else if (mapped > 255) 255 else mapped;
+                out[dst_off + c] = @intCast(clamped);
+            }
+            out[dst_off + 3] = pm.pixels[dst_off + 3];
+        }
+    }
+
+    // invariant: a convolution changes no pixel count — the output length matches the source exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = pm.width,
+        .height = pm.height,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// A box blur — the mean of each pixel's 3×3 neighborhood — over the color channels, alpha untouched. One kernel
+/// over `convolve`: nine weights of one, divisor nine. A solid color is a fixed point, since the mean of nine
+/// equal values is that value. Pure. Refuses only a degenerate image (`EmptyImage`).
+pub fn blur(allocator: std.mem.Allocator, pm: *const qoi.Pixmap) !qoi.Pixmap {
+    const kernel = [9]i32{ 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+    return convolve(allocator, pm, &kernel, 9, 0);
+}
+
+/// A sharpen — the classic five-neighborhood high-pass — over the color channels, alpha untouched. One kernel
+/// over `convolve`: center five, four edge neighbors minus-one, divisor one. Its weights sum to one, so a flat
+/// neighborhood maps to itself — a solid color is a fixed point, and only real local contrast is amplified.
+/// Pure. Refuses only a degenerate image (`EmptyImage`).
+pub fn sharpen(allocator: std.mem.Allocator, pm: *const qoi.Pixmap) !qoi.Pixmap {
+    const kernel = [9]i32{ 0, -1, 0, -1, 5, -1, 0, -1, 0 };
+    return convolve(allocator, pm, &kernel, 1, 0);
+}
+
+/// Auto-levels: stretch each color channel's actual value range to fill the full 0..255, alpha untouched. This is
+/// the analytical filter the levels and curves tools stand on — a first scan finds each channel's darkest and
+/// brightest value, then a second pass linearly maps that range onto the whole byte range, so the dimmest pixel
+/// lands on 0 and the brightest on 255. A channel already spanning the full range is a fixed point (it maps onto
+/// itself); a flat channel — every pixel equal, range zero — passes through untouched rather than dividing by
+/// nothing. The map is monotone, so pixel order within a channel is preserved. Pure: the source is never mutated.
+/// Refuses only a degenerate image (`EmptyImage`).
+pub fn stretch(allocator: std.mem.Allocator, pm: *const qoi.Pixmap) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+
+    // First scan: the darkest and brightest value each color channel actually holds. Alpha is not stretched.
+    var lo = [3]u8{ 255, 255, 255 };
+    var hi = [3]u8{ 0, 0, 0 };
+    {
+        var i: usize = 0;
+        while (i < pm.pixels.len) : (i += 4) {
+            var c: usize = 0;
+            while (c < 3) : (c += 1) {
+                const v = pm.pixels[i + c];
+                if (v < lo[c]) lo[c] = v;
+                if (v > hi[c]) hi[c] = v;
+            }
+        }
+    }
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+    // Second pass: map [lo, hi] onto [0, 255] per channel. A zero-range channel (lo == hi) passes through, so no
+    // divide by nothing; a full-range channel maps onto itself. The rounding half is added before truncation.
+    var i: usize = 0;
+    while (i < pm.pixels.len) : (i += 4) {
+        var c: usize = 0;
+        while (c < 3) : (c += 1) {
+            const v = pm.pixels[i + c];
+            if (hi[c] == lo[c]) {
+                out[i + c] = v;
+            } else {
+                const range = @as(u32, hi[c] - lo[c]);
+                // (v - lo)·255 ≤ 255·255 = 65025, far inside u32; +range/2 rounds to nearest.
+                const num = @as(u32, v - lo[c]) * 255 + range / 2;
+                const mapped = num / range;
+                // invariant: a monotone map of a value inside [lo, hi] lands inside the byte range.
+                assert(mapped <= 255);
+                out[i + c] = @intCast(mapped);
+            }
+        }
+        out[i + 3] = pm.pixels[i + 3];
+    }
+
+    // invariant: auto-levels changes no pixel count — the output length matches the source exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = pm.width,
+        .height = pm.height,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+/// Edge detection: the Sobel gradient magnitude over each pixel's luma, returned as a grayscale image where a
+/// bright pixel marks a strong local change and a flat region is black. Two 3×3 gradient kernels — one horizontal
+/// (`gx`), one vertical (`gy`) — read the 3×3 luma neighborhood; the magnitude is the L1 sum `|gx| + |gy|`,
+/// clamped into 0..255, so no square root and no float is needed and the arithmetic stays exact. A solid color
+/// (or any flat neighborhood) has zero gradient — a fixed point at black. Edges are extended by clamping so no
+/// read wraps. Alpha is set opaque on the edge map, since an edge image is a fresh grayscale view, not the source.
+/// Pure. Refuses only a degenerate image (`EmptyImage`).
+pub fn edges(allocator: std.mem.Allocator, pm: *const qoi.Pixmap) !qoi.Pixmap {
+    // invariant: the source buffer is exactly four bytes per pixel.
+    assert(pm.pixels.len == @as(usize, pm.width) * @as(usize, pm.height) * 4);
+    if (pm.width == 0 or pm.height == 0) return error.EmptyImage;
+
+    const gx = [9]i32{ -1, 0, 1, -2, 0, 2, -1, 0, 1 };
+    const gy = [9]i32{ -1, -2, -1, 0, 0, 0, 1, 2, 1 };
+
+    const out = try allocator.alloc(u8, pm.pixels.len);
+    const w = pm.width;
+    const h = pm.height;
+
+    var y: u32 = 0;
+    while (y < h) : (y += 1) {
+        var x: u32 = 0;
+        while (x < w) : (x += 1) {
+            // Accumulate each directional gradient over the 3×3 luma neighborhood. The largest term is 4·255 = 1020
+            // per direction, so both sums and their absolute magnitudes stay far inside i32.
+            var sx: i32 = 0;
+            var sy: i32 = 0;
+            var ky: i64 = -1;
+            while (ky <= 1) : (ky += 1) {
+                var kx: i64 = -1;
+                while (kx <= 1) : (kx += 1) {
+                    const px = clamp_index(@as(i64, x) + kx, w);
+                    const py = clamp_index(@as(i64, y) + ky, h);
+                    const s_off = (@as(usize, @intCast(py)) * @as(usize, w) + @as(usize, @intCast(px))) * 4;
+                    const lum = @as(i32, luma_of(pm.pixels[s_off], pm.pixels[s_off + 1], pm.pixels[s_off + 2]));
+                    const k = @as(usize, @intCast((ky + 1) * 3 + (kx + 1)));
+                    sx += gx[k] * lum;
+                    sy += gy[k] * lum;
+                }
+            }
+            const mag_x: i32 = if (sx < 0) -sx else sx;
+            const mag_y: i32 = if (sy < 0) -sy else sy;
+            const mag: i32 = mag_x + mag_y;
+            const clamped: i32 = if (mag > 255) 255 else mag;
+            const dst_off = (@as(usize, y) * @as(usize, w) + @as(usize, x)) * 4;
+            const g: u8 = @intCast(clamped);
+            // A grayscale edge view: the same magnitude on every color channel, alpha opaque.
+            out[dst_off] = g;
+            out[dst_off + 1] = g;
+            out[dst_off + 2] = g;
+            out[dst_off + 3] = 255;
+        }
+    }
+
+    // invariant: edge detection changes no pixel count — the output length matches the source exactly.
+    assert(out.len == pm.pixels.len);
+    return qoi.Pixmap{
+        .width = pm.width,
+        .height = pm.height,
+        .channels = pm.channels,
+        .colorspace = pm.colorspace,
+        .pixels = out,
+    };
+}
+
+// --- selftest: crop a position-tagged image, prove every cropped pixel is its source pixel, prove purity and
+//     the open round-trip, and prove the named refusals ------------------------------------------------------
+
+/// Build a 6×6 image where each pixel encodes its own coordinates, so a crop's correctness is unambiguous:
+/// pixel (x,y) = (x·40, y·40, x+y, 255).
+fn craft_tagged(allocator: std.mem.Allocator) !qoi.Pixmap {
+    const w: u32 = 6;
+    const h: u32 = 6;
+    const buf = try allocator.alloc(u8, w * h * 4);
+    var y: u32 = 0;
+    while (y < h) : (y += 1) {
+        var x: u32 = 0;
+        while (x < w) : (x += 1) {
+            const off = (@as(usize, y) * @as(usize, w) + @as(usize, x)) * 4;
+            buf[off] = @intCast(x * 40);
+            buf[off + 1] = @intCast(y * 40);
+            buf[off + 2] = @intCast(x + y);
+            buf[off + 3] = 255;
+        }
+    }
+    return qoi.Pixmap{ .width = w, .height = h, .channels = 4, .colorspace = 0, .pixels = buf };
+}
+
+/// Build a non-square w×h image where each pixel encodes its own coordinates, so orientation proofs are
+/// unambiguous and a width/height swap is visible: pixel (x,y) = (x·30, y·30, x·7+y, 255).
+fn craft_tagged_wh(allocator: std.mem.Allocator, w: u32, h: u32) !qoi.Pixmap {
+    const buf = try allocator.alloc(u8, @as(usize, w) * @as(usize, h) * 4);
+    var y: u32 = 0;
+    while (y < h) : (y += 1) {
+        var x: u32 = 0;
+        while (x < w) : (x += 1) {
+            const off = (@as(usize, y) * @as(usize, w) + @as(usize, x)) * 4;
+            buf[off] = @intCast(x * 30);
+            buf[off + 1] = @intCast(y * 30);
+            buf[off + 2] = @intCast(x * 7 + y);
+            buf[off + 3] = 255;
+        }
+    }
+    return qoi.Pixmap{ .width = w, .height = h, .channels = 4, .colorspace = 0, .pixels = buf };
+}
+
+/// Prove the orient verbs (flip_h, flip_v, rotate_quarter) by the algebra they must obey, so any index bug is
+/// caught regardless of the exact arithmetic. Returns the rotated image's dimensions for the GREEN line.
+fn run_orient(garden: std.mem.Allocator) !struct { rw: u32, rh: u32 } {
+    const w: u32 = 3;
+    const h: u32 = 5;
+    const pm = try craft_tagged_wh(garden, w, h);
+
+    // Each mirror is its own inverse: two flips recover the source byte-for-byte.
+    const h1 = try flip_h(garden, &pm);
+    const hh = try flip_h(garden, &h1);
+    assert(hh.same_bytes(&pm));
+    const v1 = try flip_v(garden, &pm);
+    const vv = try flip_v(garden, &v1);
+    assert(vv.same_bytes(&pm));
+
+    // A quarter turn, composed four times, is a full turn: identity, byte-for-byte.
+    const r1 = try rotate_quarter(garden, &pm, 1);
+    const r2 = try rotate_quarter(garden, &r1, 1);
+    const r3 = try rotate_quarter(garden, &r2, 1);
+    const r4 = try rotate_quarter(garden, &r3, 1);
+    assert(r4.same_bytes(&pm));
+
+    // A half turn equals both mirrors: rotate_quarter(2) == flip_h(flip_v(pm)).
+    const half = try rotate_quarter(garden, &pm, 2);
+    const fv = try flip_v(garden, &pm);
+    const both = try flip_h(garden, &fv);
+    assert(half.same_bytes(&both));
+
+    // rotate_quarter(k) equals a single quarter turn composed k times — the turns arg is honest.
+    assert(rotate_eq(garden, &pm, 2, &r2));
+    assert(rotate_eq(garden, &pm, 3, &r3));
+
+    // A 90° turn swaps the dimensions — never a no-op or a bare transpose masquerade.
+    assert(r1.width == h);
+    assert(r1.height == w);
+    assert(half.width == w);
+    assert(half.height == h);
+
+    // Concrete clockwise witness: the source top-left pixel (0,0) lands at the output top-right (w'-1, 0).
+    const tr_off = (@as(usize, 0) * @as(usize, r1.width) + @as(usize, r1.width - 1)) * 4;
+    assert(r1.pixels[tr_off] == pm.pixels[0]);
+    assert(r1.pixels[tr_off + 1] == pm.pixels[1]);
+    assert(r1.pixels[tr_off + 2] == pm.pixels[2]);
+
+    // Pure: the source is untouched — its first pixel is exactly as crafted.
+    assert(pm.pixels[0] == 0);
+    assert(pm.pixels[3] == 255);
+
+    // Still an OPEN image: a rotated image re-encodes and round-trips through the codec byte-for-byte.
+    const cap = qoi.encoded_bound(r1.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&r1, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&r1));
+
+    // Unwelcome: a degenerate zero-dimension image refuses by name for every verb.
+    const empty = qoi.Pixmap{ .width = 0, .height = 0, .channels = 4, .colorspace = 0, .pixels = &[_]u8{} };
+    if (flip_h(garden, &empty)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+    if (flip_v(garden, &empty)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+    if (rotate_quarter(garden, &empty, 1)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+
+    return .{ .rw = r1.width, .rh = r1.height };
+}
+
+/// True when rotate_quarter(pm, turns) equals `want` byte-for-byte — used to prove the turns arg composes.
+fn rotate_eq(garden: std.mem.Allocator, pm: *const qoi.Pixmap, turns: u32, want: *const qoi.Pixmap) bool {
+    const got = rotate_quarter(garden, pm, turns) catch return false;
+    return got.same_bytes(want);
+}
+
+/// Prove the scale verb: an identity resize recovers the source byte-for-byte, a 2x nearest upscale samples
+/// each output pixel from src(nx/2, ny/2), a downscale to 1x1 picks the top-left pixel, the source stays pure,
+/// a scaled image is still open, and a zero target and an over-ceiling target each refuse by name. Returns the
+/// upscaled image's dimensions for the GREEN line.
+fn run_scale(garden: std.mem.Allocator) !struct { uw: u32, uh: u32 } {
+    const w: u32 = 3;
+    const h: u32 = 4;
+    const pm = try craft_tagged_wh(garden, w, h);
+
+    // Identity resize recovers the source byte-for-byte.
+    const same = try scale(garden, &pm, w, h);
+    assert(same.same_bytes(&pm));
+
+    // A 2x nearest upscale: every output pixel equals src(nx/2, ny/2).
+    const up = try scale(garden, &pm, w * 2, h * 2);
+    assert(up.width == w * 2);
+    assert(up.height == h * 2);
+    {
+        var ny: u32 = 0;
+        while (ny < up.height) : (ny += 1) {
+            var nx: u32 = 0;
+            while (nx < up.width) : (nx += 1) {
+                const u_off = (@as(usize, ny) * @as(usize, up.width) + @as(usize, nx)) * 4;
+                const s_off = (@as(usize, ny / 2) * @as(usize, w) + @as(usize, nx / 2)) * 4;
+                assert(up.pixels[u_off] == pm.pixels[s_off]);
+                assert(up.pixels[u_off + 1] == pm.pixels[s_off + 1]);
+                assert(up.pixels[u_off + 2] == pm.pixels[s_off + 2]);
+                assert(up.pixels[u_off + 3] == pm.pixels[s_off + 3]);
+            }
+        }
+    }
+
+    // A downscale to 1x1 picks the top-left source pixel (sx=sy=0).
+    const one = try scale(garden, &pm, 1, 1);
+    assert(one.width == 1);
+    assert(one.height == 1);
+    assert(one.pixels[0] == pm.pixels[0]);
+    assert(one.pixels[3] == pm.pixels[3]);
+
+    // Pure: the source is untouched.
+    assert(pm.pixels[0] == 0);
+    assert(pm.pixels[3] == 255);
+
+    // Still an OPEN image: an upscaled image re-encodes and round-trips through the codec byte-for-byte.
+    const cap = qoi.encoded_bound(up.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&up, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&up));
+
+    // Unwelcome: a zero-dimension target refuses EmptyImage.
+    if (scale(garden, &pm, 4, 0)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+    // Unwelcome: a target past the codec's pixel ceiling refuses OutOfBounds (1<<11 · 1<<10 = 1<<21 > 1<<20).
+    if (scale(garden, &pm, 1 << 11, 1 << 10)) |_| return error.BoundsSlipped else |e| {
+        if (e != error.OutOfBounds) return error.WrongBounds;
+    }
+
+    return .{ .uw = up.width, .uh = up.height };
+}
+
+/// Prove the area downscale by the algebra it must obey: an identity size recovers the source byte-for-byte, a
+/// solid-color image stays that exact color at any smaller size (the box-filter invariant, no drift), a 2×2 image
+/// downscales to 1×1 as the exact integer mean of its four pixels over all four channels, alpha means alongside
+/// the colors, the source stays pure, a downscaled image is still open, and an upscale and a zero dimension each
+/// refuse by name. Returns the mean pixel's red for the GREEN line.
+fn run_scale_area(garden: std.mem.Allocator) !struct { mean_r: u8 } {
+    // A 2×2 image with four known colors so the 1×1 mean is unambiguous, every channel varied including alpha.
+    const buf = try garden.alloc(u8, 2 * 2 * 4);
+    const cols = [_][4]u8{
+        .{ 10, 20, 30, 40 }, //   top-left
+        .{ 20, 40, 60, 80 }, //   top-right
+        .{ 40, 60, 80, 100 }, //  bottom-left
+        .{ 60, 80, 100, 120 }, // bottom-right
+    };
+    var i: u32 = 0;
+    while (i < 4) : (i += 1) {
+        buf[i * 4] = cols[i][0];
+        buf[i * 4 + 1] = cols[i][1];
+        buf[i * 4 + 2] = cols[i][2];
+        buf[i * 4 + 3] = cols[i][3];
+    }
+    const pm = qoi.Pixmap{ .width = 2, .height = 2, .channels = 4, .colorspace = 0, .pixels = buf };
+
+    // Identity size recovers the source byte-for-byte (every cell is one pixel, its own mean).
+    const same = try scale_area(garden, &pm, 2, 2);
+    assert(same.same_bytes(&pm));
+
+    // A 2×2 downscales to 1×1 as the exact integer mean of all four pixels, per channel and alpha:
+    //   r = (10+20+40+60)/4 = 32, g = (20+40+60+80)/4 = 50, b = (30+60+80+100)/4 = 67, a = (40+80+100+120)/4 = 85.
+    const one = try scale_area(garden, &pm, 1, 1);
+    assert(one.width == 1);
+    assert(one.height == 1);
+    assert(one.pixels[0] == 32);
+    assert(one.pixels[1] == 50);
+    assert(one.pixels[2] == 67);
+    assert(one.pixels[3] == 85);
+
+    // Constant stays constant: a solid-color image downscales to the SAME color at any smaller size, no drift.
+    {
+        const sw: u32 = 6;
+        const sh: u32 = 4;
+        const solid = try garden.alloc(u8, @as(usize, sw) * @as(usize, sh) * 4);
+        var p: u32 = 0;
+        while (p < sw * sh) : (p += 1) {
+            solid[p * 4] = 77;
+            solid[p * 4 + 1] = 88;
+            solid[p * 4 + 2] = 99;
+            solid[p * 4 + 3] = 111;
+        }
+        const flat = qoi.Pixmap{ .width = sw, .height = sh, .channels = 4, .colorspace = 0, .pixels = solid };
+        const small = try scale_area(garden, &flat, 2, 3);
+        assert(small.width == 2);
+        assert(small.height == 3);
+        var q: u32 = 0;
+        while (q < small.width * small.height) : (q += 1) {
+            assert(small.pixels[q * 4] == 77);
+            assert(small.pixels[q * 4 + 1] == 88);
+            assert(small.pixels[q * 4 + 2] == 99);
+            assert(small.pixels[q * 4 + 3] == 111);
+        }
+    }
+
+    // Pure: the source is untouched.
+    assert(pm.pixels[0] == 10);
+    assert(pm.pixels[15] == 120);
+
+    // Still an OPEN image: a downscaled image re-encodes and round-trips through the codec byte-for-byte.
+    const cap = qoi.encoded_bound(one.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&one, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&one));
+
+    // Unwelcome: an upscale in either axis refuses NotDownscale — nearest `scale` handles upscales.
+    if (scale_area(garden, &pm, 3, 2)) |_| return error.UpscaleSlipped else |e| {
+        if (e != error.NotDownscale) return error.WrongUpscale;
+    }
+    // Unwelcome: a zero-dimension target refuses EmptyImage.
+    if (scale_area(garden, &pm, 1, 0)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+
+    return .{ .mean_r = one.pixels[0] };
+}
+
+/// Prove the bilinear resampler by the algebra it must obey: an identity size recovers the source byte-for-byte, a
+/// solid color stays that exact color at any size (no drift, up or down), a 2×1 [A,B] upscaled to 3 wide blends to
+/// [A, (A+B)/2, B] (the outer pixels clamp to source, the center reads the exact average), alpha blends alongside
+/// the colors, the source stays pure, a resized image is still open, and a zero dimension and an over-ceiling target
+/// each refuse by name. Returns the upscaled dimensions for the GREEN line.
+fn run_bilinear(garden: std.mem.Allocator) !struct { uw: u32, uh: u32 } {
+    const w: u32 = 3;
+    const h: u32 = 4;
+    const pm = try craft_tagged_wh(garden, w, h);
+
+    // Identity size recovers the source byte-for-byte (the half-pixel map lands on integer pixels, zero fraction).
+    const same = try scale_bilinear(garden, &pm, w, h);
+    assert(same.same_bytes(&pm));
+
+    // A clean midpoint blend: a 2×1 [A, B] upscaled across to 3 wide gives [A, (A+B)/2, B]. Red A=0, B=100 → 50.
+    {
+        const two = try garden.alloc(u8, 2 * 1 * 4);
+        two[0] = 0;
+        two[1] = 10;
+        two[2] = 20;
+        two[3] = 200;
+        two[4] = 100;
+        two[5] = 30;
+        two[6] = 60;
+        two[7] = 40;
+        const line = qoi.Pixmap{ .width = 2, .height = 1, .channels = 4, .colorspace = 0, .pixels = two };
+        const wide = try scale_bilinear(garden, &line, 3, 1);
+        assert(wide.width == 3);
+        assert(wide.height == 1);
+        // The outer output pixels clamp to the exact source pixels — every channel, alpha included.
+        assert(wide.pixels[0] == 0);
+        assert(wide.pixels[1] == 10);
+        assert(wide.pixels[2] == 20);
+        assert(wide.pixels[3] == 200);
+        assert(wide.pixels[8] == 100);
+        assert(wide.pixels[9] == 30);
+        assert(wide.pixels[10] == 60);
+        assert(wide.pixels[11] == 40);
+        // The center pixel is the exact average of the two source pixels, per channel and alpha.
+        assert(wide.pixels[4] == 50); //  (0+100)/2
+        assert(wide.pixels[5] == 20); //  (10+30)/2
+        assert(wide.pixels[6] == 40); //  (20+60)/2
+        assert(wide.pixels[7] == 120); // (200+40)/2 — alpha blends alongside the colors.
+    }
+
+    // Constant stays constant: a solid-color image resizes to the SAME color at any size, up or down, no drift.
+    {
+        const sw: u32 = 5;
+        const sh: u32 = 3;
+        const solid = try garden.alloc(u8, @as(usize, sw) * @as(usize, sh) * 4);
+        var p: u32 = 0;
+        while (p < sw * sh) : (p += 1) {
+            solid[p * 4] = 33;
+            solid[p * 4 + 1] = 66;
+            solid[p * 4 + 2] = 99;
+            solid[p * 4 + 3] = 222;
+        }
+        const flat = qoi.Pixmap{ .width = sw, .height = sh, .channels = 4, .colorspace = 0, .pixels = solid };
+        // Grow it and shrink it — both stay the exact color.
+        const big = try scale_bilinear(garden, &flat, 8, 7);
+        const small = try scale_bilinear(garden, &flat, 2, 2);
+        var q: u32 = 0;
+        while (q < big.width * big.height) : (q += 1) {
+            assert(big.pixels[q * 4] == 33);
+            assert(big.pixels[q * 4 + 1] == 66);
+            assert(big.pixels[q * 4 + 2] == 99);
+            assert(big.pixels[q * 4 + 3] == 222);
+        }
+        q = 0;
+        while (q < small.width * small.height) : (q += 1) {
+            assert(small.pixels[q * 4] == 33);
+            assert(small.pixels[q * 4 + 1] == 66);
+            assert(small.pixels[q * 4 + 2] == 99);
+            assert(small.pixels[q * 4 + 3] == 222);
+        }
+    }
+
+    // A 2x upscale of the tagged image, kept for the round-trip and the GREEN dimensions.
+    const up = try scale_bilinear(garden, &pm, w * 2, h * 2);
+    assert(up.width == w * 2);
+    assert(up.height == h * 2);
+
+    // Pure: the source is untouched.
+    assert(pm.pixels[0] == 0);
+    assert(pm.pixels[3] == 255);
+
+    // Still an OPEN image: a bilinearly-resized image re-encodes and round-trips through the codec byte-for-byte.
+    const cap = qoi.encoded_bound(up.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&up, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&up));
+
+    // Unwelcome: a zero-dimension target refuses EmptyImage.
+    if (scale_bilinear(garden, &pm, 0, 4)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+    // Unwelcome: a target past the codec's pixel ceiling refuses OutOfBounds (1<<11 · 1<<10 = 1<<21 > 1<<20).
+    if (scale_bilinear(garden, &pm, 1 << 11, 1 << 10)) |_| return error.BoundsSlipped else |e| {
+        if (e != error.OutOfBounds) return error.WrongBounds;
+    }
+
+    return .{ .uw = up.width, .uh = up.height };
+}
+
+/// Prove the adjust verb by the exact arithmetic it must obey: a neutral adjust recovers the source, a
+/// brightness lift and cut shift and clamp each color channel, a contrast push pivots around 128, a zero
+/// contrast flattens to the midpoint, alpha always passes through, the source stays pure, an adjusted image is
+/// still open, and the named refusals hold. Returns the strip's dimensions for the GREEN line.
+fn run_adjust(garden: std.mem.Allocator) !struct { w: u32, h: u32 } {
+    // A 4x1 strip with known gray levels so the affine map is unambiguous, alpha varied to prove pass-through.
+    const w: u32 = 4;
+    const h: u32 = 1;
+    const buf = try garden.alloc(u8, w * h * 4);
+    const grays = [_]u8{ 0, 100, 200, 255 };
+    const alphas = [_]u8{ 255, 200, 128, 0 };
+    var i: u32 = 0;
+    while (i < w) : (i += 1) {
+        buf[i * 4] = grays[i];
+        buf[i * 4 + 1] = grays[i];
+        buf[i * 4 + 2] = grays[i];
+        buf[i * 4 + 3] = alphas[i];
+    }
+    const pm = qoi.Pixmap{ .width = w, .height = h, .channels = 4, .colorspace = 0, .pixels = buf };
+
+    // A neutral adjust (brightness 0, contrast 1/1) recovers the source byte-for-byte.
+    const neutral = try adjust(garden, &pm, 0, 1, 1);
+    assert(neutral.same_bytes(&pm));
+
+    // A brightness lift of +40 with neutral contrast adds 40 to each color channel and clamps at 255.
+    const lit = try adjust(garden, &pm, 40, 1, 1);
+    assert(lit.pixels[0] == 40); //   0 -> 40
+    assert(lit.pixels[4] == 140); // 100 -> 140
+    assert(lit.pixels[8] == 240); // 200 -> 240
+    assert(lit.pixels[12] == 255); // 255 -> clamp 255
+    // Alpha passes through untouched across the whole strip.
+    assert(lit.pixels[3] == 255);
+    assert(lit.pixels[7] == 200);
+    assert(lit.pixels[11] == 128);
+    assert(lit.pixels[15] == 0);
+
+    // A brightness cut of -40 subtracts and clamps at 0.
+    const dim = try adjust(garden, &pm, -40, 1, 1);
+    assert(dim.pixels[0] == 0); //   0 -> clamp 0
+    assert(dim.pixels[4] == 60); // 100 -> 60
+
+    // A contrast of 2/1 pushes each channel away from the 128 midpoint: out = clamp((v-128)*2 + 128).
+    const punch = try adjust(garden, &pm, 0, 2, 1);
+    assert(punch.pixels[0] == 0); //   (0-128)*2+128 = -128 -> clamp 0
+    assert(punch.pixels[4] == 72); // (100-128)*2+128 = 72
+    assert(punch.pixels[8] == 255); // (200-128)*2+128 = 272 -> clamp 255
+
+    // A contrast of 0/1 flattens every color channel to the midpoint 128 — a legal extreme.
+    const flat = try adjust(garden, &pm, 0, 0, 1);
+    assert(flat.pixels[0] == 128);
+    assert(flat.pixels[4] == 128);
+    assert(flat.pixels[8] == 128);
+
+    // Pure: the source is untouched.
+    assert(pm.pixels[0] == 0);
+    assert(pm.pixels[4] == 100);
+    assert(pm.pixels[12] == 255);
+
+    // Still an OPEN image: an adjusted image re-encodes and round-trips through the codec byte-for-byte.
+    const cap = qoi.encoded_bound(lit.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&lit, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&lit));
+
+    // Unwelcome: a zero contrast denominator refuses BadContrast.
+    if (adjust(garden, &pm, 0, 1, 0)) |_| return error.ContrastSlipped else |e| {
+        if (e != error.BadContrast) return error.WrongContrast;
+    }
+    // Unwelcome: a brightness past full range refuses BadBrightness.
+    if (adjust(garden, &pm, 300, 1, 1)) |_| return error.BrightnessSlipped else |e| {
+        if (e != error.BadBrightness) return error.WrongBrightness;
+    }
+    // Unwelcome: a degenerate zero-dimension image refuses EmptyImage.
+    const empty = qoi.Pixmap{ .width = 0, .height = 0, .channels = 4, .colorspace = 0, .pixels = &[_]u8{} };
+    if (adjust(garden, &empty, 0, 1, 1)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+
+    return .{ .w = w, .h = h };
+}
+
+/// Prove the saturate verb by the algebra it must obey: a neutral saturation recovers the source byte-for-byte,
+/// a zero saturation flattens every pixel to its own Rec.601 luma (a true grayscale with r == g == b), a gray
+/// pixel is a fixed point at any saturation, a boost pushes a color away from its luma, alpha passes through, the
+/// source stays pure, a saturated image is still open, and the named refusals hold. Returns the strip's
+/// dimensions for the GREEN line.
+fn run_saturate(garden: std.mem.Allocator) !struct { w: u32, h: u32 } {
+    // A 4x1 strip: three saturated colors and one already-gray pixel, alpha varied to prove pass-through.
+    const w: u32 = 4;
+    const h: u32 = 1;
+    const buf = try garden.alloc(u8, w * h * 4);
+    const cols = [_][4]u8{
+        .{ 200, 50, 50, 255 }, //  a warm red
+        .{ 40, 180, 90, 200 }, //  a green
+        .{ 60, 90, 220, 128 }, //  a blue
+        .{ 130, 130, 130, 0 }, //  already gray — a fixed point
+    };
+    var i: u32 = 0;
+    while (i < w) : (i += 1) {
+        buf[i * 4] = cols[i][0];
+        buf[i * 4 + 1] = cols[i][1];
+        buf[i * 4 + 2] = cols[i][2];
+        buf[i * 4 + 3] = cols[i][3];
+    }
+    const pm = qoi.Pixmap{ .width = w, .height = h, .channels = 4, .colorspace = 0, .pixels = buf };
+
+    // A neutral saturation (num == den) recovers the source byte-for-byte.
+    const neutral = try saturate(garden, &pm, 1, 1);
+    assert(neutral.same_bytes(&pm));
+
+    // A zero saturation flattens every pixel to its own luma: r == g == b == luma_of(source), alpha untouched.
+    const gray = try saturate(garden, &pm, 0, 1);
+    {
+        var p: u32 = 0;
+        while (p < w) : (p += 1) {
+            const off = @as(usize, p) * 4;
+            const l = luma_of(pm.pixels[off], pm.pixels[off + 1], pm.pixels[off + 2]);
+            assert(gray.pixels[off] == l);
+            assert(gray.pixels[off + 1] == l);
+            assert(gray.pixels[off + 2] == l);
+            assert(gray.pixels[off + 3] == pm.pixels[off + 3]);
+        }
+    }
+
+    // The already-gray pixel (index 3, r == g == b == 130) is a fixed point at every saturation, boost included.
+    const boost = try saturate(garden, &pm, 2, 1);
+    assert(boost.pixels[12] == 130);
+    assert(boost.pixels[13] == 130);
+    assert(boost.pixels[14] == 130);
+    assert(gray.pixels[12] == 130);
+    assert(gray.pixels[13] == 130);
+    assert(gray.pixels[14] == 130);
+
+    // A boost pushes a color channel away from its luma: the red pixel's dominant red rises above its own value
+    // (or clamps at 255) while its weaker green falls further below the luma — chroma widens, never narrows.
+    {
+        const l0 = @as(i32, luma_of(pm.pixels[0], pm.pixels[1], pm.pixels[2]));
+        // Red (200) sits above the luma, so a 2x boost lifts it toward 255; green (50) sits below and falls.
+        assert(@as(i32, boost.pixels[0]) >= @as(i32, pm.pixels[0]));
+        assert(@as(i32, boost.pixels[1]) <= @as(i32, pm.pixels[1]));
+        // The boosted red stays on the far side of the luma from where its chroma pointed.
+        assert(@as(i32, boost.pixels[0]) >= l0);
+        assert(@as(i32, boost.pixels[1]) <= l0);
+    }
+
+    // Alpha passes through untouched across the whole strip for both the gray flatten and the boost.
+    assert(gray.pixels[3] == 255);
+    assert(gray.pixels[7] == 200);
+    assert(gray.pixels[11] == 128);
+    assert(gray.pixels[15] == 0);
+    assert(boost.pixels[3] == 255);
+    assert(boost.pixels[15] == 0);
+
+    // Pure: the source is untouched.
+    assert(pm.pixels[0] == 200);
+    assert(pm.pixels[12] == 130);
+    assert(pm.pixels[15] == 0);
+
+    // Still an OPEN image: a saturated image re-encodes and round-trips through the codec byte-for-byte.
+    const cap = qoi.encoded_bound(gray.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&gray, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&gray));
+
+    // Unwelcome: a zero saturation denominator refuses BadSaturation.
+    if (saturate(garden, &pm, 1, 0)) |_| return error.SaturationSlipped else |e| {
+        if (e != error.BadSaturation) return error.WrongSaturation;
+    }
+    // Unwelcome: an over-ceiling saturation numerator refuses BadSaturation.
+    if (saturate(garden, &pm, saturate_max + 1, 1)) |_| return error.SaturationSlipped else |e| {
+        if (e != error.BadSaturation) return error.WrongSaturation;
+    }
+    // Unwelcome: a degenerate zero-dimension image refuses EmptyImage.
+    const empty = qoi.Pixmap{ .width = 0, .height = 0, .channels = 4, .colorspace = 0, .pixels = &[_]u8{} };
+    if (saturate(garden, &empty, 1, 1)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+
+    return .{ .w = w, .h = h };
+}
+
+/// Prove the hue_turn verb by the algebra it must obey: a zero turn recovers the source byte-for-byte, three
+/// turns compose to the identity, turn(2) equals two single thirds, a pure red walks red→green→blue→red (the
+/// +120° direction), every pixel keeps its max and min channel (HSV value and chroma preserved), a gray pixel is
+/// a fixed point, alpha passes through, the source stays pure, a hue-turned image is still open, and a degenerate
+/// image refuses by name. Returns the strip's dimensions for the GREEN line.
+fn run_hue_turn(garden: std.mem.Allocator) !struct { w: u32, h: u32 } {
+    // A 4x1 strip: three saturated colors and one already-gray pixel, alpha varied to prove pass-through.
+    const w: u32 = 4;
+    const h: u32 = 1;
+    const buf = try garden.alloc(u8, w * h * 4);
+    const cols = [_][4]u8{
+        .{ 200, 50, 30, 255 }, //  a warm red — max red, min blue
+        .{ 40, 180, 90, 200 }, //  a green
+        .{ 60, 90, 220, 128 }, //  a blue
+        .{ 130, 130, 130, 0 }, //  already gray — a fixed point at every turn
+    };
+    var i: u32 = 0;
+    while (i < w) : (i += 1) {
+        buf[i * 4] = cols[i][0];
+        buf[i * 4 + 1] = cols[i][1];
+        buf[i * 4 + 2] = cols[i][2];
+        buf[i * 4 + 3] = cols[i][3];
+    }
+    const pm = qoi.Pixmap{ .width = w, .height = h, .channels = 4, .colorspace = 0, .pixels = buf };
+
+    // A zero turn (and any multiple of three) recovers the source byte-for-byte.
+    const zero = try hue_turn(garden, &pm, 0);
+    assert(zero.same_bytes(&pm));
+    const three = try hue_turn(garden, &pm, 3);
+    assert(three.same_bytes(&pm));
+
+    const one = try hue_turn(garden, &pm, 1);
+    const two = try hue_turn(garden, &pm, 2);
+
+    // Order three: a single third composed three times is the identity, byte-for-byte — the circle closes.
+    const one1 = try hue_turn(garden, &one, 1);
+    const one2 = try hue_turn(garden, &one1, 1);
+    assert(one2.same_bytes(&pm));
+    // turn(1) then turn(2) is also the identity.
+    const back = try hue_turn(garden, &one, 2);
+    assert(back.same_bytes(&pm));
+    // turn(2) equals two single thirds — the thirds argument is honest.
+    assert(one1.same_bytes(&two));
+
+    // Direction: the first pixel is a warm red (max red). One third turns it toward green (max green), two thirds
+    // toward blue (max blue). The channel map (b,r,g) then (g,b,r) is exact.
+    assert(one.pixels[0] == 30);
+    assert(one.pixels[1] == 200);
+    assert(one.pixels[2] == 50);
+    assert(two.pixels[0] == 50);
+    assert(two.pixels[1] == 30);
+    assert(two.pixels[2] == 200);
+
+    // Value and chroma preserved: for every pixel, the max and min color channel are unchanged at every turn.
+    {
+        var p: u32 = 0;
+        while (p < w) : (p += 1) {
+            const off = @as(usize, p) * 4;
+            const smax = @max(pm.pixels[off], @max(pm.pixels[off + 1], pm.pixels[off + 2]));
+            const smin = @min(pm.pixels[off], @min(pm.pixels[off + 1], pm.pixels[off + 2]));
+            const omax1 = @max(one.pixels[off], @max(one.pixels[off + 1], one.pixels[off + 2]));
+            const omin1 = @min(one.pixels[off], @min(one.pixels[off + 1], one.pixels[off + 2]));
+            const omax2 = @max(two.pixels[off], @max(two.pixels[off + 1], two.pixels[off + 2]));
+            const omin2 = @min(two.pixels[off], @min(two.pixels[off + 1], two.pixels[off + 2]));
+            assert(omax1 == smax);
+            assert(omin1 == smin);
+            assert(omax2 == smax);
+            assert(omin2 == smin);
+        }
+    }
+
+    // The already-gray pixel (index 3, r == g == b == 130) is a fixed point at every turn.
+    assert(one.pixels[12] == 130);
+    assert(one.pixels[13] == 130);
+    assert(one.pixels[14] == 130);
+    assert(two.pixels[12] == 130);
+    assert(two.pixels[13] == 130);
+    assert(two.pixels[14] == 130);
+
+    // Alpha passes through untouched across the whole strip for both turns.
+    assert(one.pixels[3] == 255);
+    assert(one.pixels[7] == 200);
+    assert(one.pixels[11] == 128);
+    assert(one.pixels[15] == 0);
+    assert(two.pixels[3] == 255);
+    assert(two.pixels[15] == 0);
+
+    // Pure: the source is untouched.
+    assert(pm.pixels[0] == 200);
+    assert(pm.pixels[12] == 130);
+    assert(pm.pixels[15] == 0);
+
+    // Still an OPEN image: a hue-turned image re-encodes and round-trips through the codec byte-for-byte.
+    const cap = qoi.encoded_bound(one.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&one, dst);
+    const decoded = try qoi.decode(garden, dst[0..res.len]);
+    assert(decoded.same_bytes(&one));
+
+    // Unwelcome: a degenerate zero-dimension image refuses EmptyImage.
+    const empty = qoi.Pixmap{ .width = 0, .height = 0, .channels = 4, .colorspace = 0, .pixels = &[_]u8{} };
+    if (hue_turn(garden, &empty, 1)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+
+    return .{ .w = w, .h = h };
+}
+
+/// Prove the convolution primitive and its blur/sharpen wrappers by the algebra they must obey: identity is the
+/// source, a solid color is a fixed point of both filters, a box blur averages a known row exactly, purity and
+/// the open round-trip hold, and every degenerate input refuses by name. Returns the identity image's dimensions.
+fn run_convolve(garden: std.mem.Allocator) !struct { w: u32, h: u32 } {
+    // The identity kernel over a position-tagged image is exactly the source, byte-for-byte.
+    const tag = try craft_tagged_wh(garden, 4, 3);
+    const identity = [9]i32{ 0, 0, 0, 0, 1, 0, 0, 0, 0 };
+    const same = try convolve(garden, &tag, &identity, 1, 0);
+    assert(same.same_bytes(&tag));
+
+    // A solid color is a fixed point of both the box blur (mean of nine equal values) and the sharpen (weights
+    // sum to one over a flat field).
+    const sw: u32 = 4;
+    const sh: u32 = 4;
+    const solid = try garden.alloc(u8, sw * sh * 4);
+    {
+        var i: usize = 0;
+        while (i < solid.len) : (i += 4) {
+            solid[i] = 120;
+            solid[i + 1] = 60;
+            solid[i + 2] = 200;
+            solid[i + 3] = 255;
+        }
+    }
+    const solid_pm = qoi.Pixmap{ .width = sw, .height = sh, .channels = 4, .colorspace = 0, .pixels = solid };
+    const blurred_solid = try blur(garden, &solid_pm);
+    assert(blurred_solid.same_bytes(&solid_pm));
+    const sharp_solid = try sharpen(garden, &solid_pm);
+    assert(sharp_solid.same_bytes(&solid_pm));
+
+    // A box blur truly averages: a 3×1 red row [0, 90, 0] blurs to [30, 30, 30] — with the single row clamped
+    // vertically, each pixel's 3×3 neighborhood is its three horizontal neighbors thrice, landing on the mean.
+    const row = try garden.alloc(u8, 3 * 1 * 4);
+    const reds = [3]u8{ 0, 90, 0 };
+    {
+        var x: usize = 0;
+        while (x < 3) : (x += 1) {
+            row[x * 4] = reds[x];
+            row[x * 4 + 1] = 0;
+            row[x * 4 + 2] = 0;
+            row[x * 4 + 3] = 255;
+        }
+    }
+    const row_pm = qoi.Pixmap{ .width = 3, .height = 1, .channels = 4, .colorspace = 0, .pixels = row };
+    const row_blur = try blur(garden, &row_pm);
+    // Left edge {A,A,B} = 0,0,90 → 30; center {A,B,C} = 0,90,0 → 30; right edge {B,C,C} = 90,0,0 → 30.
+    assert(row_blur.pixels[0] == 30);
+    assert(row_blur.pixels[4] == 30);
+    assert(row_blur.pixels[8] == 30);
+    // Alpha rode through the blur untouched.
+    assert(row_blur.pixels[7] == 255);
+
+    // Pure: the source row's center is untouched.
+    assert(row_pm.pixels[4] == 90);
+
+    // A blurred image is still an OPEN image: it re-encodes and round-trips byte-for-byte through the codec.
+    const cap = qoi.encoded_bound(row_blur.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&row_blur, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&row_blur));
+
+    // Unwelcome: a zero-dimension image refuses.
+    const empty = qoi.Pixmap{ .width = 0, .height = 0, .channels = 4, .colorspace = 0, .pixels = &[_]u8{} };
+    if (convolve(garden, &empty, &identity, 1, 0)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+    // Unwelcome: a zero divisor refuses.
+    if (convolve(garden, &solid_pm, &identity, 0, 0)) |_| return error.KernelSlipped else |e| {
+        if (e != error.BadKernel) return error.WrongKernel;
+    }
+    // Unwelcome: an over-ceiling weight refuses.
+    const huge = [9]i32{ kernel_weight_max + 1, 0, 0, 0, 1, 0, 0, 0, 0 };
+    if (convolve(garden, &solid_pm, &huge, 1, 0)) |_| return error.KernelSlipped else |e| {
+        if (e != error.BadKernel) return error.WrongKernel;
+    }
+
+    return .{ .w = same.width, .h = same.height };
+}
+
+fn run_stretch(garden: std.mem.Allocator) !struct { w: u32, h: u32 } {
+    // A dim red ramp {40, 60, 80, 100} with green and blue held flat: red stretches to fill [0,255] while the
+    // two flat channels pass through untouched. lo=40, hi=100, range=60 →
+    //   40 → 0 ; 60 → (20·255+30)/60 = 85 ; 80 → (40·255+30)/60 = 170 ; 100 → (60·255+30)/60 = 255.
+    const reds = [4]u8{ 40, 60, 80, 100 };
+    const ramp = try garden.alloc(u8, 4 * 1 * 4);
+    {
+        var x: usize = 0;
+        while (x < 4) : (x += 1) {
+            ramp[x * 4] = reds[x];
+            ramp[x * 4 + 1] = 90; // green flat
+            ramp[x * 4 + 2] = 200; // blue flat
+            ramp[x * 4 + 3] = 128; // alpha carried, not stretched
+        }
+    }
+    const ramp_pm = qoi.Pixmap{ .width = 4, .height = 1, .channels = 4, .colorspace = 0, .pixels = ramp };
+    const wide = try stretch(garden, &ramp_pm);
+    assert(wide.pixels[0] == 0);
+    assert(wide.pixels[4] == 85);
+    assert(wide.pixels[8] == 170);
+    assert(wide.pixels[12] == 255);
+    // The flat green and blue channels passed through untouched — a zero-range channel is not stretched.
+    {
+        var x: usize = 0;
+        while (x < 4) : (x += 1) {
+            assert(wide.pixels[x * 4 + 1] == 90);
+            assert(wide.pixels[x * 4 + 2] == 200);
+            assert(wide.pixels[x * 4 + 3] == 128); // alpha rode through untouched
+        }
+    }
+    // Monotone: the stretched red channel never decreases across the ramp.
+    assert(wide.pixels[0] <= wide.pixels[4]);
+    assert(wide.pixels[4] <= wide.pixels[8]);
+    assert(wide.pixels[8] <= wide.pixels[12]);
+
+    // Pure: the source ramp's first red is untouched.
+    assert(ramp_pm.pixels[0] == 40);
+
+    // A channel already spanning the full range is a fixed point: a red ramp {0,...,255} maps onto itself. Here a
+    // 2×1 image whose red already touches both 0 and 255 stretches to exactly itself on red.
+    const full = try garden.alloc(u8, 2 * 1 * 4);
+    full[0] = 0;
+    full[1] = 10;
+    full[2] = 20;
+    full[3] = 255;
+    full[4] = 255;
+    full[5] = 10;
+    full[6] = 20;
+    full[7] = 255;
+    const full_pm = qoi.Pixmap{ .width = 2, .height = 1, .channels = 4, .colorspace = 0, .pixels = full };
+    const same = try stretch(garden, &full_pm);
+    assert(same.same_bytes(&full_pm));
+
+    // A solid color is a fixed point: every channel is flat, so each passes through and the image is byte-identical.
+    const sw: u32 = 3;
+    const sh: u32 = 3;
+    const solid = try garden.alloc(u8, sw * sh * 4);
+    {
+        var i: usize = 0;
+        while (i < solid.len) : (i += 4) {
+            solid[i] = 120;
+            solid[i + 1] = 60;
+            solid[i + 2] = 200;
+            solid[i + 3] = 255;
+        }
+    }
+    const solid_pm = qoi.Pixmap{ .width = sw, .height = sh, .channels = 4, .colorspace = 0, .pixels = solid };
+    const solid_out = try stretch(garden, &solid_pm);
+    assert(solid_out.same_bytes(&solid_pm));
+
+    // A stretched image is still an OPEN image: it re-encodes and round-trips byte-for-byte through the codec.
+    const cap = qoi.encoded_bound(wide.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&wide, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&wide));
+
+    // Unwelcome: a zero-dimension image refuses.
+    const empty = qoi.Pixmap{ .width = 0, .height = 0, .channels = 4, .colorspace = 0, .pixels = &[_]u8{} };
+    if (stretch(garden, &empty)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+
+    return .{ .w = wide.width, .h = wide.height };
+}
+
+fn run_edges(garden: std.mem.Allocator) !struct { w: u32, h: u32 } {
+    // A sharp vertical step: a single row of luma [0, 0, 255, 255]. With the single row clamped vertically, the
+    // vertical gradient is zero everywhere and the horizontal Sobel is gx = -4·L(x-1) + 4·L(x+1) with edges
+    // clamped, so the magnitudes are [0, 255, 255, 0] — the two pixels straddling the step light up, the flat
+    // ends stay black.
+    const lum = [4]u8{ 0, 0, 255, 255 };
+    const step = try garden.alloc(u8, 4 * 1 * 4);
+    {
+        var x: usize = 0;
+        while (x < 4) : (x += 1) {
+            step[x * 4] = lum[x];
+            step[x * 4 + 1] = lum[x];
+            step[x * 4 + 2] = lum[x];
+            step[x * 4 + 3] = 200; // a translucent source: the edge map still comes back opaque
+        }
+    }
+    const step_pm = qoi.Pixmap{ .width = 4, .height = 1, .channels = 4, .colorspace = 0, .pixels = step };
+    const edged = try edges(garden, &step_pm);
+    const want = [4]u8{ 0, 255, 255, 0 };
+    {
+        var x: usize = 0;
+        while (x < 4) : (x += 1) {
+            // Grayscale: every color channel carries the same magnitude, alpha opaque.
+            assert(edged.pixels[x * 4] == want[x]);
+            assert(edged.pixels[x * 4 + 1] == want[x]);
+            assert(edged.pixels[x * 4 + 2] == want[x]);
+            assert(edged.pixels[x * 4 + 3] == 255);
+        }
+    }
+
+    // Pure: the source step's translucent alpha and second pixel are untouched.
+    assert(step_pm.pixels[3] == 200);
+    assert(step_pm.pixels[4] == 0);
+
+    // A solid color is a fixed point at black: no gradient anywhere.
+    const sw: u32 = 4;
+    const sh: u32 = 4;
+    const solid = try garden.alloc(u8, sw * sh * 4);
+    {
+        var i: usize = 0;
+        while (i < solid.len) : (i += 4) {
+            solid[i] = 120;
+            solid[i + 1] = 60;
+            solid[i + 2] = 200;
+            solid[i + 3] = 255;
+        }
+    }
+    const solid_pm = qoi.Pixmap{ .width = sw, .height = sh, .channels = 4, .colorspace = 0, .pixels = solid };
+    const flat = try edges(garden, &solid_pm);
+    {
+        var i: usize = 0;
+        while (i < flat.pixels.len) : (i += 4) {
+            assert(flat.pixels[i] == 0);
+            assert(flat.pixels[i + 1] == 0);
+            assert(flat.pixels[i + 2] == 0);
+            assert(flat.pixels[i + 3] == 255);
+        }
+    }
+
+    // An edge image is still an OPEN image: it re-encodes and round-trips byte-for-byte through the codec.
+    const cap = qoi.encoded_bound(edged.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&edged, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&edged));
+
+    // Unwelcome: a zero-dimension image refuses.
+    const empty = qoi.Pixmap{ .width = 0, .height = 0, .channels = 4, .colorspace = 0, .pixels = &[_]u8{} };
+    if (edges(garden, &empty)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyImage) return error.WrongEmpty;
+    }
+
+    return .{ .w = edged.width, .h = edged.height };
+}
+
+fn run_selftest(garden: std.mem.Allocator) !u8 {
+    const pm = try craft_tagged(garden);
+
+    // Crop a 3×2 rectangle at (2,1). Every cropped pixel must equal the source pixel at its shifted position.
+    const cx: u32 = 2;
+    const cy: u32 = 1;
+    const cw: u32 = 3;
+    const ch: u32 = 2;
+    const cut = try crop(garden, &pm, cx, cy, cw, ch);
+    assert(cut.width == cw);
+    assert(cut.height == ch);
+    {
+        var y: u32 = 0;
+        while (y < ch) : (y += 1) {
+            var x: u32 = 0;
+            while (x < cw) : (x += 1) {
+                const c_off = (@as(usize, y) * @as(usize, cw) + @as(usize, x)) * 4;
+                const s_off = (@as(usize, cy + y) * @as(usize, pm.width) + @as(usize, cx + x)) * 4;
+                assert(cut.pixels[c_off] == pm.pixels[s_off]);
+                assert(cut.pixels[c_off + 1] == pm.pixels[s_off + 1]);
+                assert(cut.pixels[c_off + 2] == pm.pixels[s_off + 2]);
+                assert(cut.pixels[c_off + 3] == pm.pixels[s_off + 3]);
+            }
+        }
+    }
+
+    // Pure: the source image is untouched — its first and last pixels are exactly as crafted.
+    assert(pm.pixels[0] == 0);
+    const last = (@as(usize, pm.height - 1) * @as(usize, pm.width) + @as(usize, pm.width - 1)) * 4;
+    assert(pm.pixels[last] == @as(u8, @intCast((pm.width - 1) * 40)));
+
+    // The identity crop (the whole rectangle) recovers the source byte-for-byte.
+    const whole = try crop(garden, &pm, 0, 0, pm.width, pm.height);
+    assert(whole.same_bytes(&pm));
+
+    // A cropped image is still an OPEN image: it re-encodes and round-trips byte-for-byte through the codec.
+    const cap = qoi.encoded_bound(cut.pixel_count());
+    const dst = try garden.alloc(u8, cap);
+    const res = try qoi.encode(&cut, dst);
+    const back = try qoi.decode(garden, dst[0..res.len]);
+    assert(back.same_bytes(&cut));
+
+    // Unwelcome: an empty rectangle refuses.
+    if (crop(garden, &pm, 0, 0, 0, 2)) |_| return error.EmptySlipped else |e| {
+        if (e != error.EmptyRect) return error.WrongEmpty;
+    }
+    // Unwelcome: a rectangle reaching past the right edge refuses (x + w > width).
+    if (crop(garden, &pm, 4, 0, 3, 2)) |_| return error.BoundsSlipped else |e| {
+        if (e != error.OutOfBounds) return error.WrongBounds;
+    }
+    // Unwelcome: a rectangle reaching past the bottom edge refuses (y + h > height).
+    if (crop(garden, &pm, 0, 5, 2, 3)) |_| return error.BoundsSlipped else |e| {
+        if (e != error.OutOfBounds) return error.WrongBounds;
+    }
+
+    print("GREEN image-photos: cropped {d}x{d} at ({d},{d}) out of {d}x{d} — every pixel its source pixel; " ++
+        "source untouched (pure); identity crop byte-identical; cropped image re-encodes and round-trips; " ++
+        "empty rect and both out-of-bounds rects refused by name\n", .{
+        cw, ch, cx, cy, pm.width, pm.height,
+    });
+
+    const orient = try run_orient(garden);
+    print("GREEN image-photos-orient: a 3x5 image turns to {d}x{d} — rotate_quarter four times is identity; " ++
+        "rotate_quarter(2) equals flip_h(flip_v); each mirror is its own inverse; a 90 turn swaps dimensions " ++
+        "clockwise (top-left to top-right); source untouched (pure); rotated image re-encodes and round-trips; " ++
+        "a zero-dimension image refused by name for every verb\n", .{ orient.rw, orient.rh });
+
+    const scaled = try run_scale(garden);
+    print("GREEN image-photos-scale: a 3x4 image resizes to {d}x{d} — identity resize byte-identical; " ++
+        "a 2x nearest upscale samples each pixel from src(nx/2,ny/2); a downscale to 1x1 picks the top-left " ++
+        "pixel; source untouched (pure); scaled image re-encodes and round-trips; a zero target and an " ++
+        "over-ceiling target refused by name\n", .{ scaled.uw, scaled.uh });
+
+    const area = try run_scale_area(garden);
+    print("GREEN image-photos-scale-area: a 2x2 image area-downscales to 1x1 with mean red {d} — identity size " ++
+        "byte-identical; a solid color stays that exact color at any smaller size (no drift); the 1x1 mean is the " ++
+        "exact integer average of all four pixels over every channel and alpha; source untouched (pure); " ++
+        "downscaled image re-encodes and round-trips; an upscale and a zero target refused by name\n", .{area.mean_r});
+
+    const bilin = try run_bilinear(garden);
+    print("GREEN image-photos-bilinear: a 3x4 image resamples smoothly to {d}x{d} — identity size byte-identical; " ++
+        "a solid color stays that exact color at any size (no drift, up or down); a 2x1 [A,B] upscaled blends to " ++
+        "[A, (A+B)/2, B] with the exact average at the center; alpha blends alongside the colors; source untouched " ++
+        "(pure); resized image re-encodes and round-trips; a zero target and an over-ceiling target refused by " ++
+        "name\n", .{ bilin.uw, bilin.uh });
+
+    const tuned = try run_adjust(garden);
+    print("GREEN image-photos-adjust: a {d}x{d} strip tunes — a neutral adjust byte-identical; a brightness " ++
+        "lift and cut shift each color channel and clamp; a contrast pivots around the 128 midpoint; a zero " ++
+        "contrast flattens to the midpoint; alpha passes through untouched; source untouched (pure); adjusted " ++
+        "image re-encodes and round-trips; a zero denominator, an over-range brightness, and an empty image " ++
+        "refused by name\n", .{ tuned.w, tuned.h });
+
+    const sat = try run_saturate(garden);
+    print("GREEN image-photos-saturate: a {d}x{d} strip saturates — a neutral saturation byte-identical; a zero " ++
+        "saturation flattens each pixel to its own Rec.601 luma (r==g==b, a true grayscale); an already-gray " ++
+        "pixel is a fixed point at every saturation; a boost pushes each channel away from its luma; alpha " ++
+        "passes through untouched; source untouched (pure); saturated image re-encodes and round-trips; a zero " ++
+        "denominator, an over-ceiling numerator, and an empty image refused by name\n", .{ sat.w, sat.h });
+
+    const hue = try run_hue_turn(garden);
+    print("GREEN image-photos-hue-turn: a {d}x{d} strip turns hue — a zero turn byte-identical; three turns " ++
+        "compose to the identity; turn(2) equals two single thirds; a pure red walks red->green->blue->red " ++
+        "(the +120 direction); every pixel keeps its max and min channel (HSV value and chroma preserved); an " ++
+        "already-gray pixel is a fixed point at every turn; alpha passes through untouched; source untouched " ++
+        "(pure); hue-turned image re-encodes and round-trips; an empty image refused by name\n", .{ hue.w, hue.h });
+
+    const conv = try run_convolve(garden);
+    print("GREEN image-photos-convolve: a {d}x{d} image convolves — the identity kernel is the source " ++
+        "byte-identical; a solid color is a fixed point of both the box blur and the sharpen; a 3x1 red row " ++
+        "[0,90,0] box-blurs to [30,30,30], the exact clamped mean at every pixel; alpha passes through " ++
+        "untouched; source untouched (pure); blurred image re-encodes and round-trips; an empty image, a zero " ++
+        "divisor, and an over-ceiling weight refused by name\n", .{ conv.w, conv.h });
+
+    const str = try run_stretch(garden);
+    print("GREEN image-photos-stretch: a {d}x{d} image auto-levels — a dim red ramp [40,60,80,100] stretches to " ++
+        "[0,85,170,255], the exact rounded map onto the full range; the flat green and blue channels pass through " ++
+        "untouched; the map is monotone (order preserved); a channel already spanning [0,255] is a fixed point; a " ++
+        "solid color is byte-identical; alpha passes through untouched; source untouched (pure); stretched image " ++
+        "re-encodes and round-trips; an empty image refused by name\n", .{ str.w, str.h });
+
+    const edg = try run_edges(garden);
+    print("GREEN image-photos-edges: a {d}x{d} image detects edges — a sharp luma step [0,0,255,255] Sobels to " ++
+        "the magnitudes [0,255,255,0], the two pixels straddling the step lighting up and the flat ends black; " ++
+        "the edge map is grayscale (r==g==b) and opaque; a solid color is a fixed point at black (no gradient); " ++
+        "source untouched (pure); edge image re-encodes and round-trips; an empty image refused by name\n", .{ edg.w, edg.h });
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    const garden = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(garden);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "selftest")) {
+        return run_selftest(garden);
+    }
+    print("usage: photos selftest\n", .{});
+    return 1;
+}

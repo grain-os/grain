@@ -1,0 +1,273 @@
+//! glow/tokens_witness.rye — proves TAME-tidy Glow token stream (STOA86).
+//!
+//!   rye build glow/tokens_witness.rye -femit-bin=glow/bin/tokens_witness
+//!   glow/bin/tokens_witness
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const tokens = @import("tokens.rye");
+
+const witness_version = "20260719.225100";
+
+/// Same shape as glow/gen/cast-named-xact.glow (comments stripped by lexer).
+const xact_desk =
+    \\+$  xact-mold
+    \\  $%  [%mint amount=@u32]
+    \\      [%send ~]
+    \\  ==
+    \\^-  xact-mold
+;
+
+const amount_cast =
+    \\+$  amount-mold
+    \\  $:  amount=@u32
+    \\  ==
+    \\^-  amount-mold
+;
+
+/// Nine-field same-desk cast — STOA176 peek budget (field_count+3 = 12).
+const nona_cast =
+    \\+$  nona-shape
+    \\  $:  from=@u32
+    \\      amount=@u32
+    \\      fee=@u32
+    \\      nonce=@u32
+    \\      memo=@u32
+    \\      tag=@u32
+    \\      to=@u32
+    \\      via=@u32
+    \\      ref=@u32
+    \\  ==
+    \\^-  nona-shape
+;
+
+const mold_only =
+    \\+$  amount-mold
+    \\  $:  amount=@u32
+    \\  ==
+;
+
+const cross_desk =
+    \\/+  mold-amount
+    \\^-  amount-mold
+;
+
+const cross_desk_junk =
+    \\/+  mold-amount extra
+    \\^-  amount-mold
+;
+
+const named_cast_junk =
+    \\+$  amount-mold
+    \\  $:  amount=@u32
+    \\  ==
+    \\^-  amount-mold extra
+;
+
+fn run_selftest() !u8 {
+    var buf: [tokens.max_tokens]tokens.Token = undefined;
+
+    const n = try tokens.tokenize(xact_desk, buf[0..]);
+    assert(n > 0); // postcondition: desk yielded tokens
+    const got = buf[0..n];
+    const want = [_]tokens.Kind{
+        .rune2, // +$
+        .ident, // xact-mold
+        .newline,
+        .rune2, // $%
+        .lbracket,
+        .percent_tag, // %mint
+        .ident, // amount
+        .equals,
+        .aura, // @u32
+        .rbracket,
+        .newline,
+        .lbracket,
+        .percent_tag, // %send
+        .tilde,
+        .rbracket,
+        .newline,
+        .double_equals,
+        .newline,
+        .rune2, // ^-
+        .ident, // xact-mold
+    };
+    assert(tokens.kinds_eql(got, want[0..])); // kind sequence pin
+    assert(std.mem.eql(u8, tokens.slice_of(xact_desk, got[0]), "+$"));
+    assert(std.mem.eql(u8, tokens.slice_of(xact_desk, got[1]), "xact-mold"));
+    assert(std.mem.eql(u8, tokens.slice_of(xact_desk, got[5]), "%mint"));
+    assert(std.mem.eql(u8, tokens.slice_of(xact_desk, got[8]), "@u32"));
+    assert(std.mem.eql(u8, tokens.slice_of(xact_desk, got[18]), "^-"));
+    print("tokens: cast-named-xact desk kind sequence -- GREEN\n", .{});
+
+    const with_comment =
+        \\::  comment line
+        \\+$  amount-mold
+        \\
+    ;
+    const n2 = try tokens.tokenize(with_comment, buf[0..]);
+    assert(n2 == 3); // comment line invisible
+    assert(buf[0].kind == .rune2);
+    assert(buf[1].kind == .ident);
+    assert(buf[2].kind == .newline);
+    assert(std.mem.eql(u8, tokens.slice_of(with_comment, buf[0]), "+$"));
+    print("tokens: :: comments skipped -- GREEN\n", .{});
+
+    // Force overflow: many idents past max_tokens (no bare memcpy).
+    var big: [4096]u8 = undefined;
+    var bi: u32 = 0;
+    var k: u32 = 0;
+    while (k < tokens.max_tokens + 8) : (k += 1) {
+        if (bi + 2 > big.len) break;
+        big[bi] = 'a';
+        big[bi + 1] = ' ';
+        bi += 2;
+    }
+    assert(bi >= 2); // precondition: overflow source non-empty
+    if (tokens.tokenize(big[0..bi], buf[0..])) |_| {
+        return error.TooManyTokensNotCaught;
+    } else |err| {
+        assert(err == tokens.TokenError.TooManyTokens); // negative space
+    }
+    print("tokens: overflow refused TooManyTokens -- GREEN\n", .{});
+
+    if (tokens.tokenize("+$  !!!", buf[0..])) |_| {
+        return error.BadTokenNotCaught;
+    } else |err| {
+        assert(err == tokens.TokenError.BadToken); // negative space
+    }
+    print("tokens: unknown bytes refused BadToken -- GREEN\n", .{});
+
+    // STOA180: `@t` cord aura tokenizes; bound is nest_type.aura_t_max_bytes.
+    var tbuf: [tokens.max_tokens]tokens.Token = undefined;
+    const nt = try tokens.tokenize("memo=@t\n", tbuf[0..]);
+    assert(nt >= 3);
+    assert(tbuf[0].kind == .ident);
+    assert(tbuf[1].kind == .equals);
+    assert(tbuf[2].kind == .aura);
+    assert(std.mem.eql(u8, tokens.slice_of("memo=@t\n", tbuf[2]), "@t"));
+    print("tokens: @t cord aura lex -- GREEN\n", .{});
+
+    // STOA183: `@ux` hex aura tokenizes; bound is nest_type.aura_ux_max_bytes.
+    const nx = try tokens.tokenize("from=@ux\n", tbuf[0..]);
+    assert(nx >= 3);
+    assert(tbuf[2].kind == .aura);
+    assert(std.mem.eql(u8, tokens.slice_of("from=@ux\n", tbuf[2]), "@ux"));
+    print("tokens: @ux hex aura lex -- GREEN\n", .{});
+
+    // STOA216: single-quoted cord literal; interior helper; refuse empty / unclosed.
+    const nc = try tokens.tokenize("'seva:open'\n", tbuf[0..]);
+    assert(nc >= 1);
+    assert(tbuf[0].kind == .cord_lit);
+    assert(std.mem.eql(u8, tokens.cord_lit_interior("'seva:open'\n", tbuf[0]), "seva:open"));
+    print("tokens: cord literal lex -- GREEN\n", .{});
+    if (tokens.tokenize("''\n", tbuf[0..])) |_| {
+        return error.EmptyCordLitAccepted;
+    } else |err| {
+        assert(err == tokens.TokenError.BadToken);
+    }
+    print("tokens: empty cord literal refused -- GREEN\n", .{});
+    if (tokens.tokenize("'open\n", tbuf[0..])) |_| {
+        return error.UnclosedCordLitAccepted;
+    } else |err2| {
+        assert(err2 == tokens.TokenError.BadToken);
+    }
+    print("tokens: unclosed cord literal refused -- GREEN\n", .{});
+
+    // STOA217: `@ux` + hex digits → hex_lit; bare `@ux` stays aura; odd/oversize refuse.
+    const root_hex =
+        "@ux99b3ae967c5a230acfc598a7e949b3c2c638ce996be47a51a7c9f8cb12e4c5fe\n";
+    const nh = try tokens.tokenize(root_hex, tbuf[0..]);
+    assert(nh >= 1);
+    assert(tbuf[0].kind == .hex_lit);
+    assert(std.mem.eql(
+        u8,
+        tokens.hex_lit_digits(root_hex, tbuf[0]),
+        "99b3ae967c5a230acfc598a7e949b3c2c638ce996be47a51a7c9f8cb12e4c5fe",
+    ));
+    print("tokens: hex literal lex -- GREEN\n", .{});
+    const n_bare = try tokens.tokenize("from=@ux\n", tbuf[0..]);
+    assert(n_bare >= 3);
+    assert(tbuf[2].kind == .aura);
+    print("tokens: bare @ux aura still lex -- GREEN\n", .{});
+    if (tokens.tokenize("@uxabc\n", tbuf[0..])) |_| {
+        return error.OddHexLitAccepted;
+    } else |err3| {
+        assert(err3 == tokens.TokenError.BadToken);
+    }
+    print("tokens: odd hex literal refused -- GREEN\n", .{});
+    if (tokens.tokenize(
+        "@ux00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00\n",
+        tbuf[0..],
+    )) |_| {
+        return error.OversizeHexLitAccepted;
+    } else |err4| {
+        assert(err4 == tokens.TokenError.BadToken);
+    }
+    print("tokens: oversize hex literal refused -- GREEN\n", .{});
+    print("tokens: STOA217 hex literal -- GREEN\n", .{});
+
+    assert(tokens.looks_like_named_cast(xact_desk));
+    assert(tokens.looks_like_named_cast(amount_cast));
+    assert(tokens.looks_like_named_cast(nona_cast));
+    assert(!tokens.looks_like_named_cast(mold_only));
+    assert(!tokens.looks_like_named_cast(cross_desk));
+    print("tokens: named-cast peek (glow_run wire) -- GREEN\n", .{});
+
+    const amount_parts = tokens.named_cast_parts(amount_cast) orelse return error.NamedCastPartsMissing;
+    assert(std.mem.eql(u8, tokens.slice_of(amount_cast, amount_parts.cast_mold), "amount-mold"));
+    const amount_mold = amount_cast[amount_parts.mold_start..][0..amount_parts.mold_len];
+    assert(std.mem.indexOf(u8, amount_mold, "+$") != null);
+    assert(std.mem.indexOf(u8, amount_mold, "amount=@u32") != null);
+    assert(std.mem.indexOf(u8, amount_mold, "==") != null);
+    assert(std.mem.indexOf(u8, amount_mold, "^-") == null);
+    const xact_parts = tokens.named_cast_parts(xact_desk) orelse return error.NamedCastPartsMissing;
+    assert(std.mem.eql(u8, tokens.slice_of(xact_desk, xact_parts.cast_mold), "xact-mold"));
+    const xact_mold = xact_desk[xact_parts.mold_start..][0..xact_parts.mold_len];
+    assert(std.mem.indexOf(u8, xact_mold, "$%") != null);
+    assert(std.mem.indexOf(u8, xact_mold, "==") != null);
+    assert(std.mem.indexOf(u8, xact_mold, "^-") == null);
+    const nona_parts = tokens.named_cast_parts(nona_cast) orelse return error.NamedCastPartsMissing;
+    assert(std.mem.eql(u8, tokens.slice_of(nona_cast, nona_parts.cast_mold), "nona-shape"));
+    const nona_mold = nona_cast[nona_parts.mold_start..][0..nona_parts.mold_len];
+    assert(std.mem.indexOf(u8, nona_mold, "ref=@u32") != null);
+    assert(std.mem.indexOf(u8, nona_mold, "^-") == null);
+    assert(tokens.named_cast_parts(named_cast_junk) == null);
+    assert(tokens.named_cast_parts(mold_only) == null);
+    assert(tokens.named_cast_parts(cross_desk) == null);
+    print("tokens: named-cast parts (lexer→lower mold-body) -- GREEN\n", .{});
+
+    assert(tokens.looks_like_shape_only(mold_only));
+    assert(!tokens.looks_like_shape_only(amount_cast));
+    assert(!tokens.looks_like_shape_only(xact_desk));
+    assert(!tokens.looks_like_shape_only(cross_desk));
+    print("tokens: shape-only peek (glow_run wire) -- GREEN\n", .{});
+
+    assert(tokens.looks_like_cross_desk(cross_desk));
+    assert(!tokens.looks_like_cross_desk(xact_desk));
+    assert(!tokens.looks_like_cross_desk(amount_cast));
+    assert(!tokens.looks_like_cross_desk(mold_only));
+    print("tokens: cross-desk peek (glow_run wire) -- GREEN\n", .{});
+
+    const parts = tokens.cross_desk_parts(cross_desk) orelse return error.CrossDeskPartsMissing;
+    assert(std.mem.eql(u8, tokens.slice_of(cross_desk, parts.stem), "mold-amount"));
+    assert(std.mem.eql(u8, tokens.slice_of(cross_desk, parts.mold), "amount-mold"));
+    assert(tokens.cross_desk_parts(cross_desk_junk) == null);
+    assert(tokens.cross_desk_parts(mold_only) == null);
+    assert(tokens.cross_desk_parts(amount_cast) == null);
+    print("tokens: cross-desk parts (lexer→lower parse) -- GREEN\n", .{});
+
+    // TAME surface: spans are u32; Token carries no authored usize fields.
+    assert(@sizeOf(u32) == @sizeOf(@TypeOf(@as(tokens.Token, .{}).start)));
+    assert(@sizeOf(u32) == @sizeOf(@TypeOf(@as(tokens.Token, .{}).len)));
+    print("tokens: TAME u32 spans -- GREEN\n", .{});
+
+    print("tokens: version {s}\n", .{witness_version});
+    print("GREEN: Glow token stream — STOA86 tidy · STOA93 cross-desk · STOA94 same-desk · STOA95 shape-only peek · STOA216 cord literal; assert · u32 · split lex.\n", .{});
+    return 0;
+}
+
+pub fn main(_: std.process.Init) !u8 {
+    return run_selftest();
+}

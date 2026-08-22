@@ -1,0 +1,326 @@
+# This repository lives inside a sandboxed home directory that also holds the
+# editor, its unpacked AppImage, downloaded tools, personal files, and
+# credentials (including .ssh). To keep every one of those out safely and by
+# default, we ignore everything at the repository root, then allow back in only
+# the project's own directories and files. When we add a new top-level project
+# directory, we list it here too.
+
+/*
+
+# --- The project ------------------------------------------------------------
+!/.gitignore
+!/.cursorignore
+!/.gitmodules
+!/.gitattributes
+!/README.md
+!/SAFE.md
+!/MAP.md
+!/bibliography.md
+!/SOURCE.md
+!/SECURITY.md
+!/CODE_OF_CONDUCT.md
+!/CHANGELOG.md
+!/LICENSE
+!/LICENSE-MIT
+!/LICENSE-APACHE
+!/LICENSE-CC-BY
+!/PUBKEYS.template.md
+!/PUBKEYS.md
+!/CONTRIBUTING.md
+!/GLOW_HOST.template.bron
+!/GLOW_PROFILE.template.bron
+!/template-manifest.bron
+!/.brix
+!/keys_*.png
+!/keys_*.svg
+!/keys/
+!/assets/
+!/context/
+!/counsel/
+!/external-research/
+!/active-designing/
+!/active-development/
+!/active-reviving/
+!/waymarks/
+!/journey/
+!/research-silo/
+!/brix/
+!/pleac/
+!/foundations/
+!/twilight/
+!/saga/
+!/manual/
+!/docs/
+!/docs-geode/
+!/press/
+!/edu/
+!/classical-vedic-astrology/
+!/linengrow/
+!/dimeroll/
+!/lattice/
+!/lantern/
+!/scribble/
+!/ember/
+!/rye/
+!/rye-learning-process/
+!/gratitude/
+!/tools/
+!/nixos/
+!/external-research/yonder/strengthening-compiler/
+!/work-in-progress/
+!/crux/
+!/rishi/
+!/aurora/
+!/tally/
+!/caravan/
+!/brushstroke/
+!/comlink/
+!/kumara/
+!/settlement/
+!/mandate/
+!/vault/
+!/scribe/
+!/mycelium/
+!/image/
+!/mikrophone/
+!/constel/
+!/crypto/
+!/encoding/
+!/lotus/
+!/basin/
+!/bat/
+!/sundial/
+!/mantra/
+!/pond/
+!/skate/
+!/cellar/
+!/amphora/
+!/bron-resins/
+!/granary/
+!/mandi/
+!/mand/
+!/glow/
+!/src/
+!/expanded-prompts/
+!/expanding-prompts/
+!/recursion-prompts/
+!/session-logs/
+!/vendor/
+/vendor/*
+!/vendor/genode/
+!/vendor/monocypher/
+!/vendor/pqclean/
+!/vendor/sel4/
+!/vendor/microkit/
+!/.cursor/
+!/.vscode/
+!/.vscode/settings.json
+!/CLAUDE.md
+!/ORGANIZING.md
+!/STEWARDS.md
+!/llms.txt
+!/.claude/
+# STOA elder trees vere/ · old/ — untracked `20260725` (Framework ritual).
+# Root /* already ignores them; do not re-allow. Files stay on disk + in history.
+
+# Claude Code grows this file when you approve shell commands in Zed; machine-local.
+/.claude/settings.local.json
+
+# --- Re-ignore fetched dependencies and build artifacts inside the project --
+# The Zig toolchain is large and fetched, not authored (the binary alone is
+# ~165MB, past GitHub's 100MB limit). The rye binary and caches are built.
+/rye/bin/
+/rishi/bin/
+/tally/bin/
+/caravan/bin/
+/caravan/.regions/
+/caravan/.channels/
+/caravan/.tapers/
+/caravan/.entrusts/
+/caravan/.confers/
+/caravan/.revokes/
+/caravan/.reclaims/
+/caravan/.abandons/
+/caravan/.reckons/
+/caravan/.mends/
+/caravan/.bears/
+/caravan/.appraisals/
+/caravan/.recants/
+/caravan/.amends/
+/caravan/.couriers/
+/caravan/.readers/
+/caravan/.hearings/
+/caravan/.disputes/
+/caravan/.abidings/
+/caravan/.lapsings/
+/caravan/.reposings/
+/caravan/.tidings/
+/caravan/.appeals/
+/caravan/.endures/
+/caravan/.heeds/
+/caravan/.relents/
+/caravan/.dwells/
+/caravan/.swells/
+/caravan/.refers/
+/caravan/.deems/
+/caravan/.avows/
+/caravan/.owes/
+/caravan/.meets/
+/caravan/.redresses/
+/caravan/.apprises/
+/caravan/.suffices/
+/caravan/.reopens/
+/caravan/.reweighs/
+/caravan/.recounts/
+/caravan/.allays/
+/comlink/bin/
+/settlement/bin/
+/mandate/bin/
+/vault/bin/
+/scribe/bin/
+/kumara/bin/
+/mycelium/bin/
+/image/bin/
+/mikrophone/bin/
+/constel/bin/
+/crypto/bin/
+/encoding/bin/
+/lotus/bin/
+/basin/bin/
+/sundial/bin/
+/classical-vedic-astrology/bin/
+/comlink/.build/
+/brushstroke/bin/
+/mantra/bin/
+/aurora/.build/
+/linengrow/bin/
+# Witness-seated symlink into glow/.cache (STOA71 A import seam).
+/linengrow/lib_session_root_nest_cue_jam.rye
+/dimeroll/bin/
+/lattice/bin/
+/lantern/bin/
+/scribble/bin/
+/ember/bin/
+/glow/nock/bin/
+/glow/bin/
+/glow/.cache/
+*.rye.zig
+# Rye build residue: `rye build` also emits <name>.zig beside each module it
+# compiles, and the `*.rye.zig` line above catches only the bridge files. Twenty-six
+# of these sat untracked in caravan/ after one witness sweep, one `git add -A` away
+# from the tree. Authored code here is Rye; the few genuine Zig files are named back.
+*.zig
+!rye/lib/*.zig
+!tools/fixtures/**/*.zig
+.zig-cache/
+zig-cache/
+
+# --- macOS extended attributes and Finder artifacts (host moved from Linux) -
+# The Linux-host .gitignore above only named .DS_Store; the Mac host adds a
+# wider family of Finder/Spotlight/TimeMachine/AppleDouble droppings that can
+# appear at any nesting depth, so these carry no leading slash on purpose.
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+Icon
+
+# --- tools/ : ship the template, withhold the personal fill-in --------------
+# The committed key-card.conf.example is the template anyone copies; the real
+# key-card.conf holds one person's details and stays local. tools/.build holds
+# the qrencode binary we compile on demand from the vendored source.
+/tools/key-card.conf
+/tools/enclosure.conf
+/tools/secrets.env
+/tools/launch-cursor.sh
+/tools/launch-zed.sh
+# Tracked launchers (not gitignored): tools/cursor-jail.sh, tools/launch-cursor.rish,
+# tools/agent-jail.sh, tools/launch-claude.rish, tools/launch-cursor-agent.rish
+/tools/.build/
+/tools/bin/
+
+# --- Editor state inside the project (ai-jail durable ground) ---------------
+/.cursor-state/
+/.zed-state/
+/.claude-state/                              # Claude Code CLI auth under agent-jail
+/.cursor-agent-state/                        # Cursor Agent CLI auth under agent-jail
+
+/squashfs-root/                              # extracted Cursor AppImage — binary, not source
+/Cursor-*.AppImage                           # downloaded AppImages at repo root
+
+# --- Local key material — never tracked -------------------------------------
+# The allow-list above already excludes anything outside the project, but we
+# say it explicitly: a sandbox GnuPG home and any loose key files live at the
+# repo root and stay out of history. These are root-anchored so they never
+# touch crypto test fixtures inside rye/lib/std.
+/.gnupg-rye/
+/.gnupg/
+/.ssh/
+/.gh/
+/tools/gh-token.secret
+/*.asc
+/*.gpg
+/*.sec
+/*.key
+/*.secret
+
+# --- Regenerated and local-only reference (added 20260627-191712) ----------
+tools/fixtures/rish_io/*.txt
+tools/fixtures/session_logs_archive/_sandbox/
+tools/.build/
+tools/.cache/
+# IronBeetle raw captions stay out of git (covered by tools/.cache/; named for the pilot):
+# tools/.cache/ironbeetle-transcripts/
+__pycache__/
+*.pyc
+/gratitude/nix/
+/gratitude/s6/
+/gratitude/skalibs/
+/gratitude/zon/
+/gratitude/openssh-portable/
+/gratitude/mosh/
+/pond/bin/
+/pond/apps/bin/
+/amphora/bin/
+/granary/bin/
+/mandi/bin/
+/mand/bin/
+/tools/fixtures/.forge_view_bundle/
+
+# Transport resins: counsel zips land at the root, prove their beads, and are
+# removed after the dual-push (crossing hygiene, e213). Never tracked.
+/*.zip
+
+# The guides home is source, not build output (e275)
+!nixos-guide/
+!nixos-guide/**
+
+# The public seed — grain-os/grain — is a PROJECTION of this field, its own
+# git repo, regenerated by tools/sow.rish. The field never tracks it; the
+# allow-list above already withholds it, and this line says so on purpose.
+# Two grains, one pier (20260808.183636 — the maintainer's word: field + seed layout).
+/seed/
+
+# Local-only private vault-interim (never tracked; the Vault module is the real home)
+/personal/
+
+# NixOS rebuild backups -- rebuild-outer.sh drops these when /etc/nixos is a
+# separate file; never track them (and /etc/nixos is symlinked here anyway).
+nixos/*.bak-*
+/caravan/.redresses/
+/caravan/.apprises/
+/caravan/.suffices/
+/caravan/.reopens/
+/caravan/.forbears/
+/caravan/.minds/

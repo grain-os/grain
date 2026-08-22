@@ -1,0 +1,29 @@
+# tools/gen/season/oven_season_o0_witness.rish — Oven Season o0 seat.
+#
+#   rishi/bin/rishi run tools/gen/season/oven_season_o0_witness.rish
+
+say "oven-season-o0: Language EN — pause Surface; open Oven oct."
+say "oven-season-o0: Style Radiant — seat the nest; refuse silent path cut."
+say "oven-season-o0: Lens TAME — Oven Season o0."
+
+let charter = run ["test" "-f" "counsel/date/20260728/20260728-234419_the-oven-season-oct-charter.md"]
+assert charter.ok else "oven-season-o0: oct charter missing"
+let bow = run ["test" "-f" "counsel/date/20260728/20260728-234419_oven-season-o0-bow-surface-paused.md"]
+assert bow.ok else "oven-season-o0: o0 bow missing"
+let prompt = run ["test" "-f" "expanding-prompts/date/20260728/20260728-234419_oven-season-o0-recursion-prompt.md"]
+assert prompt.ok else "oven-season-o0: recursion printout missing"
+
+let pins = run ["sh" "-c" "grep -q 'PAUSED' counsel/date/20260728/20260728-234419_the-oven-season-oct-charter.md && grep -q 'return_surface_p39' counsel/date/20260728/20260728-234419_the-oven-season-oct-charter.md && grep -q 'o0' counsel/date/20260728/20260728-234419_the-oven-season-oct-charter.md && grep -q 'oct' context/LEXICON.md && grep -q 'The Oven Season' context/LEXICON.md && echo O0_OK"]
+assert pins.ok else "oven-season-o0: seat pin scan failed"
+assert pins.out contains "O0_OK" else "oven-season-o0: oct lexicon or handback not seated"
+
+let held = run ["sh" "-c" "test -d oven && echo OVEN_LIVE"]
+assert held.ok else "oven-season-o0: oven/ must exist after o1 (o0 charter still seated)"
+assert held.out contains "OVEN_LIVE" else "oven-season-o0: path cut may already be landed"
+
+let scope = run ["sh" "-c" "grep -q 'oct:   Oven Season — OPEN' tools/gen/season/prin_scope.rish && grep -q 'sept:   Surface Season — PAUSED' tools/gen/season/prin_scope.rish && echo SCOPE_OK"]
+assert scope.ok else "oven-season-o0: prin_scope pin scan failed"
+assert scope.out contains "SCOPE_OK" else "oven-season-o0: prin_scope not eight-nest"
+
+say "GREEN: oven-season-o0 — oct OPEN · Surface PAUSED · oven/ LIVE · Oven Season"
+say "GREEN: oven-season-o0 — o0 charter seated."

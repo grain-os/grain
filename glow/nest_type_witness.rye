@@ -1,0 +1,680 @@
+//! glow/nest_type_witness.rye — proves nest/type surface (STOA107–110 · STOA119 · STOA122–126).
+//!
+//!   rye build glow/nest_type_witness.rye -femit-bin=glow/bin/nest_type_witness
+//!   glow/bin/nest_type_witness
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const nest_type = @import("nest_type.rye");
+const rb = @import("rune_bartis.rye");
+const rbrk = @import("rune_barket.rye");
+const lower = @import("lower_bartis.rye");
+const rm = @import("rune_shape.rye");
+
+const witness_version = "20260720.234340";
+
+fn run_selftest(init: std.process.Init) !u8 {
+    const a = init.arena.allocator();
+    const cwd = std.Io.Dir.cwd();
+    const io = init.io;
+    var buf: [4096]u8 = undefined;
+
+    // STOA107: Accept @u32 nests under @u32.
+    try nest_type.assert_aura_nests("@u32", "@u32");
+    print("nest: @u32 under @u32 accepts -- GREEN\n", .{});
+
+    // STOA107: Refuse @u64 under @u32.
+    if (nest_type.assert_aura_nests("@u64", "@u32")) |_| {
+        return error.NestAcceptedTooSoon;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: @u64 under @u32 refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // STOA180 / STOA209: `@t` nests under `@t`; named bound aura_t_max_bytes.
+    try nest_type.assert_aura_nests("@t", "@t");
+    assert(nest_type.is_cord_aura("@t"));
+    assert(!nest_type.is_cord_aura("@u32"));
+    assert(nest_type.aura_t_max_bytes == 1024);
+    print("nest: @t under @t accepts · cord bound 1024 -- GREEN\n", .{});
+    if (nest_type.assert_aura_nests("@t", "@u32")) |_| {
+        return error.CordNestAcceptedTooSoon;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: @t under @u32 refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // STOA183: `@ux` nests under `@ux`; named bound aura_ux_max_bytes.
+    try nest_type.assert_aura_nests("@ux", "@ux");
+    assert(nest_type.is_hex_aura("@ux"));
+    assert(!nest_type.is_hex_aura("@t"));
+    assert(nest_type.aura_ux_max_bytes == 32);
+    print("nest: @ux under @ux accepts · hex bound 32 -- GREEN\n", .{});
+    if (nest_type.assert_aura_nests("@ux", "@t")) |_| {
+        return error.HexNestAcceptedTooSoon;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: @ux under @t refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // Bartis accept path still lowers welcome identity.
+    const n_ok = try lower.lower_source_welcome("|=  sample=@u32\nsample\n", &buf);
+    assert(n_ok > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_ok], "bartis_gate") != null);
+    print("nest: bartis @u32 identity still lowers -- GREEN\n", .{});
+
+    // Bartis refuse path surfaces SampleDoesNotNest.
+    if (lower.lower_source_welcome("|=  sample=@u64\nsample\n", &buf)) |_| {
+        return error.BartisNestAcceptedTooSoon;
+    } else |err| {
+        if (err != lower.LowerError.SampleDoesNotNest) return err;
+    }
+    print("nest: bartis @u64 refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // Accept fixture desk parses.
+    const accept_src = try cwd.readFileAlloc(io, "glow/gen/gate-sample.glow", a, .limited(4096));
+    const accept_spec = try rb.parse_source(accept_src);
+    assert(std.mem.eql(u8, rb.face_slice(&accept_spec), "sample"));
+    print("nest: glow/gen/gate-sample.glow accepts under nest surface -- GREEN\n", .{});
+
+    // Refuse fixture desk refuses nest.
+    const refuse_src = try cwd.readFileAlloc(io, "glow/gen/gate-sample-u64-refuse.glow", a, .limited(4096));
+    if (rb.parse_source(refuse_src)) |_| {
+        return error.RefuseDeskAccepted;
+    } else |err| {
+        if (err != rb.ParseError.SampleDoesNotNest) return err;
+    }
+    print("nest: glow/gen/gate-sample-u64-refuse.glow refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // STOA108: unit $% tag nest against mold-kind.
+    const kind_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-kind.glow", a, .limited(4096));
+    const kind = try rm.parse_source(kind_src);
+    assert(kind.body == .tagged);
+    assert(kind.field_count == 2);
+    try nest_type.assert_tag_nests("%mint", &kind);
+    try nest_type.assert_tag_nests("send", &kind);
+    print("nest: %mint / send under mold-kind.glow accepts -- GREEN\n", .{});
+
+    if (nest_type.assert_tag_nests("%burn", &kind)) |_| {
+        return error.TagNestAcceptedTooSoon;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: %burn under mold-kind.glow refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // Tuple mold is not a tag nest surface.
+    const tuple_src =
+        \\+$  amount-shape
+        \\  $:  amount=@u32
+        \\  ==
+    ;
+    const tuple = try rm.parse_source(tuple_src);
+    assert(tuple.body == .tuple);
+    if (nest_type.assert_tag_nests("amount", &tuple)) |_| {
+        return error.TupleTagNestAccepted;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: tag under $: tuple shape refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // STOA109: named-shape bartis — amount-shape accepts; kind-shape refuses.
+    const amount_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-amount.glow", a, .limited(4096));
+    const amount = try rm.parse_source(amount_src);
+    try nest_type.assert_named_shape_nests("amount-mold", &amount);
+    print("nest: study desk mold-amount nests as amount-shape ShapeSpec -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("kind-shape");
+    print("nest: kind-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("xact-shape");
+    print("nest: xact-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("xfer-shape");
+    print("nest: xfer-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("pair-shape");
+    print("nest: pair-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("triple-shape");
+    print("nest: triple-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("quad-shape");
+    print("nest: quad-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("penta-shape");
+    print("nest: penta-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("hexa-shape");
+    print("nest: hexa-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("hepta-shape");
+    print("nest: hepta-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("octa-shape");
+    print("nest: octa-shape bartis named shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_bartis_named_shape("nona-shape");
+    print("nest: nona-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA148 / STOA257: living amount-shape; study alias amount-mold still accepted.
+    try nest_type.assert_bartis_named_shape("amount-shape");
+    print("nest: amount-shape bartis named shape accepts -- GREEN\n", .{});
+    try nest_type.assert_bartis_named_shape("amount-mold");
+    print("nest: study alias amount-mold bartis named shape still accepts -- GREEN\n", .{});
+
+    // STOA149: Grain living count-shape (study alias count-mold held).
+    try nest_type.assert_bartis_named_shape("count-shape");
+    print("nest: count-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA150: Grain shape alias pair-shape ≡ pair-shape.
+    try nest_type.assert_bartis_named_shape("pair-shape");
+    print("nest: pair-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA151: Grain shape alias kind-shape ≡ kind-shape.
+    try nest_type.assert_bartis_named_shape("kind-shape");
+    print("nest: kind-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA152: Grain shape alias xact-shape ≡ xact-shape.
+    try nest_type.assert_bartis_named_shape("xact-shape");
+    print("nest: xact-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA153: Grain shape alias xfer-shape ≡ xfer-shape.
+    try nest_type.assert_bartis_named_shape("xfer-shape");
+    print("nest: xfer-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA154: Grain shape alias triple-shape ≡ triple-shape.
+    try nest_type.assert_bartis_named_shape("triple-shape");
+    print("nest: triple-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA155: Grain shape alias quad-shape ≡ quad-shape.
+    try nest_type.assert_bartis_named_shape("quad-shape");
+    print("nest: quad-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA156: Grain shape alias penta-shape ≡ penta-shape.
+    try nest_type.assert_bartis_named_shape("penta-shape");
+    print("nest: penta-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA157: Grain shape alias hexa-shape ≡ hexa-shape.
+    try nest_type.assert_bartis_named_shape("hexa-shape");
+    print("nest: hexa-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA158: Grain shape alias hepta-shape ≡ hepta-shape.
+    try nest_type.assert_bartis_named_shape("hepta-shape");
+    print("nest: hepta-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA159: Grain shape alias octa-shape ≡ octa-shape.
+    try nest_type.assert_bartis_named_shape("octa-shape");
+    print("nest: octa-shape bartis named shape accepts -- GREEN\n", .{});
+
+    // STOA160: Grain shape alias nona-shape ≡ nona-shape.
+    try nest_type.assert_bartis_named_shape("nona-shape");
+    print("nest: nona-shape bartis named shape accepts -- GREEN\n", .{});
+
+    if (nest_type.assert_bartis_named_shape("deca-shape")) |_| {
+        return error.DecaMoldBartisAccepted;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: deca-shape bartis named shape refused SampleDoesNotNest -- GREEN\n", .{});
+
+    const n_amt = try lower.lower_source_welcome("|=  sample=amount-shape\nsample\n", &buf);
+    assert(n_amt > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_amt], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_amt], "amount-shape") != null);
+    print("nest: bartis sample=amount-shape lowers as u32 identity -- GREEN\n", .{});
+
+    // STOA257: study alias -mold still lowers (parse accept; not living speech).
+    const n_amt_study = try lower.lower_source_welcome("|=  sample=amount-mold\nsample\n", &buf);
+    assert(n_amt_study > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_amt_study], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_amt_study], "amount-mold") != null);
+    print("nest: study alias bartis sample=amount-mold still lowers -- GREEN\n", .{});
+
+    const amt_shape_barket = try rbrk.parse_source("|^  sample=amount-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&amt_shape_barket), "amount-shape"));
+    print("nest: barket sample=amount-shape accepts named shape -- GREEN\n", .{});
+
+    const n_cnt_shape = try lower.lower_source_welcome("|=  sample=count-shape\nsample\n", &buf);
+    assert(n_cnt_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_cnt_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_cnt_shape], "count-shape") != null);
+    print("nest: bartis sample=count-shape lowers as u32 identity -- GREEN\n", .{});
+
+    const cnt_shape_barket = try rbrk.parse_source("|^  sample=count-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&cnt_shape_barket), "count-shape"));
+    print("nest: barket sample=count-shape accepts named shape -- GREEN\n", .{});
+
+    const n_pair_shape = try lower.lower_source_welcome("|=  sample=pair-shape\nsample\n", &buf);
+    assert(n_pair_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_pair_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_pair_shape], "PairShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_pair_shape], "pair-shape") != null);
+    print("nest: bartis sample=pair-shape lowers as PairShape identity -- GREEN\n", .{});
+
+    const pair_shape_barket = try rbrk.parse_source("|^  sample=pair-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&pair_shape_barket), "pair-shape"));
+    print("nest: barket sample=pair-shape accepts named shape -- GREEN\n", .{});
+
+    const n_kind_shape = try lower.lower_source_welcome("|=  sample=kind-shape\nsample\n", &buf);
+    assert(n_kind_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_kind_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_kind_shape], "KindShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_kind_shape], "kind-shape") != null);
+    print("nest: bartis sample=kind-shape lowers as KindShape identity -- GREEN\n", .{});
+
+    const kind_shape_barket = try rbrk.parse_source("|^  sample=kind-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&kind_shape_barket), "kind-shape"));
+    print("nest: barket sample=kind-shape accepts named shape -- GREEN\n", .{});
+
+    const n_xact_shape = try lower.lower_source_welcome("|=  sample=xact-shape\nsample\n", &buf);
+    assert(n_xact_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_xact_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xact_shape], "XactShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xact_shape], "xact-shape") != null);
+    print("nest: bartis sample=xact-shape lowers as XactShape identity -- GREEN\n", .{});
+
+    const xact_shape_barket = try rbrk.parse_source("|^  sample=xact-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&xact_shape_barket), "xact-shape"));
+    print("nest: barket sample=xact-shape accepts named shape -- GREEN\n", .{});
+
+    const n_xfer_shape = try lower.lower_source_welcome("|=  sample=xfer-shape\nsample\n", &buf);
+    assert(n_xfer_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_xfer_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xfer_shape], "XferShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xfer_shape], "xfer-shape") != null);
+    print("nest: bartis sample=xfer-shape lowers as XferShape identity -- GREEN\n", .{});
+
+    const xfer_shape_barket = try rbrk.parse_source("|^  sample=xfer-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&xfer_shape_barket), "xfer-shape"));
+    print("nest: barket sample=xfer-shape accepts named shape -- GREEN\n", .{});
+
+    const n_triple_shape = try lower.lower_source_welcome("|=  sample=triple-shape\nsample\n", &buf);
+    assert(n_triple_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_triple_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_triple_shape], "TripleShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_triple_shape], "triple-shape") != null);
+    print("nest: bartis sample=triple-shape lowers as TripleShape identity -- GREEN\n", .{});
+
+    const triple_shape_barket = try rbrk.parse_source("|^  sample=triple-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&triple_shape_barket), "triple-shape"));
+    print("nest: barket sample=triple-shape accepts named shape -- GREEN\n", .{});
+
+    const n_quad_shape = try lower.lower_source_welcome("|=  sample=quad-shape\nsample\n", &buf);
+    assert(n_quad_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_quad_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_quad_shape], "QuadShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_quad_shape], "quad-shape") != null);
+    print("nest: bartis sample=quad-shape lowers as QuadShape identity -- GREEN\n", .{});
+
+    const quad_shape_barket = try rbrk.parse_source("|^  sample=quad-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&quad_shape_barket), "quad-shape"));
+    print("nest: barket sample=quad-shape accepts named shape -- GREEN\n", .{});
+
+    const n_penta_shape = try lower.lower_source_welcome("|=  sample=penta-shape\nsample\n", &buf);
+    assert(n_penta_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_penta_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_penta_shape], "PentaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_penta_shape], "penta-shape") != null);
+    print("nest: bartis sample=penta-shape lowers as PentaShape identity -- GREEN\n", .{});
+
+    const penta_shape_barket = try rbrk.parse_source("|^  sample=penta-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&penta_shape_barket), "penta-shape"));
+    print("nest: barket sample=penta-shape accepts named shape -- GREEN\n", .{});
+
+    const n_hexa_shape = try lower.lower_source_welcome("|=  sample=hexa-shape\nsample\n", &buf);
+    assert(n_hexa_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_hexa_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_hexa_shape], "HexaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_hexa_shape], "hexa-shape") != null);
+    print("nest: bartis sample=hexa-shape lowers as HexaShape identity -- GREEN\n", .{});
+
+    const hexa_shape_barket = try rbrk.parse_source("|^  sample=hexa-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&hexa_shape_barket), "hexa-shape"));
+    print("nest: barket sample=hexa-shape accepts named shape -- GREEN\n", .{});
+
+    const n_hepta_shape = try lower.lower_source_welcome("|=  sample=hepta-shape\nsample\n", &buf);
+    assert(n_hepta_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_hepta_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_hepta_shape], "HeptaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_hepta_shape], "hepta-shape") != null);
+    print("nest: bartis sample=hepta-shape lowers as HeptaShape identity -- GREEN\n", .{});
+
+    const hepta_shape_barket = try rbrk.parse_source("|^  sample=hepta-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&hepta_shape_barket), "hepta-shape"));
+    print("nest: barket sample=hepta-shape accepts named shape -- GREEN\n", .{});
+
+    const n_octa_shape = try lower.lower_source_welcome("|=  sample=octa-shape\nsample\n", &buf);
+    assert(n_octa_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_octa_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_octa_shape], "OctaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_octa_shape], "octa-shape") != null);
+    print("nest: bartis sample=octa-shape lowers as OctaShape identity -- GREEN\n", .{});
+
+    const octa_shape_barket = try rbrk.parse_source("|^  sample=octa-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&octa_shape_barket), "octa-shape"));
+    print("nest: barket sample=octa-shape accepts named shape -- GREEN\n", .{});
+
+    const n_nona_shape = try lower.lower_source_welcome("|=  sample=nona-shape\nsample\n", &buf);
+    assert(n_nona_shape > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_nona_shape], "bartis_gate") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_nona_shape], "NonaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_nona_shape], "nona-shape") != null);
+    print("nest: bartis sample=nona-shape lowers as NonaShape identity -- GREEN\n", .{});
+
+    const nona_shape_barket = try rbrk.parse_source("|^  sample=nona-shape\nsample\n");
+    assert(std.mem.eql(u8, rbrk.shape_name_slice(&nona_shape_barket), "nona-shape"));
+    print("nest: barket sample=nona-shape accepts named shape -- GREEN\n", .{});
+
+    const amt_desk = try cwd.readFileAlloc(io, "glow/gen/gate-amount.glow", a, .limited(4096));
+    const amt_spec = try rb.parse_source(amt_desk);
+    assert(std.mem.eql(u8, rb.face_slice(&amt_spec), "sample"));
+    assert(std.mem.eql(u8, rb.shape_name_slice(&amt_spec), "amount-shape"));
+    print("nest: glow/gen/gate-amount.glow accepts named shape -- GREEN\n", .{});
+
+    const kind_desk = try cwd.readFileAlloc(io, "glow/gen/gate-kind.glow", a, .limited(4096));
+    const kind_spec = try rb.parse_source(kind_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&kind_spec), "kind-shape"));
+    print("nest: glow/gen/gate-kind.glow accepts named shape -- GREEN\n", .{});
+
+    const xact_desk = try cwd.readFileAlloc(io, "glow/gen/gate-xact.glow", a, .limited(4096));
+    const xact_spec = try rb.parse_source(xact_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&xact_spec), "xact-shape"));
+    print("nest: glow/gen/gate-xact.glow accepts named shape -- GREEN\n", .{});
+
+    const xfer_desk = try cwd.readFileAlloc(io, "glow/gen/gate-xfer.glow", a, .limited(4096));
+    const xfer_spec = try rb.parse_source(xfer_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&xfer_spec), "xfer-shape"));
+    print("nest: glow/gen/gate-xfer.glow accepts named shape -- GREEN\n", .{});
+
+    const pair_desk = try cwd.readFileAlloc(io, "glow/gen/gate-pair.glow", a, .limited(4096));
+    const pair_spec = try rb.parse_source(pair_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&pair_spec), "pair-shape"));
+    print("nest: glow/gen/gate-pair.glow accepts named shape -- GREEN\n", .{});
+
+    const triple_desk = try cwd.readFileAlloc(io, "glow/gen/gate-triple.glow", a, .limited(4096));
+    const triple_spec = try rb.parse_source(triple_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&triple_spec), "triple-shape"));
+    print("nest: glow/gen/gate-triple.glow accepts named shape -- GREEN\n", .{});
+
+    const quad_desk = try cwd.readFileAlloc(io, "glow/gen/gate-quad.glow", a, .limited(4096));
+    const quad_spec = try rb.parse_source(quad_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&quad_spec), "quad-shape"));
+    print("nest: glow/gen/gate-quad.glow accepts named shape -- GREEN\n", .{});
+
+    const penta_desk = try cwd.readFileAlloc(io, "glow/gen/gate-penta.glow", a, .limited(4096));
+    const penta_spec = try rb.parse_source(penta_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&penta_spec), "penta-shape"));
+    print("nest: glow/gen/gate-penta.glow accepts named shape -- GREEN\n", .{});
+
+    const hexa_desk = try cwd.readFileAlloc(io, "glow/gen/gate-hexa.glow", a, .limited(4096));
+    const hexa_spec = try rb.parse_source(hexa_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&hexa_spec), "hexa-shape"));
+    print("nest: glow/gen/gate-hexa.glow accepts named shape -- GREEN\n", .{});
+
+    const hepta_desk = try cwd.readFileAlloc(io, "glow/gen/gate-hepta.glow", a, .limited(4096));
+    const hepta_spec = try rb.parse_source(hepta_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&hepta_spec), "hepta-shape"));
+    print("nest: glow/gen/gate-hepta.glow accepts named shape -- GREEN\n", .{});
+
+    const octa_desk = try cwd.readFileAlloc(io, "glow/gen/gate-octa.glow", a, .limited(4096));
+    const octa_spec = try rb.parse_source(octa_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&octa_spec), "octa-shape"));
+    print("nest: glow/gen/gate-octa.glow accepts named shape -- GREEN\n", .{});
+
+    const nona_desk = try cwd.readFileAlloc(io, "glow/gen/gate-nona.glow", a, .limited(4096));
+    const nona_spec = try rb.parse_source(nona_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&nona_spec), "nona-shape"));
+    print("nest: glow/gen/gate-nona.glow accepts named shape -- GREEN\n", .{});
+
+    const deca_refuse = try cwd.readFileAlloc(io, "glow/gen/gate-kind-refuse.glow", a, .limited(4096));
+    if (rb.parse_source(deca_refuse)) |_| {
+        return error.DecaRefuseDeskAccepted;
+    } else |err| {
+        if (err != rb.ParseError.SampleDoesNotNest) return err;
+    }
+    print("nest: glow/gen/gate-kind-refuse.glow (deca-shape) refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // STOA122: second closed named shape count-shape.
+    const count_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-count.glow", a, .limited(4096));
+    const count = try rm.parse_source(count_src);
+    try nest_type.assert_named_shape_nests("count-mold", &count);
+    print("nest: study count-mold ShapeSpec nests as bartis-welcome $: -- GREEN\n", .{});
+
+    const n_cnt = try lower.lower_source_welcome("|=  sample=count-shape\nsample\n", &buf);
+    assert(n_cnt > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_cnt], "count-shape") != null);
+    print("nest: bartis sample=count-shape lowers as u32 identity -- GREEN\n", .{});
+
+    const cnt_desk = try cwd.readFileAlloc(io, "glow/gen/gate-count.glow", a, .limited(4096));
+    const cnt_spec = try rb.parse_source(cnt_desk);
+    assert(std.mem.eql(u8, rb.shape_name_slice(&cnt_spec), "count-shape"));
+    print("nest: glow/gen/gate-count.glow accepts named shape -- GREEN\n", .{});
+
+    // STOA123: unit $% kind-shape shape.
+    const kind_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-kind.glow", a, .limited(4096));
+    const kind_mold = try rm.parse_source(kind_mold_src);
+    try nest_type.assert_kind_shape_nests("kind-mold", &kind_mold);
+    print("nest: study kind-mold ShapeSpec nests as unit $% -- GREEN\n", .{});
+
+    const n_kind = try lower.lower_source_welcome("|=  sample=kind-shape\nsample\n", &buf);
+    assert(n_kind > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_kind], "KindShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_kind], ".mint") != null);
+    print("nest: bartis sample=kind-shape lowers as KindShape identity -- GREEN\n", .{});
+
+    // STOA124: payload $% xact-shape shape.
+    const xact_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-xact.glow", a, .limited(4096));
+    const xact_mold = try rm.parse_source(xact_mold_src);
+    try nest_type.assert_xact_shape_nests("xact-mold", &xact_mold);
+    print("nest: study xact-mold ShapeSpec nests as payload $% -- GREEN\n", .{});
+
+    const n_xact = try lower.lower_source_welcome("|=  sample=xact-shape\nsample\n", &buf);
+    assert(n_xact > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_xact], "XactShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xact], ".mint") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xact], "amount") != null);
+    print("nest: bartis sample=xact-shape lowers as XactShape identity -- GREEN\n", .{});
+
+    // STOA125: multi-face payload $% xfer-shape shape.
+    const xfer_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-xfer.glow", a, .limited(4096));
+    const xfer_mold = try rm.parse_source(xfer_mold_src);
+    try nest_type.assert_xfer_shape_nests("xfer-mold", &xfer_mold);
+    print("nest: study xfer-mold ShapeSpec nests as multi-face payload $% -- GREEN\n", .{});
+
+    const n_xfer = try lower.lower_source_welcome("|=  sample=xfer-shape\nsample\n", &buf);
+    assert(n_xfer > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_xfer], "XferShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xfer], ".mint") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xfer], "from") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_xfer], "amount") != null);
+    print("nest: bartis sample=xfer-shape lowers as XferShape identity -- GREEN\n", .{});
+
+    // STOA126: multi-field $: pair-shape shape.
+    const pair_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-pair.glow", a, .limited(4096));
+    const pair_mold = try rm.parse_source(pair_mold_src);
+    try nest_type.assert_pair_shape_nests("pair-mold", &pair_mold);
+    print("nest: study pair-mold ShapeSpec nests as multi-field $: -- GREEN\n", .{});
+
+    const n_pair = try lower.lower_source_welcome("|=  sample=pair-shape\nsample\n", &buf);
+    assert(n_pair > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_pair], "PairShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_pair], "from") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_pair], "amount") != null);
+    print("nest: bartis sample=pair-shape lowers as PairShape identity -- GREEN\n", .{});
+
+    // STOA134: three-field $: triple-shape shape.
+    const triple_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-triple.glow", a, .limited(4096));
+    const triple_mold = try rm.parse_source(triple_mold_src);
+    try nest_type.assert_triple_shape_nests("triple-mold", &triple_mold);
+    print("nest: study triple-mold ShapeSpec nests as three-field $: -- GREEN\n", .{});
+
+    const n_triple = try lower.lower_source_welcome("|=  sample=triple-shape\nsample\n", &buf);
+    assert(n_triple > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_triple], "TripleShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_triple], "fee") != null);
+    print("nest: bartis sample=triple-shape lowers as TripleShape identity -- GREEN\n", .{});
+
+    // STOA135: four-field $: quad-shape shape.
+    const quad_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-quad.glow", a, .limited(4096));
+    const quad_mold = try rm.parse_source(quad_mold_src);
+    try nest_type.assert_quad_shape_nests("quad-mold", &quad_mold);
+    print("nest: study quad-mold ShapeSpec nests as four-field $: -- GREEN\n", .{});
+
+    const n_quad = try lower.lower_source_welcome("|=  sample=quad-shape\nsample\n", &buf);
+    assert(n_quad > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_quad], "QuadShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_quad], "nonce") != null);
+    print("nest: bartis sample=quad-shape lowers as QuadShape identity -- GREEN\n", .{});
+
+    // STOA138: five-field $: penta-shape shape.
+    const penta_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-penta.glow", a, .limited(4096));
+    const penta_mold = try rm.parse_source(penta_mold_src);
+    try nest_type.assert_penta_shape_nests("penta-mold", &penta_mold);
+    print("nest: study penta-mold ShapeSpec nests as five-field $: -- GREEN\n", .{});
+
+    const n_penta = try lower.lower_source_welcome("|=  sample=penta-shape\nsample\n", &buf);
+    assert(n_penta > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_penta], "PentaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_penta], "memo") != null);
+    print("nest: bartis sample=penta-shape lowers as PentaShape identity -- GREEN\n", .{});
+
+    // STOA140: six-field $: hexa-shape shape.
+    const hexa_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-hexa.glow", a, .limited(4096));
+    const hexa_mold = try rm.parse_source(hexa_mold_src);
+    try nest_type.assert_hexa_shape_nests("hexa-mold", &hexa_mold);
+    print("nest: study hexa-mold ShapeSpec nests as six-field $: -- GREEN\n", .{});
+
+    const n_hexa = try lower.lower_source_welcome("|=  sample=hexa-shape\nsample\n", &buf);
+    assert(n_hexa > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_hexa], "HexaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_hexa], "tag") != null);
+    print("nest: bartis sample=hexa-shape lowers as HexaShape identity -- GREEN\n", .{});
+
+    // STOA142: seven-field $: hepta-shape shape.
+    const hepta_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-hepta.glow", a, .limited(4096));
+    const hepta_mold = try rm.parse_source(hepta_mold_src);
+    try nest_type.assert_hepta_shape_nests("hepta-mold", &hepta_mold);
+    print("nest: study hepta-mold ShapeSpec nests as seven-field $: -- GREEN\n", .{});
+
+    const n_hepta = try lower.lower_source_welcome("|=  sample=hepta-shape\nsample\n", &buf);
+    assert(n_hepta > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_hepta], "HeptaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_hepta], "to: u32") != null);
+    print("nest: bartis sample=hepta-shape lowers as HeptaShape identity -- GREEN\n", .{});
+
+    // STOA144: eight-field $: octa-shape shape.
+    const octa_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-octa.glow", a, .limited(4096));
+    const octa_mold = try rm.parse_source(octa_mold_src);
+    try nest_type.assert_octa_shape_nests("octa-mold", &octa_mold);
+    print("nest: study octa-mold ShapeSpec nests as eight-field $: -- GREEN\n", .{});
+
+    const n_octa = try lower.lower_source_welcome("|=  sample=octa-shape\nsample\n", &buf);
+    assert(n_octa > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_octa], "OctaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_octa], "via: u32") != null);
+    print("nest: bartis sample=octa-shape lowers as OctaShape identity -- GREEN\n", .{});
+
+    // STOA146: nine-field $: nona-shape shape.
+    const nona_mold_src = try cwd.readFileAlloc(io, "glow/gen/hoon-study/mold-nona.glow", a, .limited(4096));
+    const nona_mold = try rm.parse_source(nona_mold_src);
+    try nest_type.assert_nona_shape_nests("nona-mold", &nona_mold);
+    print("nest: study nona-mold ShapeSpec nests as nine-field $: -- GREEN\n", .{});
+
+    const n_nona = try lower.lower_source_welcome("|=  sample=nona-shape\nsample\n", &buf);
+    assert(n_nona > 0);
+    assert(std.mem.indexOf(u8, buf[0..n_nona], "NonaShape") != null);
+    assert(std.mem.indexOf(u8, buf[0..n_nona], "ref: u32") != null);
+    print("nest: bartis sample=nona-shape lowers as NonaShape identity -- GREEN\n", .{});
+
+    // STOA110 / STOA130: nesting-flagged sample claims refuse; stated claims accept.
+    try nest_type.assert_sample_not_nesting(false);
+    print("nest: stated sample claim (is_nesting=false) accepts -- GREEN\n", .{});
+
+    if (nest_type.assert_sample_not_nesting(true)) |_| {
+        return error.NestingSampleAcceptedTooSoon;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: nesting sample claim (is_nesting=true) refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // STOA119 / STOA130: nesting accept under stated closed molds; refuse mismatches.
+    try nest_type.assert_sample_nesting_nests(false, "@u32", "@u32");
+    print("nest: nesting-nests stated no-op (is_nesting=false) accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "@u32", "@u32");
+    print("nest: nesting @u32 under @u32 accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "amount-shape", "amount-shape");
+    print("nest: nesting amount-shape under amount-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "count-shape", "count-shape");
+    print("nest: nesting count-shape under count-shape accepts -- GREEN\n", .{});
+
+    if (nest_type.assert_sample_nesting_nests(true, "amount-shape", "count-shape")) |_| {
+        return error.NestingNamedMoldCrossAccepted;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: nesting amount-shape under count-shape refused SampleDoesNotNest -- GREEN\n", .{});
+
+    if (nest_type.assert_sample_nesting_nests(true, "@u64", "@u32")) |_| {
+        return error.NestingAuraMismatchAccepted;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: nesting @u64 under @u32 refused SampleDoesNotNest -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "kind-shape", "kind-shape");
+    print("nest: nesting kind-shape under kind-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "xact-shape", "xact-shape");
+    print("nest: nesting xact-shape under xact-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "xfer-shape", "xfer-shape");
+    print("nest: nesting xfer-shape under xfer-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "pair-shape", "pair-shape");
+    print("nest: nesting pair-shape under pair-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "triple-shape", "triple-shape");
+    print("nest: nesting triple-shape under triple-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "quad-shape", "quad-shape");
+    print("nest: nesting quad-shape under quad-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "penta-shape", "penta-shape");
+    print("nest: nesting penta-shape under penta-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "hexa-shape", "hexa-shape");
+    print("nest: nesting hexa-shape under hexa-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "hepta-shape", "hepta-shape");
+    print("nest: nesting hepta-shape under hepta-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "octa-shape", "octa-shape");
+    print("nest: nesting octa-shape under octa-shape accepts -- GREEN\n", .{});
+
+    try nest_type.assert_sample_nesting_nests(true, "nona-shape", "nona-shape");
+    print("nest: nesting nona-shape under nona-shape accepts -- GREEN\n", .{});
+
+    if (nest_type.assert_sample_nesting_nests(true, "deca-shape", "deca-shape")) |_| {
+        return error.NestingDecaMoldAcceptedTooSoon;
+    } else |err| {
+        if (err != nest_type.NestError.SampleDoesNotNest) return err;
+    }
+    print("nest: nesting deca-shape refused SampleDoesNotNest -- GREEN\n", .{});
+
+    // Stated bartis path still holds beside nesting refuse + nesting-nests.
+    const n_dry = try lower.lower_source_welcome("|=  sample=@u32\nsample\n", &buf);
+    assert(n_dry > 0);
+    print("nest: stated bartis still lowers under nesting-refuse pin -- GREEN\n", .{});
+
+    print("nest: version {s}\n", .{witness_version});
+    print("GREEN: Glow nest/type — stated aura · $% tag · named-shape · amount-shape … nona-shape · study alias amount-mold · nesting refuse · nesting-nests; STOA107–160 · STOA257 · STOA328 table collapse · STOA330 gate shape_name.\n", .{});
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    return run_selftest(init);
+}

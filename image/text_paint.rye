@@ -1,0 +1,1137 @@
+//! image/text_paint.rye -- the open text-painting rung (Season G, the paint half after the measure half).
+//!
+//! Season G (Open Media Primitives) - the rung image/text_layout.rye named as the one it prepares: "Painting the
+//! placed coverage into an RGBA grid is the later rung this one prepares; here we only place and measure." This
+//! module is that later rung. It joins the whole open-font family into one act -- a string SEEN on an image:
+//!   - image/text_layout.rye places each glyph along a line (its pen origin, borrowed from the atlas),
+//!   - image/glyph.rye hands each glyph a coverage grid (one byte per cell, 0 no ink .. 255 full ink),
+//!   - image/color.rye composites an ink color over the destination (Porter-Duff src-over, straight alpha),
+//!   - image/qoi.rye owns the RGBA target (a Pixmap, pixels held RGBA, four bytes per cell).
+//! Pure composition over those public APIs -- no new storage, codec, palette, or geometry. A coverage byte is the
+//! ink's alpha at that cell (scaled by the ink's own alpha), so full-ink over an opaque ink writes the ink exactly,
+//! no-ink leaves the destination untouched, and a partial cell blends. The painted line's bounding box is checked
+//! against the target ONCE, up front, so an overflowing paint refuses PaintOutOfBounds BY NAME rather than writing
+//! a pixel outside the buffer -- the same "refuse rather than paint garbage" discipline glyph.rye keeps. Clipping a
+//! line that runs past the edge (painting only the visible part) is its companion painter. And paint_paragraph
+//! stacks the whole family into a block: it wraps a paragraph to a max width at glyph boundaries (text_layout's
+//! never-overflow wrap_lines_break), then paints each wrapped line stepping down by one line box, so a block of text
+//! is SEEN -- checked all-or-nothing against the target ONCE up front (ParagraphOutOfBounds by name) so it never
+//! paints half a paragraph. paint_paragraph_aligned sets each wrapped line left, centre, or right within the block by
+//! a pure sideways offset within the line's slack -- alignment moves ink, adding none and dropping none, so the box
+//! check and the changed-pixel count hold whatever the alignment, and left reproduces the plain paint byte-for-byte.
+//! paint_paragraph_justified is the block companion to text_layout's justify_line: every wrapped line but the last flushes
+//! both margins to the max_width column (the last line, and any single-word line, left-set), so a block reads as a
+//! flat-edged newspaper column -- the same box check and changed-pixel count hold, since justification only spreads ink.
+//! And paint_paragraph_clipped is the paragraph's clip companion: where paint_paragraph is all-or-nothing, this one paints
+//! as much of the block as a fixed box holds -- a line inside lands identically to the strict paint, a line straddling the
+//! bottom lands its visible rows, a line entirely below is skipped -- so a bounded panel shows the text that fits rather
+//! than refusing the whole block. It returns the count of cells painted. No network, no key, no funds.
+//!
+//!   env RYE_ZIG=vendor/zig-toolchain/zig rye/bin/rye run image/text_paint.rye selftest
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const glyph = @import("glyph.rye");
+const color = @import("color.rye");
+const qoi = @import("qoi.rye");
+const text_layout = @import("text_layout.rye");
+const font_ascii = @import("font5x7_ascii.rye");
+
+pub const text_paint_version = "20260817.022328";
+
+/// Where each wrapped line sits inside the paragraph's content box (the widest line's width). `left` hugs the origin
+/// (the block's natural, historical behaviour); `right` flushes each line's right edge to the widest line's; `center`
+/// splits the slack evenly. A pure horizontal offset -- alignment moves ink sideways, never adds or drops a pixel.
+pub const Align = enum { left, center, right };
+
+/// Where the whole wrapped block sits inside a box taller than itself -- the vertical companion to `Align`. `top` hugs
+/// the box's top edge (the block's natural origin); `bottom` flushes the block's last line-box to the box's bottom;
+/// `middle` splits the vertical slack evenly. A pure vertical offset of the block's origin -- it moves the stack of
+/// lines down as one, adding no pixel and dropping none, exactly as `Align` shifts a line sideways.
+pub const VAlign = enum { top, middle, bottom };
+
+/// Scale a base alpha by a coverage byte, both in 0..255, rounded -- the ink's own alpha times the cell's coverage.
+/// Full coverage (255) returns the base alpha unchanged; no coverage (0) returns zero (a transparent, no-op source).
+fn scale_alpha(base: u8, cov: u8) u8 {
+    // invariant: a product of two bytes, rounded and divided by 255, is itself a byte -- never overflows u8.
+    const scaled: u32 = (@as(u32, base) * @as(u32, cov) + 127) / 255;
+    assert(scaled <= 255);
+    return @intCast(scaled);
+}
+
+/// Allocate a fresh RGBA Pixmap of `width` x `height`, every pixel the one color `fill` -- the canvas a paint needs
+/// before it has anything to paint on. Bounded by qoi's own pixel ceiling, so the buffer size is proven at birth.
+pub fn solid(allocator: std.mem.Allocator, width: u32, height: u32, fill: color.Rgba) !qoi.Pixmap {
+    // invariant: a canvas has real extent on both axes, within the image module's named pixel ceiling.
+    if (width == 0 or height == 0) return error.BadDimensions;
+    const total: u64 = @as(u64, width) * @as(u64, height);
+    if (total > qoi.qoi_max_pixels) return error.TooLarge;
+
+    const pixels = try allocator.alloc(u8, @as(usize, @intCast(total)) * 4);
+    // invariant: the buffer is exactly four bytes per pixel -- the RGBA invariant qoi.Pixmap carries.
+    assert(pixels.len == @as(usize, @intCast(total)) * 4);
+
+    var i: usize = 0;
+    while (i < pixels.len) : (i += 4) {
+        pixels[i] = fill.r;
+        pixels[i + 1] = fill.g;
+        pixels[i + 2] = fill.b;
+        pixels[i + 3] = fill.a;
+    }
+    return qoi.Pixmap{ .width = width, .height = height, .channels = 4, .colorspace = 0, .pixels = pixels };
+}
+
+/// Composite one covered cell of ink onto the target at (`dx`, `dy`) -- the single place a pixel is written, shared
+/// by the strict and the clipping painters so both blend identically. The caller has already proven (dx, dy) lands
+/// inside the buffer (a box check up front, or a per-cell clip). The ink's alpha is scaled by the cell coverage.
+fn composite_cell(target: *qoi.Pixmap, dx: u32, dy: u32, ink: color.Rgba, cov: u8) void {
+    // invariant: the caller proved this cell lands inside the target buffer, on both axes.
+    assert(dx < target.width);
+    assert(dy < target.height);
+    const di = (@as(usize, dy) * @as(usize, target.width) + @as(usize, dx)) * 4;
+    const dst = color.Rgba{
+        .r = target.pixels[di],
+        .g = target.pixels[di + 1],
+        .b = target.pixels[di + 2],
+        .a = target.pixels[di + 3],
+    };
+    const src = color.Rgba{ .r = ink.r, .g = ink.g, .b = ink.b, .a = scale_alpha(ink.a, cov) };
+    const res = color.over(src, dst);
+    target.pixels[di] = res.r;
+    target.pixels[di + 1] = res.g;
+    target.pixels[di + 2] = res.b;
+    target.pixels[di + 3] = res.a;
+}
+
+/// Paint already-placed glyphs into `target`, compositing `ink` through each glyph's coverage, at pixel origin
+/// (`origin_x`, `origin_y`). Each cell one byte of coverage becomes the ink's alpha at (origin_x + pen_x + cx,
+/// origin_y + cy); a zero cell leaves the destination untouched; a covered cell is `color.over(ink', dst)`. Refuses
+/// PaintOutOfBounds BY NAME if the line's painted box would exceed the target -- checked once, so the inner loop is
+/// proven in-bounds. An empty placement paints nothing. The atlas gives the cell size every glyph's coverage carries.
+pub fn paint_placed(
+    atlas: *const glyph.GlyphAtlas,
+    placed: []const text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !void {
+    // invariant: the placement stays within text_layout's own line ceiling, so the outer loop is bounded.
+    if (placed.len > text_layout.line_glyph_max) return error.LineTooLong;
+    if (placed.len == 0) return; // an empty line paints nothing -- a real, bounded base case
+
+    const cw: u32 = atlas.cell_w;
+    const ch: u32 = atlas.cell_h;
+    // invariant: a paintable atlas has real cells on both axes.
+    assert(cw >= 1);
+    assert(ch >= 1);
+
+    // The line's painted box: its rightmost inked column is the last glyph's pen origin plus one cell width, and its
+    // bottom is one cell height. Computed in u64 so the sum can never wrap before the bound check refuses.
+    const last = placed[placed.len - 1];
+    const box_right: u64 = @as(u64, origin_x) + @as(u64, last.pen_x) + @as(u64, cw);
+    const box_bottom: u64 = @as(u64, origin_y) + @as(u64, ch);
+    if (box_right > @as(u64, target.width) or box_bottom > @as(u64, target.height)) return error.PaintOutOfBounds;
+
+    for (placed) |p| {
+        const g = p.src;
+        // invariant: the glyph's coverage is exactly the atlas cell area -- the grid the inner loop walks.
+        assert(g.coverage.len == @as(usize, cw) * @as(usize, ch));
+        var cy: u32 = 0;
+        while (cy < ch) : (cy += 1) {
+            var cx: u32 = 0;
+            while (cx < cw) : (cx += 1) {
+                const cov = g.coverage[@as(usize, cy) * @as(usize, cw) + @as(usize, cx)];
+                if (cov == 0) continue; // no ink -- the destination shows through untouched
+                // invariant: the up-front box check proved every inked cell lands inside the target buffer.
+                composite_cell(target, origin_x + p.pen_x + cx, origin_y + cy, ink, cov);
+            }
+        }
+    }
+}
+
+/// Paint already-placed glyphs into `target`, CLIPPING any cell that falls outside the buffer rather than refusing.
+/// Where paint_placed refuses a line that would overrun, this one paints only the visible part -- exactly what a
+/// panel that shows a label wider than itself wants. An inked cell inside the target is composited identically to
+/// paint_placed; an inked cell outside is dropped. Returns the count of cells actually painted, so a caller (and a
+/// witness) can measure how much of the line landed. An empty placement paints nothing and returns zero.
+pub fn paint_placed_clipped(
+    atlas: *const glyph.GlyphAtlas,
+    placed: []const text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !u32 {
+    // invariant: the placement stays within text_layout's own line ceiling, so the outer loop is bounded.
+    if (placed.len > text_layout.line_glyph_max) return error.LineTooLong;
+
+    const cw: u32 = atlas.cell_w;
+    const ch: u32 = atlas.cell_h;
+    // invariant: a paintable atlas has real cells on both axes.
+    assert(cw >= 1);
+    assert(ch >= 1);
+
+    var painted: u32 = 0;
+    for (placed) |p| {
+        const g = p.src;
+        // invariant: the glyph's coverage is exactly the atlas cell area -- the grid the inner loop walks.
+        assert(g.coverage.len == @as(usize, cw) * @as(usize, ch));
+        var cy: u32 = 0;
+        while (cy < ch) : (cy += 1) {
+            var cx: u32 = 0;
+            while (cx < cw) : (cx += 1) {
+                const cov = g.coverage[@as(usize, cy) * @as(usize, cw) + @as(usize, cx)];
+                if (cov == 0) continue; // no ink -- the destination shows through untouched
+                const dx = origin_x + p.pen_x + cx;
+                const dy = origin_y + cy;
+                // A cell outside the target is clipped, not painted -- the visible part lands, the rest is dropped.
+                if (dx >= target.width or dy >= target.height) continue;
+                composite_cell(target, dx, dy, ink, cov);
+                painted += 1;
+            }
+        }
+    }
+    // invariant: no more cells were painted than the placement could carry (glyphs times cell area).
+    assert(painted <= @as(u32, @intCast(placed.len)) * cw * ch);
+    return painted;
+}
+
+/// Lay `text` out against `atlas` and paint it in one call -- the verb a surface reaches for. `scratch` holds one
+/// PlacedGlyph per byte (the caller sizes it >= text.len, no hidden allocation); layout_line refuses an uncovered
+/// byte BY NAME before a pixel is touched, and paint_placed refuses PaintOutOfBounds if the laid line would overflow.
+pub fn paint_line(
+    atlas: *const glyph.GlyphAtlas,
+    text: []const u8,
+    scratch: []text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !void {
+    // invariant: the scratch buffer holds a placed glyph for every input byte.
+    assert(scratch.len >= text.len);
+    const line = try text_layout.layout_line(atlas, text, scratch);
+    // invariant: layout placed exactly one glyph per byte, so the slice we paint matches the text length.
+    assert(line.count == text.len);
+    try paint_placed(atlas, scratch[0..line.count], target, origin_x, origin_y, ink);
+}
+
+/// Paint a whole PARAGRAPH, each wrapped line ALIGNED within the block -- wrap `text` to `max_width` at glyph
+/// boundaries (text_layout's never-overflow wrap_lines_break, so no line runs past the max), then paint each wrapped
+/// line stepping down by one line box, offset sideways per `mode` so a block of text is SEEN left-, centre-, or
+/// right-set on the image. The vertical step from one line's top to the next is one cell height plus `line_gap` cells
+/// of leading -- always >= the cell height, so line boxes never overlap and a paragraph's changed pixels are exactly
+/// the sum of each line's ink, whatever the alignment (alignment only shifts a line sideways within the box; it adds
+/// no pixel and drops none). Every line's horizontal offset stays within the block's slack (widest line minus this
+/// line), so an aligned line never leaves the paragraph box the up-front check proved. That box (widest line across,
+/// all lines and their gaps down) is checked ONCE up front, so the paint is all-or-nothing: it refuses
+/// ParagraphOutOfBounds BY NAME before touching a pixel rather than painting some lines then failing on a later one.
+/// `lines_buf` holds one WrapLine per input byte (the wrap's worst case) and `scratch` one PlacedGlyph per byte; the
+/// caller sizes both >= text.len, so there is no hidden allocation. Returns the number of lines painted; an empty (or
+/// all-space) paragraph paints nothing and returns zero.
+pub fn paint_paragraph_aligned(
+    atlas: *const glyph.GlyphAtlas,
+    text: []const u8,
+    max_width: u32,
+    line_gap: u32,
+    mode: Align,
+    lines_buf: []text_layout.WrapLine,
+    scratch: []text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !u32 {
+    // invariant: both buffers hold room for the worst case -- one wrapped line, and one placed glyph, per input byte.
+    assert(lines_buf.len >= text.len);
+    assert(scratch.len >= text.len);
+
+    const lines = try text_layout.wrap_lines_break(atlas, text, max_width, lines_buf);
+    if (lines == 0) return 0; // an empty or all-space paragraph paints nothing -- a bounded base case
+
+    const ch: u32 = atlas.cell_h;
+    // invariant: a paintable atlas has a real cell height, so a line step is a real forward move.
+    assert(ch >= 1);
+    // The vertical step is the cell height plus the leading -- always >= the cell height, so line boxes stay disjoint.
+    const line_step: u64 = @as(u64, ch) + @as(u64, line_gap);
+
+    // The paragraph's full painted box, in u64 so the sums can never wrap before the bound check refuses. Widest line
+    // across; all lines and their inter-line gaps down. Each WrapLine.width is the pen width of that line (>= its
+    // inked box, since the trailing advance carries no ink), so bounding on it is conservative -- never an overflow.
+    var widest: u32 = 0;
+    var k: u32 = 0;
+    while (k < lines) : (k += 1) {
+        if (lines_buf[k].width > widest) widest = lines_buf[k].width;
+    }
+    const box_right: u64 = @as(u64, origin_x) + @as(u64, widest);
+    const box_bottom: u64 = @as(u64, origin_y) + @as(u64, lines - 1) * line_step + @as(u64, ch);
+    if (box_right > @as(u64, target.width) or box_bottom > @as(u64, target.height)) return error.ParagraphOutOfBounds;
+
+    // Paint each wrapped line at its stepped-down origin, offset sideways by its alignment slack. The up-front box
+    // check proved every line fits at offset 0; each offset stays within the slack, so an aligned line stays inside
+    // the same box; paint_placed keeps its own guard regardless -- a belt beside this brace.
+    k = 0;
+    while (k < lines) : (k += 1) {
+        const wl = lines_buf[k];
+        const span = text[wl.start .. wl.start + wl.len];
+        const laid = try text_layout.layout_line(atlas, span, scratch);
+        // invariant: layout placed one glyph per span byte, so the slice we paint matches the wrap's reported length.
+        assert(laid.count == wl.len);
+        // The slack is how much narrower this line is than the widest -- the room alignment has to shift it sideways.
+        const slack: u32 = widest - wl.width;
+        const off: u32 = switch (mode) {
+            .left => 0,
+            .right => slack,
+            .center => slack / 2,
+        };
+        // invariant: the offset never exceeds the slack, so the shifted line stays inside the widest-line block.
+        assert(off <= slack);
+        const dy: u32 = origin_y + @as(u32, @intCast(@as(u64, k) * line_step));
+        try paint_placed(atlas, scratch[0..laid.count], target, origin_x + off, dy, ink);
+    }
+    // invariant: the loop painted exactly the wrapped line count.
+    assert(k == lines);
+    return lines;
+}
+
+/// Paint a whole PARAGRAPH left-set -- the block's natural, historical behaviour, kept as the plain verb a caller
+/// reaches for when no alignment is wanted. Exactly `paint_paragraph_aligned` with `.left`, so a left paragraph is
+/// one routine with the aligned painter (single-stranded) and reproduces the pre-alignment paint byte-for-byte.
+pub fn paint_paragraph(
+    atlas: *const glyph.GlyphAtlas,
+    text: []const u8,
+    max_width: u32,
+    line_gap: u32,
+    lines_buf: []text_layout.WrapLine,
+    scratch: []text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !u32 {
+    return paint_paragraph_aligned(atlas, text, max_width, line_gap, .left, lines_buf, scratch, target, origin_x, origin_y, ink);
+}
+
+/// Paint a whole PARAGRAPH JUSTIFIED -- every wrapped line but the last flushed to both margins of the `max_width`
+/// column, the last line left-set. This is the block companion to text_layout's justify_line: where alignment shifts
+/// a whole line sideways within its slack, justification spreads that slack across the line's interior word gaps so the
+/// right margin lands flat on max_width. The last line keeps its natural left-set width (the honest newspaper habit --
+/// a final short line is not stretched), and any line with a single long word has no gap to widen and stays left-set
+/// too, exactly as justify_line leaves it. The block is bound-checked all-or-nothing ONCE up front against the FULL
+/// max_width column (justified lines reach it; the last and single-word lines fall short of it), so a too-narrow
+/// target refuses ParagraphOutOfBounds by name before a pixel moves, never a half-painted block. Returns the wrapped
+/// line count. `lines_buf` holds one WrapLine per input byte and `scratch` one PlacedGlyph per byte; the caller sizes
+/// both >= text.len.
+pub fn paint_paragraph_justified(
+    atlas: *const glyph.GlyphAtlas,
+    text: []const u8,
+    max_width: u32,
+    line_gap: u32,
+    lines_buf: []text_layout.WrapLine,
+    scratch: []text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !u32 {
+    // invariant: both buffers hold the worst case -- one wrapped line, and one placed glyph, per input byte.
+    assert(lines_buf.len >= text.len);
+    assert(scratch.len >= text.len);
+
+    const lines = try text_layout.wrap_lines_break(atlas, text, max_width, lines_buf);
+    if (lines == 0) return 0; // an empty or all-space paragraph paints nothing -- a bounded base case
+
+    const ch: u32 = atlas.cell_h;
+    // invariant: a paintable atlas has a real cell height, so a line step is a real forward move.
+    assert(ch >= 1);
+    const line_step: u64 = @as(u64, ch) + @as(u64, line_gap);
+
+    // The justified block's full painted box: every non-last line flushes to max_width, so the column right edge is
+    // origin_x + max_width; the last and single-word lines fall short of it, so bounding on max_width is conservative.
+    // u64 so the sums can never wrap before the bound check refuses.
+    const box_right: u64 = @as(u64, origin_x) + @as(u64, max_width);
+    const box_bottom: u64 = @as(u64, origin_y) + @as(u64, lines - 1) * line_step + @as(u64, ch);
+    if (box_right > @as(u64, target.width) or box_bottom > @as(u64, target.height)) return error.ParagraphOutOfBounds;
+
+    // Paint each wrapped line at its stepped-down origin. Every line but the last is justified to max_width first; the
+    // last line stays left-set. justify_line only ever widens within the proven column, so a justified line stays
+    // inside the box the up-front check cleared; paint_placed keeps its own guard regardless -- a belt beside the brace.
+    var k: u32 = 0;
+    while (k < lines) : (k += 1) {
+        const wl = lines_buf[k];
+        const span = text[wl.start .. wl.start + wl.len];
+        const laid = try text_layout.layout_line(atlas, span, scratch);
+        // invariant: layout placed one glyph per span byte, so the slice we paint matches the wrap's reported length.
+        assert(laid.count == wl.len);
+        if (k + 1 < lines) {
+            // A non-last line flushes to the column width; a single-word line has no gap and justify leaves it as laid.
+            _ = try text_layout.justify_line(scratch, laid.count, ' ', laid.width, max_width);
+        }
+        const dy: u32 = origin_y + @as(u32, @intCast(@as(u64, k) * line_step));
+        try paint_placed(atlas, scratch[0..laid.count], target, origin_x, dy, ink);
+    }
+    // invariant: the loop painted exactly the wrapped line count.
+    assert(k == lines);
+    return lines;
+}
+
+/// Paint a whole PARAGRAPH into a fixed box, CLIPPING any line or cell that falls outside the target rather than
+/// refusing. Where paint_paragraph is all-or-nothing (it refuses ParagraphOutOfBounds before touching a pixel), this
+/// one paints as much of the block as the box holds -- exactly what a bounded panel that shows more text than it has
+/// room for wants. It wraps `text` to `max_width` at glyph boundaries (never-overflow), then paints each wrapped line
+/// stepping down by one line box through paint_placed_clipped, so a line inside the box lands identically to the strict
+/// paint, a line straddling the bottom edge lands its visible rows, and a line entirely below the box is skipped. No
+/// up-front box check -- clipping is the whole point. Returns the count of cells actually painted, so a caller (and a
+/// witness) can measure how much of the block landed. `lines_buf` holds one WrapLine per input byte and `scratch` one
+/// PlacedGlyph per byte; the caller sizes both >= text.len. An empty (or all-space) paragraph paints nothing.
+pub fn paint_paragraph_clipped(
+    atlas: *const glyph.GlyphAtlas,
+    text: []const u8,
+    max_width: u32,
+    line_gap: u32,
+    lines_buf: []text_layout.WrapLine,
+    scratch: []text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !u32 {
+    // invariant: both buffers hold room for the worst case -- one wrapped line, and one placed glyph, per input byte.
+    assert(lines_buf.len >= text.len);
+    assert(scratch.len >= text.len);
+
+    const lines = try text_layout.wrap_lines_break(atlas, text, max_width, lines_buf);
+    if (lines == 0) return 0; // an empty or all-space paragraph paints nothing -- a bounded base case
+
+    const ch: u32 = atlas.cell_h;
+    // invariant: a paintable atlas has a real cell height, so a line step is a real forward move.
+    assert(ch >= 1);
+    // The vertical step is the cell height plus the leading -- always >= the cell height, so line boxes stay disjoint.
+    const line_step: u64 = @as(u64, ch) + @as(u64, line_gap);
+
+    var painted: u32 = 0;
+    var k: u32 = 0;
+    while (k < lines) : (k += 1) {
+        const wl = lines_buf[k];
+        const span = text[wl.start .. wl.start + wl.len];
+        const laid = try text_layout.layout_line(atlas, span, scratch);
+        // invariant: layout placed one glyph per span byte, so the slice we paint matches the wrap's reported length.
+        assert(laid.count == wl.len);
+        // This line's top row, in u64 so the sum can never wrap. A line whose top is already at or past the bottom
+        // edge contributes nothing -- skip it, the clean vertical clip that saves paint_placed_clipped a whole pass.
+        const dy_u64: u64 = @as(u64, origin_y) + @as(u64, k) * line_step;
+        if (dy_u64 >= @as(u64, target.height)) continue;
+        const dy: u32 = @intCast(dy_u64);
+        painted += try paint_placed_clipped(atlas, scratch[0..laid.count], target, origin_x, dy, ink);
+    }
+    // invariant: the loop walked exactly the wrapped line count.
+    assert(k == lines);
+    return painted;
+}
+
+/// Paint a whole PARAGRAPH placed VERTICALLY within a box of height `box_h` -- the vertical companion to
+/// `paint_paragraph_aligned`'s sideways set. The block is wrapped and stacked exactly as `paint_paragraph_aligned`
+/// does (so `h_mode` still sets each line left, centre, or right within the content box), then the whole stack is
+/// offset down by its vertical slack -- `top` at the box's top, `bottom` flush to its bottom, `middle` centred -- and
+/// painted at that shifted origin. All-or-nothing on both axes: if the block is taller than the box it refuses
+/// ParagraphBoxTooShort BY NAME before a pixel is touched (the clipped painter is the "show what fits" companion), and
+/// the delegated paint refuses ParagraphOutOfBounds if the box itself does not fit the target. Vertical placement only
+/// moves the stack down as one -- it adds no pixel and drops none, so the changed-pixel count holds whatever the
+/// vertical set, and `top` reproduces `paint_paragraph_aligned` at the same origin byte-for-byte. `lines_buf` holds one
+/// WrapLine per input byte and `scratch` one PlacedGlyph per byte; the caller sizes both >= text.len. Returns the
+/// number of lines painted; an empty (or all-space) paragraph paints nothing and returns zero.
+pub fn paint_paragraph_boxed(
+    atlas: *const glyph.GlyphAtlas,
+    text: []const u8,
+    max_width: u32,
+    line_gap: u32,
+    h_mode: Align,
+    v_mode: VAlign,
+    box_h: u32,
+    lines_buf: []text_layout.WrapLine,
+    scratch: []text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !u32 {
+    // invariant: both buffers hold room for the worst case -- one wrapped line, and one placed glyph, per input byte.
+    assert(lines_buf.len >= text.len);
+    assert(scratch.len >= text.len);
+    // invariant: a box a block can sit in has real vertical extent.
+    if (box_h == 0) return error.BadDimensions;
+
+    const lines = try text_layout.wrap_lines_break(atlas, text, max_width, lines_buf);
+    if (lines == 0) return 0; // an empty or all-space paragraph paints nothing -- a bounded base case
+
+    const ch: u32 = atlas.cell_h;
+    // invariant: a paintable atlas has a real cell height, so a line step is a real forward move.
+    assert(ch >= 1);
+    // The block's own height: one cell per line, plus the leading between them. In u64 so the sum can never wrap
+    // before the fit check refuses. This mirrors paint_paragraph_aligned's box_bottom offset exactly.
+    const line_step: u64 = @as(u64, ch) + @as(u64, line_gap);
+    const block_h: u64 = @as(u64, lines - 1) * line_step + @as(u64, ch);
+    // A block taller than the box cannot be placed all-or-nothing -- refuse by name (the clipped painter shows what fits).
+    if (block_h > @as(u64, box_h)) return error.ParagraphBoxTooShort;
+
+    // The vertical slack is the room the box has beyond the block -- where a top/middle/bottom set moves the stack.
+    const slack: u32 = box_h - @as(u32, @intCast(block_h));
+    const voff: u32 = switch (v_mode) {
+        .top => 0,
+        .bottom => slack,
+        .middle => slack / 2,
+    };
+    // invariant: the vertical offset never exceeds the slack, so the shifted block stays inside the box.
+    assert(voff <= slack);
+
+    // Delegate the actual wrap-stack-paint to the aligned painter at the shifted origin -- single-stranded, so the
+    // horizontal set, the disjoint bands, and the target box check all stay in one place. voff + block_h <= box_h, so
+    // the delegated paint stays inside the box the caller reserved; its own ParagraphOutOfBounds guards the target.
+    return paint_paragraph_aligned(atlas, text, max_width, line_gap, h_mode, lines_buf, scratch, target, origin_x, origin_y + voff, ink);
+}
+
+/// Paint a whole PARAGRAPH placed within a box on BOTH axes -- the 2-D capstone of the family, a real text region. The
+/// content block (widest line across, all lines and gaps down) is positioned horizontally within `box_w` and vertically
+/// within `box_h` by the one `h`/`v` set: `h` chooses left/centre/right for BOTH the block's place in the box AND each
+/// line's set within the block (a right-set region right-sets its lines too -- one intent, one knob), and `v` chooses
+/// top/middle/bottom. All-or-nothing on both axes: it refuses ParagraphBoxTooNarrow BY NAME if the block is wider than
+/// the box, and delegates to paint_paragraph_boxed for the vertical placement (which refuses ParagraphBoxTooShort if the
+/// block is taller). Single-stranded -- it only computes the horizontal box offset, then hands the wrap-stack-paint to
+/// the boxed painter at the shifted origin, so the vertical set, the inter-line set, and the target check all stay in
+/// one place. Placement moves the block as one, adding no pixel and dropping none. `lines_buf` holds one WrapLine per
+/// input byte and `scratch` one PlacedGlyph per byte; the caller sizes both >= text.len. Returns the lines painted; an
+/// empty (or all-space) paragraph paints nothing and returns zero.
+pub fn paint_paragraph_in_box(
+    atlas: *const glyph.GlyphAtlas,
+    text: []const u8,
+    max_width: u32,
+    line_gap: u32,
+    h: Align,
+    v: VAlign,
+    box_w: u32,
+    box_h: u32,
+    lines_buf: []text_layout.WrapLine,
+    scratch: []text_layout.PlacedGlyph,
+    target: *qoi.Pixmap,
+    origin_x: u32,
+    origin_y: u32,
+    ink: color.Rgba,
+) !u32 {
+    // invariant: both buffers hold room for the worst case -- one wrapped line, and one placed glyph, per input byte.
+    assert(lines_buf.len >= text.len);
+    assert(scratch.len >= text.len);
+    // invariant: a box a block can sit in has real extent on both axes.
+    if (box_w == 0 or box_h == 0) return error.BadDimensions;
+
+    const lines = try text_layout.wrap_lines_break(atlas, text, max_width, lines_buf);
+    if (lines == 0) return 0; // an empty or all-space paragraph paints nothing -- a bounded base case
+
+    // The content block's width is the widest wrapped line -- the same measure paint_paragraph_aligned bounds against.
+    var widest: u32 = 0;
+    var k: u32 = 0;
+    while (k < lines) : (k += 1) {
+        if (lines_buf[k].width > widest) widest = lines_buf[k].width;
+    }
+    // A block wider than the box cannot be placed all-or-nothing -- refuse by name, the horizontal peer of TooShort.
+    if (@as(u64, widest) > @as(u64, box_w)) return error.ParagraphBoxTooNarrow;
+
+    // The horizontal slack is the room the box has beyond the block -- where a left/centre/right set moves it sideways.
+    const hslack: u32 = box_w - widest;
+    const hoff: u32 = switch (h) {
+        .left => 0,
+        .right => hslack,
+        .center => hslack / 2,
+    };
+    // invariant: the horizontal box offset never exceeds the slack, so the shifted block stays inside the box width.
+    assert(hoff <= hslack);
+
+    // Delegate the vertical placement (and the wrap-stack-paint) to the boxed painter at the sideways-shifted origin --
+    // single-stranded, so the vertical set, the inter-line set, and the target box check all stay in one place. The
+    // block sits within [origin_x + hoff, origin_x + box_w) across, so it stays inside the box the caller reserved.
+    return paint_paragraph_boxed(atlas, text, max_width, line_gap, h, v, box_h, lines_buf, scratch, target, origin_x + hoff, origin_y, ink);
+}
+
+// --- selftest: paint real text against the full-ASCII font, prove ink composites exactly and bounds refuse -------
+
+/// Count the inked cells (coverage byte != 0) across a laid-out line -- the exact number of pixels a full-opaque ink
+/// paint must change, so the selftest can bind "painted" to a measured count rather than a guess.
+fn inked_cells(placed: []const text_layout.PlacedGlyph, cell_area: u32) u32 {
+    var n: u32 = 0;
+    var k: u32 = 0;
+    // invariant: the walk stays within the placement.
+    assert(placed.len <= text_layout.line_glyph_max);
+    while (k < placed.len) : (k += 1) {
+        var c: u32 = 0;
+        while (c < cell_area) : (c += 1) {
+            if (placed[k].src.coverage[c] != 0) n += 1;
+        }
+    }
+    return n;
+}
+
+/// How many pixels of `a` differ from `b` -- two canvases of the same length, four bytes per pixel.
+fn changed_pixels(a: []const u8, b: []const u8) u32 {
+    // invariant: the two canvases are the same buffer length, a whole number of RGBA pixels.
+    assert(a.len == b.len);
+    assert(a.len % 4 == 0);
+    var n: u32 = 0;
+    var i: usize = 0;
+    while (i < a.len) : (i += 4) {
+        if (a[i] != b[i] or a[i + 1] != b[i + 1] or a[i + 2] != b[i + 2] or a[i + 3] != b[i + 3]) n += 1;
+    }
+    return n;
+}
+
+fn run_selftest(garden: std.mem.Allocator) !u8 {
+    const atlas = try font_ascii.build_atlas(garden);
+    const cell_area = atlas.cell_area();
+
+    const white = color.Rgba{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    const red = color.Rgba{ .r = 255, .g = 0, .b = 0, .a = 255 };
+
+    // solid(): a fresh canvas is the fill color in every pixel, on both channels and alpha.
+    const canvas = try solid(garden, 20, 8, white);
+    assert(canvas.width == 20);
+    assert(canvas.height == 8);
+    assert(canvas.pixels.len == 20 * 8 * 4);
+    {
+        var i: usize = 0;
+        while (i < canvas.pixels.len) : (i += 4) {
+            assert(canvas.pixels[i] == 255);
+            assert(canvas.pixels[i + 3] == 255);
+        }
+    }
+
+    // Lay out "Hi!" and count exactly how many cells carry ink -- the number a full-opaque paint must change.
+    const text = "Hi!";
+    const scratch = try garden.alloc(text_layout.PlacedGlyph, text.len);
+    const line = try text_layout.layout_line(&atlas, text, scratch);
+    const want_changed = inked_cells(scratch[0..line.count], cell_area);
+    // invariant: real glyphs carry ink, so the count the paint must change is positive.
+    assert(want_changed >= 1);
+
+    // Keep a pristine copy of the white canvas, then paint red text over a working copy.
+    const pristine = try garden.alloc(u8, canvas.pixels.len);
+    @import("tally_copy.rye").copy_disjoint(u8, pristine, canvas.pixels);
+    try paint_placed(&atlas, scratch[0..line.count], @constCast(&canvas), 0, 0, red);
+
+    // The number of changed pixels equals the inked-cell count exactly -- no stray pixel, no missed cell.
+    const changed = changed_pixels(canvas.pixels, pristine);
+    assert(changed == want_changed);
+
+    // Every changed pixel is EXACTLY the ink (opaque red over white = red, by color.over); every unchanged pixel
+    // is still the white background byte-for-byte. Ink lands where coverage is, nowhere else.
+    {
+        var i: usize = 0;
+        while (i < canvas.pixels.len) : (i += 4) {
+            const now = color.Rgba{ .r = canvas.pixels[i], .g = canvas.pixels[i + 1], .b = canvas.pixels[i + 2], .a = canvas.pixels[i + 3] };
+            const was_white = pristine[i] == 255 and pristine[i + 1] == 255 and pristine[i + 2] == 255;
+            if (color.Rgba.eql(now, red)) {
+                // an inked cell -- correct
+            } else {
+                // a cell the paint left alone -- it was white before and is still white, byte-for-byte.
+                assert(was_white);
+                assert(now.r == 255);
+                assert(now.g == 255);
+                assert(now.b == 255);
+            }
+        }
+    }
+
+    // Determinism: painting the same line onto a fresh identical canvas yields byte-for-byte the same pixels.
+    const canvas2 = try solid(garden, 20, 8, white);
+    try paint_placed(&atlas, scratch[0..line.count], @constCast(&canvas2), 0, 0, red);
+    assert(canvas2.same_bytes(&canvas));
+
+    // Transparent ink paints nothing -- an alpha-0 source leaves the canvas white byte-for-byte (a real no-op).
+    const clear_red = color.Rgba{ .r = 255, .g = 0, .b = 0, .a = 0 };
+    const canvas3 = try solid(garden, 20, 8, white);
+    const before3 = try garden.alloc(u8, canvas3.pixels.len);
+    @import("tally_copy.rye").copy_disjoint(u8, before3, canvas3.pixels);
+    try paint_placed(&atlas, scratch[0..line.count], @constCast(&canvas3), 0, 0, clear_red);
+    assert(changed_pixels(canvas3.pixels, before3) == 0);
+
+    // Partial alpha blends through color.over exactly -- half-alpha red over white is the composite, not a guess.
+    const half_red = color.Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 };
+    const expect_blend = color.over(color.Rgba{ .r = 255, .g = 0, .b = 0, .a = 128 }, white);
+    const canvas4 = try solid(garden, 20, 8, white);
+    try paint_placed(&atlas, scratch[0..line.count], @constCast(&canvas4), 0, 0, half_red);
+    {
+        // At least one pixel must carry the exact blend (a covered cell), and none may be a stray color.
+        var seen_blend = false;
+        var i: usize = 0;
+        while (i < canvas4.pixels.len) : (i += 4) {
+            const now = color.Rgba{ .r = canvas4.pixels[i], .g = canvas4.pixels[i + 1], .b = canvas4.pixels[i + 2], .a = canvas4.pixels[i + 3] };
+            if (color.Rgba.eql(now, expect_blend)) {
+                seen_blend = true;
+            } else {
+                // an untouched white cell -- the blend landed only where the glyph carries coverage.
+                assert(now.r == 255);
+                assert(now.g == 255);
+                assert(now.b == 255);
+            }
+        }
+        assert(seen_blend);
+    }
+
+    // The empty line paints nothing -- a bounded base case that never touches the buffer.
+    const empty_canvas = try solid(garden, 4, 4, white);
+    const empty_before = try garden.alloc(u8, empty_canvas.pixels.len);
+    @import("tally_copy.rye").copy_disjoint(u8, empty_before, empty_canvas.pixels);
+    try paint_placed(&atlas, scratch[0..0], @constCast(&empty_canvas), 0, 0, red);
+    assert(changed_pixels(empty_canvas.pixels, empty_before) == 0);
+
+    // PaintOutOfBounds: a line that overruns the target's width refuses BY NAME, and so does one past its height.
+    const tiny = try solid(garden, 6, 8, white);
+    if (paint_placed(&atlas, scratch[0..line.count], @constCast(&tiny), 0, 0, red)) |_| {
+        return error.OverflowSlipped;
+    } else |e| {
+        if (e != error.PaintOutOfBounds) return error.WrongOverflow;
+    }
+    const shallow = try solid(garden, 20, 4, white);
+    if (paint_placed(&atlas, scratch[0..line.count], @constCast(&shallow), 0, 3, red)) |_| {
+        return error.OverflowSlipped;
+    } else |e| {
+        if (e != error.PaintOutOfBounds) return error.WrongOverflow;
+    }
+
+    // paint_line composes layout and paint in one call, matching the placed path byte-for-byte.
+    const canvas5 = try solid(garden, 20, 8, white);
+    const scratch5 = try garden.alloc(text_layout.PlacedGlyph, text.len);
+    try paint_line(&atlas, text, scratch5, @constCast(&canvas5), 0, 0, red);
+    assert(canvas5.same_bytes(&canvas));
+
+    // --- clipping: paint_placed_clipped paints only the visible part, matching the strict paint where in-bounds ---
+    // A full-width canvas holds the whole line (the strict painter's canvas above is our ground truth). A narrow
+    // canvas clips the overrun; every pixel it holds must equal the full canvas at the same coordinate, and the
+    // painted count must be exactly the inked cells whose column stays within the narrow width.
+    const narrow_w: u32 = 8; // narrower than the 17-cell painted box of "Hi!" -- the tail clips off
+    const narrow = try solid(garden, narrow_w, 8, white);
+    const clipped = try paint_placed_clipped(&atlas, scratch[0..line.count], @constCast(&narrow), 0, 0, red);
+    // Every pixel of the narrow canvas equals the full canvas at (x, y) -- clipping never alters an in-bounds pixel.
+    {
+        var y: u32 = 0;
+        while (y < narrow.height) : (y += 1) {
+            var x: u32 = 0;
+            while (x < narrow.width) : (x += 1) {
+                const ni = (@as(usize, y) * @as(usize, narrow.width) + @as(usize, x)) * 4;
+                const fi = (@as(usize, y) * @as(usize, canvas.width) + @as(usize, x)) * 4;
+                assert(narrow.pixels[ni] == canvas.pixels[fi]);
+                assert(narrow.pixels[ni + 1] == canvas.pixels[fi + 1]);
+                assert(narrow.pixels[ni + 2] == canvas.pixels[fi + 2]);
+                assert(narrow.pixels[ni + 3] == canvas.pixels[fi + 3]);
+            }
+        }
+    }
+    // The clipped paint landed fewer cells than the whole line (real ink was dropped past the edge) yet more than
+    // zero (the head of the line is visible) -- a true partial paint, neither a refusal nor a full paint.
+    assert(clipped < want_changed);
+    assert(clipped >= 1);
+
+    // A line painted entirely off the canvas (origin past the right edge) clips to nothing -- zero painted, buffer
+    // untouched byte-for-byte. Clipping degrades to a clean no-op rather than a refusal.
+    const off = try solid(garden, 8, 8, white);
+    const off_before = try garden.alloc(u8, off.pixels.len);
+    @import("tally_copy.rye").copy_disjoint(u8, off_before, off.pixels);
+    const off_painted = try paint_placed_clipped(&atlas, scratch[0..line.count], @constCast(&off), 100, 0, red);
+    assert(off_painted == 0);
+    assert(changed_pixels(off.pixels, off_before) == 0);
+
+    // Clipping a line that fits entirely paints exactly what the strict painter does -- same pixels, count = inked.
+    const wide = try solid(garden, 20, 8, white);
+    const wide_painted = try paint_placed_clipped(&atlas, scratch[0..line.count], @constCast(&wide), 0, 0, red);
+    assert(wide_painted == want_changed);
+    assert(wide.same_bytes(&canvas));
+
+    // --- paragraph: wrap a block to a max width and paint each line stepping down, all-or-nothing on overflow ------
+    var para_lines_report: u32 = 0;
+    var para_changed_report: u32 = 0;
+    {
+        const para = "ab cd ef"; // wraps to two lines at max 5*advance: "ab cd" then "ef"
+        const adv: u32 = font_ascii.glyph_advance;
+        const pmax: u32 = adv * 5;
+        const ph: u32 = atlas.cell_h;
+        const gap: u32 = 1;
+        const step: u32 = ph + gap;
+
+        // Independently wrap and lay out each line to count the ink the paragraph paint must change. Line bands are
+        // vertically disjoint (the step is >= the cell height), so the per-line inked counts sum without overlap.
+        const plines = try garden.alloc(text_layout.WrapLine, para.len);
+        const pscratch = try garden.alloc(text_layout.PlacedGlyph, para.len);
+        const nlines = try text_layout.wrap_lines_break(&atlas, para, pmax, plines);
+        assert(nlines == 2);
+        var para_want: u32 = 0;
+        {
+            var pk: u32 = 0;
+            while (pk < nlines) : (pk += 1) {
+                const span = para[plines[pk].start .. plines[pk].start + plines[pk].len];
+                const laid = try text_layout.layout_line(&atlas, span, pscratch);
+                para_want += inked_cells(pscratch[0..laid.count], cell_area);
+            }
+        }
+        // invariant: a real two-word paragraph carries ink, so there is something to paint.
+        assert(para_want >= 1);
+
+        // A canvas exactly tall and wide enough: width holds the widest line (5*advance), height holds two line
+        // boxes plus the gap (line 0 at rows [0,ph), line 1 at [step, step+ph); paragraph bottom = step+ph).
+        const pw: u32 = pmax;
+        const pht: u32 = ph + step;
+        const pcanvas = try solid(garden, pw, pht, white);
+        const pbefore = try garden.alloc(u8, pcanvas.pixels.len);
+        @import("tally_copy.rye").copy_disjoint(u8, pbefore, pcanvas.pixels);
+        const painted_lines = try paint_paragraph(&atlas, para, pmax, gap, plines, pscratch, @constCast(&pcanvas), 0, 0, red);
+        assert(painted_lines == nlines);
+
+        // The paragraph changed exactly the summed ink of its lines -- no band overlap, no stray pixel, none missed.
+        const pchanged = changed_pixels(pcanvas.pixels, pbefore);
+        assert(pchanged == para_want);
+
+        // Every changed pixel is exactly the ink; every other stays the white background, byte-for-byte.
+        {
+            var i: usize = 0;
+            while (i < pcanvas.pixels.len) : (i += 4) {
+                const now = color.Rgba{ .r = pcanvas.pixels[i], .g = pcanvas.pixels[i + 1], .b = pcanvas.pixels[i + 2], .a = pcanvas.pixels[i + 3] };
+                if (color.Rgba.eql(now, red)) {
+                    // an inked cell -- correct
+                } else {
+                    assert(now.r == 255);
+                    assert(now.g == 255);
+                    assert(now.b == 255);
+                }
+            }
+        }
+
+        // Determinism: the same paragraph onto a fresh identical canvas yields byte-for-byte the same pixels.
+        const pcanvas2 = try solid(garden, pw, pht, white);
+        _ = try paint_paragraph(&atlas, para, pmax, gap, plines, pscratch, @constCast(&pcanvas2), 0, 0, red);
+        assert(pcanvas2.same_bytes(&pcanvas));
+
+        // The paragraph is the single-line paint stacked, nothing more: its top line-box band equals a standalone
+        // paint_placed of the first wrapped line at the same origin, pixel-for-pixel.
+        const firstspan = para[plines[0].start .. plines[0].start + plines[0].len];
+        const fl_scratch = try garden.alloc(text_layout.PlacedGlyph, firstspan.len);
+        const fl = try text_layout.layout_line(&atlas, firstspan, fl_scratch);
+        const oneline = try solid(garden, pw, ph, white);
+        try paint_placed(&atlas, fl_scratch[0..fl.count], @constCast(&oneline), 0, 0, red);
+        {
+            var y: u32 = 0;
+            while (y < ph) : (y += 1) {
+                var x: u32 = 0;
+                while (x < pw) : (x += 1) {
+                    const pi = (@as(usize, y) * @as(usize, pw) + @as(usize, x)) * 4;
+                    assert(pcanvas.pixels[pi] == oneline.pixels[pi]);
+                    assert(pcanvas.pixels[pi + 1] == oneline.pixels[pi + 1]);
+                    assert(pcanvas.pixels[pi + 2] == oneline.pixels[pi + 2]);
+                    assert(pcanvas.pixels[pi + 3] == oneline.pixels[pi + 3]);
+                }
+            }
+        }
+
+        // ParagraphOutOfBounds: a canvas one row too short for the second line refuses BY NAME before any pixel is
+        // touched -- all-or-nothing, never a half-painted paragraph.
+        const pshort = try solid(garden, pw, pht - 1, white);
+        const pshort_before = try garden.alloc(u8, pshort.pixels.len);
+        @import("tally_copy.rye").copy_disjoint(u8, pshort_before, pshort.pixels);
+        if (paint_paragraph(&atlas, para, pmax, gap, plines, pscratch, @constCast(&pshort), 0, 0, red)) |_| {
+            return error.ParagraphOverflowSlipped;
+        } else |e| {
+            if (e != error.ParagraphOutOfBounds) return error.WrongParagraphOverflow;
+        }
+        // The refused paragraph left the short canvas untouched byte-for-byte -- the up-front check paints nothing.
+        assert(changed_pixels(pshort.pixels, pshort_before) == 0);
+
+        // --- alignment: centre- and right-set the same wrapped block, proving alignment only shifts ink sideways ---
+        {
+            // Left through the aligned painter reproduces paint_paragraph byte-for-byte -- one routine, two names.
+            const pleft = try solid(garden, pw, pht, white);
+            _ = try paint_paragraph_aligned(&atlas, para, pmax, gap, .left, plines, pscratch, @constCast(&pleft), 0, 0, red);
+            assert(pleft.same_bytes(&pcanvas));
+
+            // Build the expected right- and centre-set canvases by painting each wrapped line at its own offset --
+            // the very definition of alignment, composed from the strict single-line painter, matched byte-for-byte.
+            const rexpect = try solid(garden, pw, pht, white);
+            const cexpect = try solid(garden, pw, pht, white);
+            var widest2: u32 = 0;
+            {
+                var wi: u32 = 0;
+                while (wi < nlines) : (wi += 1) {
+                    if (plines[wi].width > widest2) widest2 = plines[wi].width;
+                }
+            }
+            {
+                var li: u32 = 0;
+                while (li < nlines) : (li += 1) {
+                    const wl = plines[li];
+                    const span = para[wl.start .. wl.start + wl.len];
+                    const laid = try text_layout.layout_line(&atlas, span, pscratch);
+                    const slack: u32 = widest2 - wl.width;
+                    const dy: u32 = li * (ph + gap);
+                    try paint_placed(&atlas, pscratch[0..laid.count], @constCast(&rexpect), slack, dy, red);
+                    try paint_placed(&atlas, pscratch[0..laid.count], @constCast(&cexpect), slack / 2, dy, red);
+                }
+            }
+
+            // The aligned painter matches the hand-composed expectation exactly, for both directions.
+            const pright = try solid(garden, pw, pht, white);
+            _ = try paint_paragraph_aligned(&atlas, para, pmax, gap, .right, plines, pscratch, @constCast(&pright), 0, 0, red);
+            assert(pright.same_bytes(&rexpect));
+            const pcenter = try solid(garden, pw, pht, white);
+            _ = try paint_paragraph_aligned(&atlas, para, pmax, gap, .center, plines, pscratch, @constCast(&pcenter), 0, 0, red);
+            assert(pcenter.same_bytes(&cexpect));
+
+            // Alignment shifts ink, never adds or drops it: centre- and right-set change exactly as many pixels as left.
+            assert(changed_pixels(pright.pixels, pbefore) == pchanged);
+            assert(changed_pixels(pcenter.pixels, pbefore) == pchanged);
+
+            // The block truly moved: right-set differs from left-set (the short line shifted), yet the widest line --
+            // zero slack -- sits at the same origin under every alignment, so the two disagree only on the short line.
+            assert(!pright.same_bytes(&pcanvas));
+        }
+
+        // --- justified paragraph: every line but the last flushes both margins to the column, the last left-set ------
+        {
+            // A paragraph whose first wrapped line has real slack, so justification actually stretches. "aa bb cc dd"
+            // at max 10*advance wraps to "aa bb cc" (8 glyphs, 2 cells of slack over its two interior gaps) then "dd".
+            const jpara = "aa bb cc dd";
+            const adv2: u32 = font_ascii.glyph_advance;
+            const jmax: u32 = adv2 * 10;
+            const jph: u32 = atlas.cell_h;
+            const jstep: u32 = jph + gap;
+            const jlines = try garden.alloc(text_layout.WrapLine, jpara.len);
+            const jscratch = try garden.alloc(text_layout.PlacedGlyph, jpara.len);
+            const jn = try text_layout.wrap_lines_break(&atlas, jpara, jmax, jlines);
+            assert(jn == 2); // "aa bb cc" then "dd"
+            // The first line has slack to the column, so justification has room to work; the last line is left-set.
+            assert(jlines[0].width < jmax);
+
+            // The canvas holds the full column width and both line boxes.
+            const jw: u32 = jmax;
+            const jht: u32 = jph + jstep;
+            const jcanvas = try solid(garden, jw, jht, white);
+            const jbefore = try garden.alloc(u8, jcanvas.pixels.len);
+            @import("tally_copy.rye").copy_disjoint(u8, jbefore, jcanvas.pixels);
+            const jpainted = try paint_paragraph_justified(&atlas, jpara, jmax, gap, jlines, jscratch, @constCast(&jcanvas), 0, 0, red);
+            assert(jpainted == jn);
+
+            // Build the expected canvas by hand: line 0 justified to the column then painted at the origin, line 1
+            // left-set one line box down -- the very definition of a justified block, composed from the strict painters.
+            const jexpect = try solid(garden, jw, jht, white);
+            {
+                var ji: u32 = 0;
+                while (ji < jn) : (ji += 1) {
+                    const wl = jlines[ji];
+                    const span = jpara[wl.start .. wl.start + wl.len];
+                    const laid = try text_layout.layout_line(&atlas, span, jscratch);
+                    if (ji + 1 < jn) _ = try text_layout.justify_line(jscratch, laid.count, ' ', laid.width, jmax);
+                    const dy: u32 = ji * jstep;
+                    try paint_placed(&atlas, jscratch[0..laid.count], @constCast(&jexpect), 0, dy, red);
+                }
+            }
+            assert(jcanvas.same_bytes(&jexpect)); // the block painter matches the hand-composed justified expectation
+
+            // A left-set paint of the same paragraph differs -- the first line truly stretched to the right margin.
+            const jleft = try solid(garden, jw, jht, white);
+            _ = try paint_paragraph(&atlas, jpara, jmax, gap, jlines, jscratch, @constCast(&jleft), 0, 0, red);
+            assert(!jcanvas.same_bytes(&jleft));
+
+            // Justification moves ink, adds none and drops none: it changes exactly as many pixels as the left-set paint.
+            assert(changed_pixels(jcanvas.pixels, jbefore) == changed_pixels(jleft.pixels, jbefore));
+
+            // The justified first line's right edge reaches the column: a standalone justify + paint of line 0 equals
+            // the block's top band pixel-for-pixel, confirming both margins met.
+            const jtopspan = jpara[jlines[0].start .. jlines[0].start + jlines[0].len];
+            const jtoplaid = try text_layout.layout_line(&atlas, jtopspan, jscratch);
+            _ = try text_layout.justify_line(jscratch, jtoplaid.count, ' ', jtoplaid.width, jmax);
+            const jtop = try solid(garden, jw, jph, white);
+            try paint_placed(&atlas, jscratch[0..jtoplaid.count], @constCast(&jtop), 0, 0, red);
+            {
+                var bi: usize = 0;
+                const band = @as(usize, jw) * @as(usize, jph) * 4;
+                while (bi < band) : (bi += 1) assert(jcanvas.pixels[bi] == jtop.pixels[bi]);
+            }
+
+            // A canvas one column short of the block refuses ParagraphOutOfBounds by name, leaving the buffer untouched.
+            const jshort = try solid(garden, jmax - 1, jht, white);
+            const jshort_before = try garden.alloc(u8, jshort.pixels.len);
+            @import("tally_copy.rye").copy_disjoint(u8, jshort_before, jshort.pixels);
+            if (paint_paragraph_justified(&atlas, jpara, jmax, gap, jlines, jscratch, @constCast(&jshort), 0, 0, red)) |_| {
+                return error.JustifyOverflowSlipped;
+            } else |e| {
+                if (e != error.ParagraphOutOfBounds) return error.WrongJustifyOverflow;
+            }
+            assert(changed_pixels(jshort.pixels, jshort_before) == 0);
+        }
+
+        // --- clipped paragraph: paint the wrapped block into a box, clipping lines past the edge rather than refusing --
+        {
+            // A box the paragraph fits in: the clipped painter matches the strict all-or-nothing paint byte-for-byte and
+            // paints all the ink -- inside the box, clipping and refusing agree exactly.
+            const pcfit = try solid(garden, pw, pht, white);
+            const fit_painted = try paint_paragraph_clipped(&atlas, para, pmax, gap, plines, pscratch, @constCast(&pcfit), 0, 0, red);
+            assert(pcfit.same_bytes(&pcanvas));
+            assert(fit_painted == para_want);
+
+            // A box only one line-box tall holds line 0 and clips line 1 entirely (line 1 starts at row step >= ph). The
+            // clipped paint lands line 0's ink alone -- fewer cells than the whole paragraph, more than zero -- and every
+            // pixel equals a standalone paint of the first line, so the visible line is exact and the dropped line
+            // touches nothing. Where the strict painter refuses this same too-short canvas, the clipped one shows what fits.
+            const line0span = para[plines[0].start .. plines[0].start + plines[0].len];
+            const l0scratch = try garden.alloc(text_layout.PlacedGlyph, line0span.len);
+            const l0 = try text_layout.layout_line(&atlas, line0span, l0scratch);
+            const line0_ink = inked_cells(l0scratch[0..l0.count], cell_area);
+            const shortbox = try solid(garden, pw, ph, white);
+            const short_painted = try paint_paragraph_clipped(&atlas, para, pmax, gap, plines, pscratch, @constCast(&shortbox), 0, 0, red);
+            assert(short_painted == line0_ink);
+            assert(short_painted < para_want);
+            assert(short_painted >= 1);
+            const l0only = try solid(garden, pw, ph, white);
+            try paint_placed(&atlas, l0scratch[0..l0.count], @constCast(&l0only), 0, 0, red);
+            assert(shortbox.same_bytes(&l0only));
+
+            // A box placed entirely below the block (origin at the paragraph's bottom) clips to a clean no-op -- zero
+            // painted, buffer untouched byte-for-byte. Clipping degrades to nothing rather than a refusal.
+            const belowbox = try solid(garden, pw, ph, white);
+            const below_before = try garden.alloc(u8, belowbox.pixels.len);
+            @import("tally_copy.rye").copy_disjoint(u8, below_before, belowbox.pixels);
+            const below_painted = try paint_paragraph_clipped(&atlas, para, pmax, gap, plines, pscratch, @constCast(&belowbox), 0, ph, red);
+            assert(below_painted == 0);
+            assert(changed_pixels(belowbox.pixels, below_before) == 0);
+        }
+
+        // --- boxed paragraph: place the whole block top/middle/bottom within a box taller than itself ---------------
+        {
+            // A box the block sits in with room to spare: block height is pht (two line boxes), the box is six rows
+            // taller, so the vertical slack is exactly six -- room for a top, middle, and bottom set to differ.
+            const vslack: u32 = 6;
+            const box_h: u32 = pht + vslack;
+
+            // The vertical set is a pure downward offset of the block's origin, so each set equals a plain paragraph
+            // paint at the shifted origin_y -- top at 0, middle at slack/2, bottom at the whole slack -- byte-for-byte.
+            const vtop_expect = try solid(garden, pw, box_h, white);
+            _ = try paint_paragraph(&atlas, para, pmax, gap, plines, pscratch, @constCast(&vtop_expect), 0, 0, red);
+            const vmid_expect = try solid(garden, pw, box_h, white);
+            _ = try paint_paragraph(&atlas, para, pmax, gap, plines, pscratch, @constCast(&vmid_expect), 0, vslack / 2, red);
+            const vbot_expect = try solid(garden, pw, box_h, white);
+            _ = try paint_paragraph(&atlas, para, pmax, gap, plines, pscratch, @constCast(&vbot_expect), 0, vslack, red);
+
+            // The boxed painter matches each hand-composed expectation exactly, and reports the wrapped line count.
+            const vtop = try solid(garden, pw, box_h, white);
+            const vtop_lines = try paint_paragraph_boxed(&atlas, para, pmax, gap, .left, .top, box_h, plines, pscratch, @constCast(&vtop), 0, 0, red);
+            assert(vtop_lines == nlines);
+            assert(vtop.same_bytes(&vtop_expect));
+            const vmid = try solid(garden, pw, box_h, white);
+            _ = try paint_paragraph_boxed(&atlas, para, pmax, gap, .left, .middle, box_h, plines, pscratch, @constCast(&vmid), 0, 0, red);
+            assert(vmid.same_bytes(&vmid_expect));
+            const vbot = try solid(garden, pw, box_h, white);
+            _ = try paint_paragraph_boxed(&atlas, para, pmax, gap, .left, .bottom, box_h, plines, pscratch, @constCast(&vbot), 0, 0, red);
+            assert(vbot.same_bytes(&vbot_expect));
+
+            // Vertical placement moves the stack down as one -- it adds no pixel and drops none, so every vertical set
+            // changes exactly as many pixels as the block carries (the same count the strict paragraph changed).
+            const vpristine = try solid(garden, pw, box_h, white);
+            assert(changed_pixels(vtop.pixels, vpristine.pixels) == pchanged);
+            assert(changed_pixels(vmid.pixels, vpristine.pixels) == pchanged);
+            assert(changed_pixels(vbot.pixels, vpristine.pixels) == pchanged);
+
+            // The block truly moved: a bottom set differs from a top set (the whole stack shifted down by the slack).
+            assert(!vbot.same_bytes(&vtop));
+
+            // ParagraphBoxTooShort: a box shorter than the block refuses BY NAME before any pixel is touched, leaving
+            // the buffer untouched -- all-or-nothing, the strict companion to the clipping painter above.
+            const vtight = try solid(garden, pw, pht - 1, white);
+            const vtight_before = try garden.alloc(u8, vtight.pixels.len);
+            @import("tally_copy.rye").copy_disjoint(u8, vtight_before, vtight.pixels);
+            if (paint_paragraph_boxed(&atlas, para, pmax, gap, .left, .top, pht - 1, plines, pscratch, @constCast(&vtight), 0, 0, red)) |_| {
+                return error.BoxOverflowSlipped;
+            } else |e| {
+                if (e != error.ParagraphBoxTooShort) return error.WrongBoxOverflow;
+            }
+            assert(changed_pixels(vtight.pixels, vtight_before) == 0);
+        }
+
+        // --- boxed on both axes: place the block left/centre/right AND top/middle/bottom within a 2-D box -----------
+        {
+            // The content block's width is the widest wrapped line -- the measure the horizontal box offset works from.
+            var widest3: u32 = 0;
+            {
+                var wi: u32 = 0;
+                while (wi < nlines) : (wi += 1) {
+                    if (plines[wi].width > widest3) widest3 = plines[wi].width;
+                }
+            }
+            // A box roomy on both axes: six columns wider than the block, six rows taller than it -- slack each way.
+            const hslack: u32 = 6;
+            const vslack: u32 = 6;
+            const bw: u32 = widest3 + hslack;
+            const bh: u32 = pht + vslack;
+
+            // A 2-D set equals paint_paragraph_aligned(mode = h) at the box offset (hoff, voff) -- the boxed painter it
+            // delegates to only shifts the origin. Prove three corners: (left, top) at (0, 0), (centre, middle) at
+            // (slack/2, slack/2), (right, bottom) at (slack, slack) -- each byte-for-byte against the hand-composed paint.
+            const lt_expect = try solid(garden, bw, bh, white);
+            _ = try paint_paragraph_aligned(&atlas, para, pmax, gap, .left, plines, pscratch, @constCast(&lt_expect), 0, 0, red);
+            const cm_expect = try solid(garden, bw, bh, white);
+            _ = try paint_paragraph_aligned(&atlas, para, pmax, gap, .center, plines, pscratch, @constCast(&cm_expect), hslack / 2, vslack / 2, red);
+            const rb_expect = try solid(garden, bw, bh, white);
+            _ = try paint_paragraph_aligned(&atlas, para, pmax, gap, .right, plines, pscratch, @constCast(&rb_expect), hslack, vslack, red);
+
+            const lt = try solid(garden, bw, bh, white);
+            const lt_lines = try paint_paragraph_in_box(&atlas, para, pmax, gap, .left, .top, bw, bh, plines, pscratch, @constCast(&lt), 0, 0, red);
+            assert(lt_lines == nlines);
+            assert(lt.same_bytes(&lt_expect));
+            const cm = try solid(garden, bw, bh, white);
+            _ = try paint_paragraph_in_box(&atlas, para, pmax, gap, .center, .middle, bw, bh, plines, pscratch, @constCast(&cm), 0, 0, red);
+            assert(cm.same_bytes(&cm_expect));
+            const rb = try solid(garden, bw, bh, white);
+            _ = try paint_paragraph_in_box(&atlas, para, pmax, gap, .right, .bottom, bw, bh, plines, pscratch, @constCast(&rb), 0, 0, red);
+            assert(rb.same_bytes(&rb_expect));
+
+            // Placement moves the block as one -- it adds no pixel and drops none, so every corner changes exactly as
+            // many pixels as the strict block, and a bottom-right set truly differs from a top-left one.
+            const bpristine = try solid(garden, bw, bh, white);
+            assert(changed_pixels(lt.pixels, bpristine.pixels) == pchanged);
+            assert(changed_pixels(cm.pixels, bpristine.pixels) == pchanged);
+            assert(changed_pixels(rb.pixels, bpristine.pixels) == pchanged);
+            assert(!rb.same_bytes(&lt));
+
+            // ParagraphBoxTooNarrow: a box narrower than the block refuses BY NAME before any pixel is touched, buffer
+            // untouched -- the horizontal peer of the vertical ParagraphBoxTooShort, all-or-nothing on both axes.
+            const bnarrow = try solid(garden, widest3 - 1, bh, white);
+            const bnarrow_before = try garden.alloc(u8, bnarrow.pixels.len);
+            @import("tally_copy.rye").copy_disjoint(u8, bnarrow_before, bnarrow.pixels);
+            if (paint_paragraph_in_box(&atlas, para, pmax, gap, .left, .top, widest3 - 1, bh, plines, pscratch, @constCast(&bnarrow), 0, 0, red)) |_| {
+                return error.BoxNarrowSlipped;
+            } else |e| {
+                if (e != error.ParagraphBoxTooNarrow) return error.WrongBoxNarrow;
+            }
+            assert(changed_pixels(bnarrow.pixels, bnarrow_before) == 0);
+
+            // And the vertical refusal still propagates through the delegate: a box wide enough yet a row too short
+            // refuses ParagraphBoxTooShort by name, so the 2-D painter guards both axes.
+            const bshort = try solid(garden, bw, pht - 1, white);
+            if (paint_paragraph_in_box(&atlas, para, pmax, gap, .left, .top, bw, pht - 1, plines, pscratch, @constCast(&bshort), 0, 0, red)) |_| {
+                return error.BoxShortSlipped;
+            } else |e| {
+                if (e != error.ParagraphBoxTooShort) return error.WrongBoxShort;
+            }
+        }
+
+        para_lines_report = painted_lines;
+        para_changed_report = pchanged;
+    }
+
+    print("GREEN image-text-paint: '{s}' painted red over white changed exactly {d} pixels (= inked cells); every changed pixel is the ink, every other stays background; deterministic and byte-identical through paint_line; transparent ink is a no-op; half-alpha blends through color.over exactly; empty line paints nothing; PaintOutOfBounds refused by name on width and on height; clipping paints only the visible part ({d} of {d} cells on a narrow canvas, matching the strict paint pixel-for-pixel), a fully off-canvas line clips to a clean no-op, and a line that fits clips identically to the strict paint; a wrapped paragraph paints {d} stacked lines changing exactly {d} pixels (= summed line ink, disjoint bands), its top band equals a standalone single-line paint, and a too-short canvas refuses ParagraphOutOfBounds by name leaving the buffer untouched; the paragraph aligns -- left reproduces the plain paint byte-for-byte, centre- and right-set match a line-by-line offset composition exactly while changing the same pixel count (alignment shifts ink sideways, adding none and dropping none); the paragraph justifies -- every wrapped line but the last flushes both margins to the column while the last stays left-set, matching a hand-composed justify+paint byte-for-byte, differing from the left-set paint (the first line truly stretched) yet changing the same pixel count, and a column-short canvas refuses ParagraphOutOfBounds by name; and the paragraph clips -- a box it fits in paints byte-for-byte the strict paint, a box one line-box tall paints just the first line's ink (matching a standalone single-line paint) where the strict painter would refuse, and a box below the block clips to a clean no-op; and the paragraph sits in a box -- a top set reproduces the plain paragraph at the box origin, middle- and bottom-set match a plain paint at the shifted origin exactly while changing the same pixel count (vertical placement moves the whole stack down as one, adding none and dropping none), and a box shorter than the block refuses ParagraphBoxTooShort by name leaving the buffer untouched; and the paragraph sits in a 2-D box -- left/centre/right AND top/middle/bottom together, each corner equal to a plain aligned paint at the box offset while changing the same pixel count, refusing ParagraphBoxTooNarrow on a box too narrow and ParagraphBoxTooShort on one too short\n", .{ text, changed, clipped, want_changed, para_lines_report, para_changed_report });
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    const garden = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(garden);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "selftest")) {
+        return run_selftest(garden);
+    }
+    print("usage: text_paint selftest\n", .{});
+    return 1;
+}

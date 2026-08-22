@@ -1,0 +1,240 @@
+//! glow-book: runes.md#g-barket
+//! glow/rune_barket.rye — parses Glow's `|^` barket (STOA112–120).
+//!
+//! Stated-sample demo: `|^  sample=@u32` or `|^  sample=amount-shape` header, then either:
+//!   - header-only (STOA112)
+//!   - identity body face (STOA113)
+//!   - call body: `%-  <gate>  <sample-face>` (STOA115–116)
+//! Closed demo gates: `double` · `inc` · `dec` (`@u32`) · `flip` (kind · xact · xfer · pair · triple · quad · penta · hexa · hepta · octa · nona · STOA127–131/136–139/141/143/145/147).
+//! STOA117: TAME tidy — copy_disjoint · parse_body split.
+//! STOA118: closed named mold `amount-mold` (one-field `$:` ≡ `@u32` lower).
+//! STOA148: closed allowlist alias `amount-shape` ≡ `amount-mold` (Glow OS shape word).
+//! STOA149: closed allowlist alias `count-shape` ≡ `count-mold` (Glow OS shape word).
+//! STOA150: closed allowlist alias `pair-shape` ≡ `pair-mold` (Glow OS shape word · PairShape).
+//! STOA151: closed allowlist alias `kind-shape` ≡ `kind-mold` (Glow OS shape word · KindShape).
+//! STOA152: closed allowlist alias `xact-shape` ≡ `xact-mold` (Glow OS shape word · XactShape).
+//! STOA153: closed allowlist alias `xfer-shape` ≡ `xfer-mold` (Glow OS shape word · XferShape).
+//! STOA154: closed allowlist alias `triple-shape` ≡ `triple-mold` (Glow OS shape word · TripleShape).
+//! STOA155: closed allowlist alias `quad-shape` ≡ `quad-mold` (Glow OS shape word · QuadShape).
+//! STOA156: closed allowlist alias `penta-shape` ≡ `penta-mold` (Glow OS shape word · PentaShape).
+//! STOA157: closed allowlist alias `hexa-shape` ≡ `hexa-mold` (Glow OS shape word · HexaShape).
+//! STOA158: closed allowlist alias `hepta-shape` ≡ `hepta-mold` (Glow OS shape word · HeptaShape).
+//! STOA159: closed allowlist alias `octa-shape` ≡ `octa-mold` (Glow OS shape word · OctaShape).
+//! STOA160: closed allowlist alias `nona-shape` ≡ `nona-mold` (Glow OS shape word · NonaShape).
+//! STOA120: expansion calls `assert_sample_nesting_nests` at the mold seam.
+//! STOA121 / STOA130: barket passes `is_nesting=true` through nesting-nests under stated molds.
+//! STOA122: closed allowlist adds `count-mold` beside `amount-mold`.
+//! STOA123: closed allowlist adds unit `$%` `kind-mold` (identity lower).
+//! STOA124: closed allowlist adds payload `$%` `xact-mold` (identity lower).
+//! STOA125: closed allowlist adds multi-face payload `$%` `xfer-mold` (identity lower).
+//! STOA126: closed allowlist adds multi-field `$:` `pair-mold` (identity lower).
+//! STOA127: closed call-body under kind-mold — `flip` (mint↔send).
+//! STOA128: closed call-body under xact-mold — `flip` (mint↔send).
+//! STOA129: closed call-body under xfer-mold — `flip` (mint↔send).
+//! STOA131: closed call-body under pair-mold — `flip` (from↔amount).
+//! STOA134: closed allowlist adds three-field `$:` `triple-mold` (identity lower).
+//! STOA135: closed allowlist adds four-field `$:` `quad-mold` (identity lower).
+//! STOA136: closed call-body under triple-mold — `flip` (from↔amount · fee stays).
+//! STOA137: closed call-body under quad-mold — `flip` (from↔amount · fee/nonce stay).
+//! STOA138: closed allowlist adds five-field `$:` `penta-mold` (identity lower).
+//! STOA139: closed call-body under penta-mold — `flip` (from↔amount · fee/nonce/memo stay).
+//! STOA140: closed allowlist adds six-field `$:` `hexa-mold` (identity lower).
+//! STOA141: closed call-body under hexa-mold — `flip` (from↔amount · fee/nonce/memo/tag stay).
+//! STOA142: closed allowlist adds seven-field `$:` `hepta-mold` (identity lower).
+//! STOA143: closed call-body under hepta-mold — `flip` (from↔amount · fee/nonce/memo/tag/to stay).
+//! STOA144: closed allowlist adds eight-field `$:` `octa-mold` (identity lower).
+//! STOA145: closed call-body under octa-mold — `flip` (from↔amount · fee/nonce/memo/tag/to/via stay).
+//! STOA146: closed allowlist adds nine-field `$:` `nona-mold` (identity lower).
+//! STOA147: closed call-body under nona-mold — `flip` (from↔amount · fee/nonce/memo/tag/to/via/ref stay).
+//! STOA330: BarketSpec fields — `shape_name` · `shape_name_len` · `shape_name_slice` · `max_shape_len`.
+//! Sample nests under `@u32` / named allowlist via nest_type; ambient gold held.
+//! Token-driven via tokens.rye. Open `$:` beyond nona barket samples held.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const tokens = @import("tokens.rye");
+const tally_copy = @import("tally_copy.rye");
+const nest_type = @import("nest_type.rye");
+
+pub const max_face_len: u32 = tokens.max_name_len;
+pub const max_gate_len: u32 = tokens.max_name_len;
+pub const max_shape_len: u32 = tokens.max_name_len;
+
+pub const ParseError = error{
+    EmptySource,
+    NotABarket,
+    MissingFace,
+    MissingEquals,
+    MissingAura,
+    SampleDoesNotNest,
+    BodyFaceMismatch,
+    BodyGateNotYetLowered,
+    BodySampleMismatch,
+    MalformedBody,
+    BodyNotYetLowered,
+    TooManyTokens,
+    BadToken,
+};
+
+pub const BodyKind = enum {
+    header_only,
+    identity,
+    call_one,
+};
+
+/// A parsed thin barket: sample face + optional named shape + identity/call body.
+/// `shape_name_len == 0` means sample shape is the aura `@u32`.
+pub const BarketSpec = struct {
+    face: [max_face_len]u8 = [_]u8{0} ** max_face_len,
+    face_len: u32 = 0,
+    shape_name: [max_shape_len]u8 = [_]u8{0} ** max_shape_len,
+    shape_name_len: u32 = 0,
+    body: BodyKind = .header_only,
+    gate: [max_gate_len]u8 = [_]u8{0} ** max_gate_len,
+    gate_len: u32 = 0,
+};
+
+pub fn face_slice(spec: *const BarketSpec) []const u8 {
+    assert(spec.face_len <= max_face_len); // invariant: face fits in buffer
+    return spec.face[0..spec.face_len];
+}
+
+pub fn shape_name_slice(spec: *const BarketSpec) []const u8 {
+    assert(spec.shape_name_len <= max_shape_len); // invariant: shape name fits
+    return spec.shape_name[0..spec.shape_name_len];
+}
+
+pub fn gate_slice(spec: *const BarketSpec) []const u8 {
+    assert(spec.gate_len <= max_gate_len); // invariant: gate fits in buffer
+    return spec.gate[0..spec.gate_len];
+}
+
+/// True when `gate` is a closed demo one-arg gate accepted in a barket call body.
+pub fn is_closed_call_gate(gate: []const u8) bool {
+    return std.mem.eql(u8, gate, "double") or std.mem.eql(u8, gate, "inc") or std.mem.eql(u8, gate, "dec") or std.mem.eql(u8, gate, "flip") or std.mem.eql(u8, gate, "say");
+}
+
+/// True when `gate` is the closed kind-mold call-body gate (STOA127).
+pub fn is_kind_call_gate(gate: []const u8) bool {
+    return std.mem.eql(u8, gate, "flip");
+}
+
+/// True when `gate` is the closed xact-mold call-body gate (STOA128).
+pub fn is_xact_call_gate(gate: []const u8) bool {
+    return std.mem.eql(u8, gate, "flip");
+}
+
+/// True when `gate` is the closed xfer-mold call-body gate (STOA129).
+pub fn is_xfer_call_gate(gate: []const u8) bool {
+    return std.mem.eql(u8, gate, "flip");
+}
+
+/// STOA326: closed call-body gate under pair…nona `$:` — `flip` only today.
+pub fn is_n_field_call_gate(gate: []const u8) bool {
+    return std.mem.eql(u8, gate, "flip");
+}
+
+fn parse_body(src: []const u8, toks: []const tokens.Token, start: u32, face_text: []const u8, spec: *BarketSpec) ParseError!u32 {
+    var i = start;
+    const n: u32 = @intCast(toks.len);
+    if (i >= n) {
+        spec.body = .header_only;
+        return i;
+    }
+    if (toks[@as(usize, @intCast(i))].kind == .ident) {
+        const body_text = tokens.slice_of(src, toks[@as(usize, @intCast(i))]);
+        if (!std.mem.eql(u8, body_text, face_text)) return error.BodyFaceMismatch;
+        i += 1;
+        spec.body = .identity;
+        return i;
+    }
+    if (toks[@as(usize, @intCast(i))].kind == .rune2 and std.mem.eql(u8, tokens.slice_of(src, toks[@as(usize, @intCast(i))]), "%-")) {
+        i += 1;
+        if (i >= n or toks[@as(usize, @intCast(i))].kind != .ident) return error.MalformedBody;
+        const gate_text = tokens.slice_of(src, toks[@as(usize, @intCast(i))]);
+        if (gate_text.len == 0 or gate_text.len > max_gate_len) return error.MalformedBody;
+        // Closed demo gates — double (STOA115) · inc · dec (STOA116).
+        if (!is_closed_call_gate(gate_text)) return error.BodyGateNotYetLowered;
+        i += 1;
+        if (i >= n or toks[@as(usize, @intCast(i))].kind != .ident) return error.MalformedBody;
+        const call_sample = tokens.slice_of(src, toks[@as(usize, @intCast(i))]);
+        if (!std.mem.eql(u8, call_sample, face_text)) return error.BodySampleMismatch;
+        i += 1;
+        spec.body = .call_one;
+        tally_copy.copy_disjoint(u8, spec.gate[0..gate_text.len], gate_text);
+        spec.gate_len = @intCast(gate_text.len);
+        return i;
+    }
+    return error.BodyNotYetLowered;
+}
+
+/// Parse a barket source into a BarketSpec.
+pub fn parse_source(src: []const u8) ParseError!BarketSpec {
+    if (src.len == 0) return error.EmptySource;
+    var buf: [tokens.max_tokens]tokens.Token = undefined;
+    const n = tokens.tokenize(src, &buf) catch |err| switch (err) {
+        error.TooManyTokens => return error.TooManyTokens,
+        error.BadToken => return error.BadToken,
+        error.EmptySource => return error.EmptySource,
+    };
+    assert(n <= tokens.max_tokens); // postcondition: tokenize bound
+    const toks = buf[0..n];
+    var i: u32 = 0;
+
+    while (i < n and toks[@as(usize, @intCast(i))].kind == .newline) : (i += 1) {}
+    if (i >= n) return error.NotABarket;
+
+    const rune_tok = toks[@as(usize, @intCast(i))];
+    if (rune_tok.kind != .rune2) return error.NotABarket;
+    if (!std.mem.eql(u8, tokens.slice_of(src, rune_tok), "|^")) return error.NotABarket;
+    i += 1;
+
+    if (i >= n or toks[@as(usize, @intCast(i))].kind != .ident) return error.MissingFace;
+    const face_text = tokens.slice_of(src, toks[@as(usize, @intCast(i))]);
+    if (face_text.len == 0 or face_text.len > max_face_len) return error.MissingFace;
+    i += 1;
+
+    if (i >= n or toks[@as(usize, @intCast(i))].kind != .equals) return error.MissingEquals;
+    i += 1;
+
+    // Sample shape — aura `@u32` or closed named living `-shape` / study `-mold`.
+    if (i >= n) return error.MissingAura;
+    const shape_tok = toks[@as(usize, @intCast(i))];
+    var named_shape: ?[]const u8 = null;
+    var sample_text: []const u8 = undefined;
+    var stated_shape: []const u8 = undefined;
+    if (shape_tok.kind == .aura) {
+        const aura_text = tokens.slice_of(src, shape_tok);
+        nest_type.assert_aura_nests(aura_text, "@u32") catch return error.SampleDoesNotNest;
+        sample_text = aura_text;
+        stated_shape = "@u32";
+    } else if (shape_tok.kind == .ident) {
+        const shape_text = tokens.slice_of(src, shape_tok);
+        if (shape_text.len == 0 or shape_text.len > max_shape_len) return error.MissingAura;
+        nest_type.assert_bartis_named_shape(shape_text) catch return error.SampleDoesNotNest;
+        named_shape = shape_text;
+        sample_text = shape_text;
+        stated_shape = shape_text;
+    } else return error.MissingAura;
+    // STOA121 / STOA130: |^ carries nesting through shape-bounded nesting-nests (no new token).
+    nest_type.assert_sample_nesting_nests(true, sample_text, stated_shape) catch return error.SampleDoesNotNest;
+    i += 1;
+
+    while (i < n and toks[@as(usize, @intCast(i))].kind == .newline) : (i += 1) {}
+
+    var spec: BarketSpec = .{};
+    assert(face_text.len <= max_face_len); // precondition held by check above
+    tally_copy.copy_disjoint(u8, spec.face[0..face_text.len], face_text);
+    spec.face_len = @intCast(face_text.len);
+    if (named_shape) |sn| {
+        tally_copy.copy_disjoint(u8, spec.shape_name[0..sn.len], sn);
+        spec.shape_name_len = @intCast(sn.len);
+    }
+
+    i = try parse_body(src, toks, i, face_text, &spec);
+
+    while (i < n) : (i += 1) {
+        if (toks[@as(usize, @intCast(i))].kind != .newline) return error.MalformedBody;
+    }
+    return spec;
+}

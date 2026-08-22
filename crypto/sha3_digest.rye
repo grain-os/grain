@@ -1,0 +1,106 @@
+//! crypto/sha3_digest.rye -- the SHA3-256 or SHA3-512 of a file, over this tree's own Keccak.
+//!
+//! WHY THIS EXISTS. The Amphora and Cellar fixtures pinned `openssl dgst -sha3-256` as their
+//! digest, and `openssl` is absent from this pier's PATH -- so Amphora lap 2 could not run, which in turn
+//! kept the fascia meter silent for an unknown span (REDS %112). The obvious substitution is the
+//! wrong one: `sha256sum` computes SHA-2, and SHA3-256 is Keccak. They are different algorithms,
+//! not two spellings of one, and swapping them would silently change every content address in
+//! every manifest this tree has written.
+//!
+//! So the digest comes from OUR OWN code instead. `crypto/sha3.rye` is authored Rye over
+//! Keccak-f[1600], studied clean-room from FIPS 202 and parity-checked, and it computes exactly
+//! the algorithm the hash-tier spec already names for the Working tier
+//! (`context/specs/20260703-191112_resins-and-hash-tiers.md`). Same algorithm, same digests, no
+//! external dependency, and one more place the tree stands on what it built.
+//!
+//! WHAT THIS DOES NOT REPLACE. That spec calls openssl the *independent host oracle*, and it was
+//! right to: a digest checked only against the code that produced it proves less than one checked
+//! against a stranger. This tool is the IMPLEMENTATION, so the lap runs anywhere; openssl stays
+//! the ORACLE wherever it is installed, and `tools/sha3_file_witness.rish` checks our digests
+//! against published FIPS 202 answers so the parity claim rests on a public standard rather than
+//! on whichever tools a given machine happens to carry.
+//!
+//! Season: the Standfast restrategizing of `20260821` -- closing the last known red on this pier,
+//! then widening to SHA3-512 so the waymark draws and the registry seal stand on the same Keccak.
+//! After that widening the tree carries NO external hash dependency at all: openssl remains only
+//! as the independent oracle the hash-tier spec asks for, consulted where present, never required.
+//!
+//!   rye/bin/rye build crypto/sha3_digest.rye -femit-bin=crypto/bin/sha3-digest
+//!   crypto/bin/sha3-digest 256 <path>   # 64 lowercase hex characters and a newline
+//!   crypto/bin/sha3-digest 512 <path>   # 128 lowercase hex characters and a newline
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const sha3 = @import("sha3.rye");
+
+/// Every file this digests is a manifest, a resin, or a test fixture -- none of them large. The
+/// bound is named rather than unlimited because `hash256` takes the whole message in memory, so
+/// an unbounded read is an unbounded allocation wearing a convenience API.
+const max_file_bytes: u32 = 64 * 1024 * 1024;
+
+/// A SHA3-256 digest is 32 bytes and a SHA3-512 digest is 64, so their hex renderings are 64 and
+/// 128 characters. The buffer is sized for the wider one and only the used prefix is written.
+const hex_max: u32 = 128;
+
+pub fn main(init: std.process.Init) !u8 {
+    const a = init.arena.allocator();
+    const io = init.io;
+
+    const args = init.minimal.args.toSlice(a) catch return error.OutOfMemory;
+    if (args.len < 3) {
+        print("usage: sha3-digest <256|512> <path>\n", .{});
+        return 2;
+    }
+    const bits = args[1];
+    const path = args[2];
+
+    const want_512 = std.mem.eql(u8, bits, "512");
+    if (!want_512 and !std.mem.eql(u8, bits, "256")) {
+        print("sha3-digest: width must be 256 or 512, not {s}\n", .{bits});
+        return 2;
+    }
+
+    // invariant: a path is named before anything is opened, since a digest of nothing is a lie
+    // that looks exactly like a digest.
+    assert(path.len != 0);
+
+    const cwd = std.Io.Dir.cwd();
+    const data = cwd.readFileAlloc(io, path, a, std.Io.Limit.limited(max_file_bytes)) catch |err| {
+        print("sha3-256: cannot read {s}: {s}\n", .{ path, @errorName(err) });
+        return 1;
+    };
+
+    // invariant: the read stayed inside the bound this file names, so the digest below covers the
+    // whole file rather than a silently truncated prefix.
+    assert(data.len <= max_file_bytes);
+
+    var digest_buf: [sha3.digest_512]u8 = undefined;
+    var digest_len: u32 = sha3.digest_256;
+    if (want_512) {
+        const d = try sha3.hash512(data);
+        @memcpy(digest_buf[0..d.len], d[0..]);
+        digest_len = sha3.digest_512;
+    } else {
+        const d = try sha3.hash256(data);
+        @memcpy(digest_buf[0..d.len], d[0..]);
+        digest_len = sha3.digest_256;
+    }
+
+    // invariant: the digest is one of the two widths SHA3 promises, so the hex length below is
+    // exactly twice it and the buffer is never overrun.
+    assert(digest_len == sha3.digest_256 or digest_len == sha3.digest_512);
+
+    const hex_len: u32 = digest_len * 2;
+    var hex: [hex_max + 1]u8 = undefined;
+    sha3.to_hex(digest_buf[0..digest_len], hex[0..hex_len]);
+    hex[hex_len] = '\n';
+
+    // The digest goes to STDOUT, not through `print`, which is std.debug.print and writes to
+    // stderr. A tool whose whole output is one value must put that value where a caller captures
+    // it -- the first shape of this file printed a perfect digest that every `$(...)` around it
+    // read as the empty string.
+    var out = std.Io.File.stdout();
+    try out.writeStreamingAll(io, hex[0 .. hex_len + 1]);
+    return 0;
+}
