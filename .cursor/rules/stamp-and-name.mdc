@@ -1,0 +1,45 @@
+---
+description: A mark is a stamp and a name -- never an ascending letter or number; a room folds by what its files are found by, day into date/YYYYMMDD/ or first sprig letter into <room>/<letter>/, and a dated filename keeps its whole stamp.
+alwaysApply: true
+---
+
+> **Molted into Gauge `20260823.234815`** alongside the canonical `.claude/rules/stamp-and-name.md`, register only -- every claim, number, path, and stamp held exactly (checkpoint `1d5ade54b7`).
+
+# Stamp and Name -- how a piece of work is marked
+
+**Seated:** `20260821.160050` on the maintainer's word. Canonical twin: `.claude/rules/stamp-and-name.md` (full form). Kin: `waymark-ladders.mdc`, the one-clock naming law, `lindy-first-crux.mdc`.
+
+**A mark is a stamp and a name.** The stamp orders it; the name means it.
+
+1. **Mark by stamp and name** -- `the standing movement (20260821-142939)`.
+2. **Never mint an ascending mark** -- no `Fold A -> Fold AH`, no `f0-f63`, no `X0/X1` rungs for planned work.
+3. **Count, never number** -- derive a total by measurement rather than carrying it inside a name.
+4. **Keep the whole stamp in every filename** -- `date/YYYYMMDD/YYYYMMDD-HHMMSS_sprig.ext`.
+
+**Why.** Four seated ladders announced a length and stopped short (`f0-f63` at f3, `u0-u127` at u91, `i0-i15` at i6, sixteen Geode rounds at two rooms of twelve), so each number was a forecast written where it can never be corrected. An ascending mark also implies a dependency that is not there, sorts wrong in every text-sorting tool (`Fold Z` before `Fold AA`), and collides across ladders. The commit subject already carries a stamp and a name, so the law is subtraction rather than substitution.
+
+**What keeps its place.** Waymarks are names, not counts -- they stay. `rung` stays where a real ladder exists in code (`caravan/ladder_checks.rye`); `lap` and `round` carry planned work.
+
+**The path.** A room that outgrows a reader folds to `<room>/date/YYYYMMDD/`. `date/`, not `archive/` -- archive means finished, and a log from nine days ago is the live record. The whole stamp stays in the filename because it makes old-path-to-new a pure invertible function, keeps the basename globally unique, and survives leaving its directory.
+
+**Living things are repointed; dated testimony is resolved.** A room index and living code are repointed in the same round (`tools/d/dated_path_repoint.rish`), because a witness running `grep -q ... <room>/<file>.md` resolves nothing -- it fails. Dated testimony is never rewritten, and the line needs no roster: a file whose own basename carries a one-clock stamp is testimony. A stale reference in testimony is resolved: `rishi/bin/rishi run tools/d/dated_path_resolve.rish <reference> [<citing-file>]`.
+
+**A room folds by what its files are found by** -- amended `20260823.144100`. The bound is one number for every room, 256 flat entries; the shape follows from a different question. A room whose files are found by WHEN folds by day, into `date/YYYYMMDD/`. A room whose files are found by WHAT folds by first sprig letter, into `<room>/<letter>/`, a letter over bound splitting one deeper -- `tools/` went that way, 1,917 flat entries into 35 rooms. Both keep the property that makes a fold safe: the new path is a pure function of the basename, so a stale reference is resolved (`tools/t/tool_path_resolve.rish`) rather than rewritten, and living references are repointed (`tools/t/tool_path_repoint.rish`). One extension names its own room ahead of the letter: a `.rye` source of `tools/` lives in `tools/rye/` with the shims and the `enrich/` room it imports, because Zig refuses an import that escapes the root file's directory.
+
+**A terminal day shelf is bounded at 768, never 256** -- amended `20260828.194500` on the maintainer's word. A day shelf under `date/YYYYMMDD/` is the fold's own output and its day is closed, so it can never grow; its one hazard is the 1,000-entry listing cliff, and 768 is a power of two under that cliff rather than at it. A shelf past 768 reds `tools/r/room_bound_witness.rish`, and the named escape is the hour fold, `date/YYYYMMDD/HH/` -- equally pure, the hour being characters 10 and 11 of the basename. Proven both ways in `tools/fixtures/r/room_bound_control.sh`.
+
+**A meter reads a room by its own rule.** `tools/fixtures/r/room_bound_scan.sh` counts a day-folded room by dated basenames and a letter-folded room by every flat entry, printing `counts=all` beside the second. That is why `tools/` reached 7.4x the bound with every guard green -- not one of its entries carried a stamp, so the dated count read zero for the room's whole life.
+
+**The fold, the resolver, and the census must agree on what a file is** -- each disagreement cost a round.
+
+**A room earns ENFORCE by folding** -- `session-logs`, `counsel`, `active-designing`, `expanding-prompts`, `waymarks` (`20260821.171331`), `tools` (`20260823.144100`) -- or is **born enforced** if opened under the law, like `active-development` (`20260821.174047`), which has no backlog to grandfather. An enforced room is reported even at zero flat files, since a room that vanishes from a meter is not a room that passed it. Everything else stays advisory until its own fold. No fold ships without `tools/d/dated_path_witness.rish` green -- it gates the **lost**-reference count (a basename that exists nowhere, or one at two paths) with no slack, rather than the whole broken count, since a recovered reference is the expected steady state and rises whenever a room folds.
+
+**Illustrate with placeholders, cite only what exists.** An example path in prose is a shape -- `date/YYYYMMDD/YYYYMMDD-HHMMSS_sprig.ext` -- never a concrete-looking path to a file that is not there, which reads as a real citation to every reader and every tool.
+
+**A census number keeps its place** (amended `20260823.173634`). A number that predicts is a forecast; a number that counts is a census, and this law retires only the first. `construction/REDS.md` keeps its `%NNN` rows: each row already carries stamp and name beside the number, a gapless spine proves the record is whole where a stamp cannot (`1..N` with no gaps, held by `tools/gen/chapter/reds_ledger_monotone_witness.rish`), and of 2,519 citations measured `20260823.173634` some 532 sit in commit messages and 208 in dated testimony, both beyond any migration's reach. **The test:** could this number turn out to be wrong? Planned work, yes -- stamp and name it. Work already done, no, and a gap in it would mean a record has gone. Full argument: `active-designing/20260823-173634_the-census-number-keeps-its-place.md`.
+
+**An index folds with the room it describes** (amended `20260824.052329`). A fold moves a room's files and leaves its index rows standing, so the index becomes the one file growing without a ceiling: `session-logs/README.md` reached 2,895,849 bytes against the 24,576 its own header declared, with its title at line 1,881 beneath 1,880 rows and no table delimiter under any of the 1,658 pipe rows, so by the GFM spec it held no table at all (REDS %182). The rule: a day's rows fold the moment that day's logs do, onto `<room>/date/README-index-YYYYMMDD.md`, one shelf per closed day, immutable once written -- so the pin holds exactly the rows whose logs are still flat. Following the files is what keeps shelf links true, since `](date/YYYYMMDD/name)` becomes `](YYYYMMDD/name)` with exactly one answer while a still-flat row's target would change again. The gate is the row rule rather than a byte ceiling, because a byte ceiling would refuse ordinary work and a row goes stale only when its logs fold; the byte bound then follows for free. One tool: `rye run tools/rye/session_logs_archive.rye index-fold [--room NAME]`. `tools/i/index_fold_witness.rish` holds `session-logs` at zero and ratchets the other four rooms under a ceiling of 317 that only falls.
+
+**A calendar ring is a capacity, never a label** (amended `20260829.005357`). The panchanga's rings -- orbit 15, quest 75, journey 375, equinox 1,875, chapter 9,375 rounds -- are counted capacities: borrowing one as a subdivision label for a plan spends a counted word on an uncounted thing, the same squat REDS %330 booked for the equinox guard family. A plan's parts are **movements**, marked by stamp and name; the ladder keeps its waymark; the rings keep their numbers (REDS %336).
+
+**Accrete-never-break.** Every dated log and commit that already wrote `Fold AI` or `f0-f63` keeps every letter. This governs what is marked from here forward.

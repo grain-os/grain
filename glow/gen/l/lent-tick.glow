@@ -1,0 +1,3 @@
+::  Bounded trap whose ceiling is a named subject's length.
+::  Lowers to a shrinking-list fold under records.len (brief's own shape).
+|-  (lent records)

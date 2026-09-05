@@ -1,0 +1,103 @@
+//! tally/seed.rye -- the first running Tally: a bounded region with asserted edges.
+//!
+//! Tally is the garden allocator of the Rye family: a region of memory with a
+//! stated start, length, and end, where bump allocation either lands inside the
+//! edges or fails with a reason -- no silent wrap, no undefined behavior. This
+//! seed is the smallest version that runs: one backing buffer, one region, bump
+//! allocation, and clear whole -- proved by hosted assertions so the design lives
+//! in running code and not only in prose.
+//!
+//! Build and run:
+//!   mkdir -p tally/bin
+//!   export RYE_ZIG="$PWD/vendor/zig-toolchain/zig"
+//!   rye/bin/rye build tally/seed.rye -femit-bin=tally/bin/tally-seed
+//!   tally/bin/tally-seed
+//!
+//! Expected output: tally seed: all facts held.
+//!
+//! The design grows toward Tally v1 -- named regions per service with explicit
+//! start, length, and end -- and eventually forms the floor that Pond's mem_mb
+//! measures. See active-designing/20260619-084412_the-first-seeds.md.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+
+const tally_seed_version = "20260620.211712";
+
+/// Stack backing for the proof -- small enough to hold in mind, large enough to prove.
+const BACKING_LEN: u32 = 64;
+
+// `Region` and `buf_len_u32` stood here whole, and `tally/gardens.rye` held a copy of them that
+// had drifted by one assert. One body now, in `region.rye` beside this file. This module keeps
+// them private, exactly as it always did -- nothing outside it ever named them.
+
+const region_mod = @import("region.rye");
+const buf_len_u32 = region_mod.buf_len_u32;
+const Region = region_mod.Region;
+
+pub fn main(init: std.process.Init) !u8 {
+    const io = init.io;
+    const stdout = std.Io.File.stdout();
+
+    // A 64-byte stack garden -- small enough to hold in mind, large enough to prove.
+    var backing: [BACKING_LEN]u8 = undefined;
+    var region = Region.init(&backing);
+
+    // At creation: cursor at the start, the full length remains.
+    assert(region.pos == 0);
+    assert(region.remaining() == BACKING_LEN);
+
+    // --- Allocate within bounds ---
+    // Each call lands inside the edges; the cursor advances by exactly n.
+    const a = try region.alloc(10);
+    assert(a.len == 10);
+    assert(region.pos == 10);
+    assert(region.remaining() == 54);
+
+    const b = try region.alloc(20);
+    assert(b.len == 20);
+    assert(region.pos == 30);
+    assert(region.remaining() == 34);
+
+    // The slices are real memory -- write into them and read the values back.
+    @memset(a, 'A');
+    @memset(b, 'B');
+    assert(a[0] == 'A');
+    assert(b[0] == 'B');
+
+    // Allocate all the way to the edge -- the last byte is still inside.
+    const c = try region.alloc(34);
+    assert(c.len == 34);
+    assert(region.pos == 64);
+    assert(region.remaining() == 0);
+
+    // --- Overflow fails with a stated reason ---
+    // OutOfBounds is returned, not a wrap, not silence, not undefined behavior.
+    {
+        const overflow = region.alloc(1);
+        if (overflow) |_| unreachable else |err| assert(err == error.OutOfBounds);
+    }
+
+    // Zero bytes at the edge succeeds -- no space consumed, cursor unchanged.
+    const empty = try region.alloc(0);
+    assert(empty.len == 0);
+    assert(region.pos == 64);
+
+    // --- Clear whole: one gesture, season ends ---
+    region.clear();
+    assert(region.pos == 0);
+    assert(region.remaining() == BACKING_LEN);
+
+    // After clearing, fresh allocations begin again from the same backing store.
+    const d = try region.alloc(16);
+    assert(d.len == 16);
+    assert(region.pos == 16);
+    assert(d.ptr == backing[0..].ptr);
+
+    // Old and new allocations do not overlap across a clear -- the cursor reset.
+    assert(region.remaining() == 48);
+
+    stdout.writeStreamingAll(io, "tally seed: all facts held.\n") catch {};
+    return 0;
+}

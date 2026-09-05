@@ -1,0 +1,75 @@
+# tools/w/waymark_rung_drift_witness.rish -- the CION conversion map stands while ascending rung
+# marks in living files stay under a ceiling that only falls (REDS %329, the mark law's meter).
+#
+#   rishi/bin/rishi run tools/w/waymark_rung_drift_witness.rish
+#
+# The opening campaign lap maps every STOA and ALES rung to the author clock of its landing
+# commit before a citation moves. Its controls alter history and ledger readings, remove a row,
+# and exercise the honest census fallback. The mark law retired HAWM7-shaped rung marks on
+# 20260821.160050 and two ladders numbered past it for a week, because the law had no meter. This
+# witness then proves the ceiling from both sides on planted tracked-path input in a Grain-tree
+# pen. Explicit Bash keeps the controls clear of the macOS selector shell that this Codex
+# enclosure cannot read.
+
+say "rung-stamp-map: Language EN -- a landing keeps its name while the one-clock stamp carries order."
+say "rung-stamp-map: Style Gauge, Meter -- every derived row names the commit that supports it."
+say "rung-stamp-map: Lens TAME -- an absent or altered source refuses before a citation moves."
+
+let map_live = run ["bash" "tools/fixtures/w/waymark_rung_stamp_map_scan.sh"]
+say map_live.out
+assert map_live.ok else "rung-stamp-map: the live fixture must agree with both ledgers and landed history"
+assert map_live.out contains "map_rows=588" else "rung-stamp-map: every landed label in both ladders must have one row"
+assert map_live.out contains "resolved_rows=588" else "rung-stamp-map: every derived label must carry its author stamp"
+assert map_live.out contains "census_rows=0" else "rung-stamp-map: a recoverable landing must not hide behind a census mark"
+assert map_live.out contains "ledger_rows=17" else "rung-stamp-map: each explicit STOA ledger stamp must agree with the author clock"
+assert map_live.out contains "spot_checks=10" else "rung-stamp-map: the commit attachment must be sampled across both ladders"
+assert map_live.out contains "verdict=ok" else "rung-stamp-map: the live scan must agree with its exit"
+
+let map_control = run ["bash" "tools/fixtures/w/waymark_rung_stamp_map_control.sh"]
+say map_control.out
+assert map_control.ok else "rung-stamp-map: the planted controls must complete"
+assert map_control.out contains "author_stamp_refusal=yes" else "rung-stamp-map: changing an author stamp must refuse against git history"
+assert map_control.out contains "ledger_stamp_refusal=yes" else "rung-stamp-map: changing an explicit ledger stamp must refuse"
+assert map_control.out contains "coverage_refusal=yes" else "rung-stamp-map: removing a landed row must refuse"
+assert map_control.out contains "census_fallback=yes" else "rung-stamp-map: an honestly underivable row must keep its number"
+assert map_control.out contains "one_clock_host_independent=yes" else "rung-stamp-map: the one-clock stamp must not drift with the host zone"
+assert map_control.out contains "control_verdict=ok" else "rung-stamp-map: the controls must agree with themselves"
+
+say "GREEN: rung-stamp-map -- 588 labels stand, author and ledger seams bite, and census remains an honest fallback."
+
+say "rung-drift: Language EN -- a rung is marked by waymark, stamp, and plain name; a counter is the retired form."
+say "rung-drift: Style Gauge, Meter -- the ceiling only falls, and the reading is the scan's own."
+say "rung-drift: Lens TAME -- the boundary proven from both sides before the live reading is trusted."
+
+# THE INTERPRETER IS NAMED BY PATH LOOKUP HERE TOO, and the two legs below are why REDS %353
+# was not the whole repair. That row swept twelve absolute `/bin/bash` spellings out of this
+# family and left two standing INSIDE this file -- nested in the `bash -c` strings on the pen
+# legs, where a grep for an interpreter in command position cannot see them. On a pier whose
+# /bin is empty the elder spelling exited 127 with `No such file or directory`, which
+# satisfied `bitten.ok == false` for a reason that has nothing to do with rung drift: a
+# refusing-side proof passing VACUOUSLY, which is the one failure a refusing-side proof
+# exists to prevent. It was caught only because the assert beside it also reads the verdict
+# text, so the lesson is the pair: a refusal must refuse, AND it must refuse for its own
+# reason. Measured on this pier `20260830`: /bin holds `sh` alone and bash resolves to
+# /run/current-system/sw/bin/bash.
+let pen = run ["bash" "-c" "set -eu; mkdir -p .mind-state/tmp; pen=$(mktemp -d .mind-state/tmp/rung-drift.XXXXXX); mkdir -p $pen/docs; echo 'the FORA7 rung lands' > $pen/docs/page.md; echo 'the FORA8 rung lands' >> $pen/docs/page.md; echo 'docs/page.md' > $pen/files.lst; echo $pen"]
+assert pen.ok else "rung-drift: the pen must build"
+let pen_dir = trim pen.out
+
+let bitten = run ["bash" "-c" "RUNG_ROOT=${pen_dir} RUNG_FILE_LIST=${pen_dir}/files.lst RUNG_CEILING=1 bash tools/fixtures/w/waymark_rung_drift_scan.sh"]
+assert (bitten.ok == false) else "rung-drift: two planted marks over a pen ceiling of one must refuse"
+assert bitten.out contains "verdict=rung_drift" else "rung-drift: the refusal must wear its own verdict"
+
+let freed = run ["bash" "-c" "RUNG_ROOT=${pen_dir} RUNG_FILE_LIST=${pen_dir}/files.lst RUNG_CEILING=2 bash tools/fixtures/w/waymark_rung_drift_scan.sh"]
+assert freed.ok else "rung-drift: two marks at a pen ceiling of exactly two must walk free"
+assert freed.out contains "verdict=ok" else "rung-drift: the boundary must be met from the passing side too"
+
+let cleanup = run ["bash" "-c" "rm -rf ${pen_dir}"]
+assert cleanup.ok else "rung-drift: the pen must be returned"
+
+let live = run ["bash" "tools/fixtures/w/waymark_rung_drift_scan.sh"]
+say live.out
+assert live.ok else "rung-drift: a numbered rung mark entered living prose past the ceiling -- write the waymark, stamp, and plain name instead (.claude/rules/stamp-and-name.md)"
+assert live.out contains "verdict=ok" else "rung-drift: the live reading must agree with its own exit"
+
+say "GREEN: rung-drift -- the retired mark is countable, the ceiling only falls, and both sides of the boundary are proven on metal."

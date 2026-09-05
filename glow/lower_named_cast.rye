@@ -1,0 +1,700 @@
+//! glow/lower_named_cast.rye -- resolve `^-  <name>` against a `+$` mold.
+//!
+//! STOA77: same-desk `+$` / `$:` then `^-`.
+//! STOA79: cross-desk `/+` then `^-` for `$:` molds.
+//! STOA81: same-desk - cross-desk `^-` against unit `$%` molds.
+//! STOA82: same-desk - cross-desk `^-` against payload `$%` molds.
+//! STOA84-85: dispatch peeks via `tokens.rye`.
+//! STOA87: TAME tidy -- assert - u32 - copy_disjoint - split emitters.
+//! STOA93: cross-desk parse walks `tokens.cross_desk_parts` (lexer->lower).
+//! STOA94: same-desk mold-body span via `tokens.named_cast_parts`.
+//! STOA175: multi-field `$:` named-cast (pair...nona) -- full struct emit - demo vals.
+//! STOA182: `$:` `@t` named-cast mirrors mold lower (`[aura_t_max_bytes]u8` + demo cord).
+//! STOA184: `$:` `@ux` named-cast mirrors mold lower (`[aura_ux_max_bytes]u8` + demo hex).
+//! STOA187: `$%` payload `@t`/`@ux` parse.
+//! STOA188: `$%` payload `@t`/`@ux` named-cast emit.
+//! `20260724.205719`: `$:` / `$%` `@u64` named-cast emit (Zig `u64`).
+//!
+//!   +$  kind-mold
+//!     $%  [%mint ~]
+//!         [%send ~]
+//!     ==
+//!   ^-  kind-mold
+
+const std = @import("std");
+const assert = std.debug.assert;
+const rm = @import("rune_shape.rye");
+const tokens = @import("tokens.rye");
+const tally_copy = @import("tally_copy.rye");
+const nest_type = @import("nest_type.rye");
+
+pub const max_stem_len: u32 = 64;
+
+pub const LowerError = rm.ParseError || error{
+    Overflow,
+    EmptySource,
+    BadIdent,
+    CastShapeMismatch,
+    NamedCastNeedsTuple,
+    NamedCastNeedsPayloadArm,
+    NotACrossDesk,
+    NotANamedCast,
+    TooFewLines,
+    TooManyLines,
+};
+
+pub const named_cast_demo: u32 = 5;
+/// Demo faces for multi-field `$:` named-cast (matches lower_shape.shape_demo_vals).
+pub const named_cast_demo_vals: [rm.max_fields]u32 = .{ 5, 3, 7, 2, 7, 4, 6, 8, 9 };
+
+/// Cross-desk `/+ <stem>` then `^- <mold>`.
+/// Invariant: stem_len <= max_stem_len; cast_mold_len <= rm.max_name_len.
+pub const CrossDeskSpec = struct {
+    stem: [max_stem_len]u8 = .{0} ** max_stem_len,
+    stem_len: u32 = 0,
+    cast_mold: [rm.max_name_len]u8 = .{0} ** rm.max_name_len,
+    cast_mold_len: u32 = 0,
+};
+
+fn zig_safe_ident(face: []const u8, out: *[rm.max_name_len]u8) LowerError!u32 {
+    // invariant: the safe ident is built in a fixed buffer of that budget, so a longer name
+    // would arrive truncated into a different one rather than refused
+    assert(face.len <= rm.max_name_len);
+    if (face.len == 0 or face.len > rm.max_name_len) return error.BadIdent;
+    const n: u32 = @intCast(face.len);
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        const c = face[@as(usize, @intCast(i))];
+        const mapped: u8 = if (c == '-') '_' else c;
+        if (i == 0) {
+            if (!((mapped >= 'a' and mapped <= 'z') or (mapped >= 'A' and mapped <= 'Z') or mapped == '_'))
+                return error.BadIdent;
+        } else {
+            if (!((mapped >= 'a' and mapped <= 'z') or (mapped >= 'A' and mapped <= 'Z') or (mapped >= '0' and mapped <= '9') or mapped == '_'))
+                return error.BadIdent;
+        }
+        out[@as(usize, @intCast(i))] = mapped;
+    }
+    return n;
+}
+
+fn zig_type_name(name: []const u8, out: *[rm.max_name_len]u8) LowerError!u32 {
+    // invariant: the safe ident is built in a fixed buffer of that budget, so a longer name
+    // would arrive truncated into a different one rather than refused
+    assert(name.len <= rm.max_name_len);
+    if (name.len == 0 or name.len > rm.max_name_len) return error.BadIdent;
+    // STOA190: study `-mold` names emit the same Zig stem as `-shape` (AmountShape).
+    var name_norm_buf: [rm.max_name_len]u8 = undefined;
+    var name_use: []const u8 = name;
+    if (name.len >= 5 and std.mem.eql(u8, name[name.len - 5 ..], "-mold")) {
+        const stem_len = name.len - 5;
+        tally_copy.copy_disjoint(u8, name_norm_buf[0..stem_len], name[0..stem_len]);
+        tally_copy.copy_disjoint(u8, name_norm_buf[stem_len .. stem_len + 6], "-shape");
+        name_use = name_norm_buf[0 .. stem_len + 6];
+    }
+    var o: u32 = 0;
+    var cap = true;
+    for (name_use) |c| {
+        if (c == '-' or c == '_') {
+            cap = true;
+            continue;
+        }
+        if (o >= rm.max_name_len) return error.BadIdent;
+        var ch = c;
+        if (cap) {
+            if (ch >= 'a' and ch <= 'z') ch = ch - ('a' - 'A');
+            cap = false;
+        }
+        if (o == 0) {
+            if (!((ch >= 'A' and ch <= 'Z') or (ch >= 'a' and ch <= 'z') or ch == '_'))
+                return error.BadIdent;
+        }
+        out[@as(usize, @intCast(o))] = ch;
+        o += 1;
+    }
+    if (o == 0) return error.BadIdent;
+    return o;
+}
+
+pub fn stem_slice(spec: *const CrossDeskSpec) []const u8 {
+    // invariant: the slice below is taken from a fixed buffer of that size, so a stored length
+    // past it would read the bytes that follow the field
+    assert(spec.stem_len <= max_stem_len);
+    return spec.stem[0..@as(usize, @intCast(spec.stem_len))];
+}
+
+pub fn cast_mold_slice(spec: *const CrossDeskSpec) []const u8 {
+    // invariant: the slice below is taken from a fixed buffer of that size, so a stored length
+    // past it would read the bytes that follow the field
+    assert(spec.cast_mold_len <= rm.max_name_len);
+    return spec.cast_mold[0..@as(usize, @intCast(spec.cast_mold_len))];
+}
+
+pub fn zig_stem(spec: *const CrossDeskSpec, out: *[max_stem_len]u8) LowerError!u32 {
+    return zig_safe_ident(stem_slice(spec), out);
+}
+
+/// True when a multi-line desk is `+$` ... `==` followed by `^-  <name>`.
+pub fn looks_like_named_cast(src: []const u8) bool {
+    return tokens.looks_like_named_cast(src);
+}
+
+/// True when desk is `/+  <stem>` then `^-  <mold-name>`.
+pub fn looks_like_cross_desk(src: []const u8) bool {
+    return tokens.looks_like_cross_desk(src);
+}
+
+pub fn parse_cross_desk(src: []const u8) LowerError!CrossDeskSpec {
+    const parts = tokens.cross_desk_parts(src) orelse return error.NotACrossDesk;
+    var spec: CrossDeskSpec = .{};
+    const stem = tokens.slice_of(src, parts.stem);
+    // invariant: the stem is copied into a buffer of max_stem_len, and the lexer's own ident
+    // bound is what makes that copy fit
+    assert(stem.len <= max_stem_len);
+    if (stem.len == 0 or stem.len > max_stem_len) return error.BadIdent;
+    if (stem[0] >= '0' and stem[0] <= '9') return error.BadIdent;
+    tally_copy.copy_disjoint(u8, spec.stem[0..stem.len], stem);
+    spec.stem_len = @intCast(stem.len);
+    const mold = tokens.slice_of(src, parts.mold);
+    if (mold.len == 0 or mold.len > rm.max_name_len) return error.BadIdent;
+    if (mold[0] == '@') return error.NamedCastNeedsTuple;
+    tally_copy.copy_disjoint(u8, spec.cast_mold[0..mold.len], mold);
+    spec.cast_mold_len = @intCast(mold.len);
+    return spec;
+}
+
+pub fn bind_cross_desk(spec: *const CrossDeskSpec, lib_src: []const u8) LowerError!rm.ShapeSpec {
+    const mold_spec = try rm.parse_source(lib_src);
+    const mold_name = rm.name_slice(&mold_spec);
+    if (!std.mem.eql(u8, cast_mold_slice(spec), mold_name)) return error.CastShapeMismatch;
+    switch (mold_spec.body) {
+        .tuple => {
+            // STOA175: one- through nine-field `$:` (capacity freeze).
+            if (mold_spec.field_count == 0 or mold_spec.field_count > rm.max_fields)
+                return error.NamedCastNeedsTuple;
+        },
+        .tagged => {},
+    }
+    return mold_spec;
+}
+
+fn append_print(out: []u8, used: *u32, comptime fmt: []const u8, args: anytype) LowerError!void {
+    // invariant: the cursor addresses the remaining buffer below, so a cursor past the end
+    // would hand the print a negative span
+    assert(used.* <= out.len);
+    const slice = out[@as(usize, @intCast(used.*))..];
+    const written = std.fmt.bufPrint(slice, fmt, args) catch return error.Overflow;
+    const n: u32 = @intCast(written.len);
+    // invariant: the print has already landed when this runs, so it states that the write
+    // stayed inside the buffer rather than checking beforehand
+    assert(used.* + n <= out.len);
+    used.* += n;
+}
+
+fn emit_bytes_demo_helper(out: []u8, used: *u32, comptime fn_name: []const u8, bound: u32) LowerError!void {
+    // invariant: the cursor addresses the remaining buffer below, so a cursor past the end
+    // would hand the print a negative span
+    assert(used.* <= out.len);
+    // Bound-copy loop in emit (no memcpy token in this file -- TAME scan).
+    try append_print(out, used,
+        \\fn {s}(comptime s: []const u8) [{d}]u8 {{
+        \\    var buf = [_]u8{{0}} ** {d};
+        \\    var i: u32 = 0;
+        \\    while (i < @as(u32, @intCast(s.len))) : (i += 1) {{
+        \\        buf[@as(usize, @intCast(i))] = s[@as(usize, @intCast(i))];
+        \\    }}
+        \\    return buf;
+        \\}}
+        \\
+    , .{ fn_name, bound, bound });
+}
+
+fn emit_tuple_cast(spec: *const rm.ShapeSpec, cast_mold: []const u8, out: []u8) LowerError!u32 {
+    const mold_name = rm.name_slice(spec);
+    const n: u32 = @intCast(spec.field_count);
+    // invariant: the tuple type is emitted with one field per face and the mold budget is what
+    // the buffer below is sized for, while one face is where a tuple starts at all
+    assert(n >= 1);
+    assert(n <= rm.max_fields);
+    const has_cord = rm.any_cord_field(spec);
+    const has_hex = rm.any_hex_field(spec);
+    const cord_bound = nest_type.aura_t_max_bytes;
+    const hex_bound = nest_type.aura_ux_max_bytes;
+    var zt: [rm.max_name_len]u8 = undefined;
+    const tn = try zig_type_name(mold_name, &zt);
+    var used: u32 = 0;
+    if (has_cord or has_hex) {
+        try append_print(out, &used,
+            \\const std = @import("std");
+            \\
+            \\/// Lowered from Glow `+$ {s}` + `^-  {s}` — named-cast resolve (STOA77/175/182/184).
+            \\pub const {s} = struct {{
+            \\
+        , .{ mold_name, cast_mold, zt[0..@as(usize, @intCast(tn))] });
+    } else {
+        try append_print(out, &used,
+            \\const std = @import("std");
+            \\
+            \\/// Lowered from Glow `+$ {s}` + `^-  {s}` — named-cast resolve (STOA77/175).
+            \\pub const {s} = struct {{
+            \\
+        , .{ mold_name, cast_mold, zt[0..@as(usize, @intCast(tn))] });
+    }
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        var zf: [rm.max_name_len]u8 = undefined;
+        const fl = try zig_safe_ident(rm.field_slice(spec, @as(usize, @intCast(i))), &zf);
+        const face = zf[0..@as(usize, @intCast(fl))];
+        if (spec.field_is_cord[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "    {s}: [{d}]u8 = [_]u8{{0}} ** {d},\n", .{ face, cord_bound, cord_bound });
+        } else if (spec.field_is_hex[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "    {s}: [{d}]u8 = [_]u8{{0}} ** {d},\n", .{ face, hex_bound, hex_bound });
+        } else if (spec.field_is_u64[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "    {s}: u64 = 0,\n", .{face});
+        } else {
+            try append_print(out, &used, "    {s}: u32 = 0,\n", .{face});
+        }
+    }
+    try append_print(out, &used, "}};\n\n", .{});
+    if (has_cord) try emit_bytes_demo_helper(out, &used, "glow_demo_cord", cord_bound);
+    if (has_hex) try emit_bytes_demo_helper(out, &used, "glow_demo_hex", hex_bound);
+    try append_print(out, &used,
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const casted: {s} = .{{
+        \\
+    , .{zt[0..@as(usize, @intCast(tn))]});
+    i = 0;
+    while (i < n) : (i += 1) {
+        var zf: [rm.max_name_len]u8 = undefined;
+        const face_src = rm.field_slice(spec, @as(usize, @intCast(i)));
+        const fl = try zig_safe_ident(face_src, &zf);
+        const face = zf[0..@as(usize, @intCast(fl))];
+        if (spec.field_is_cord[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "        .{s} = glow_demo_cord(\"{s}\"),\n", .{ face, face_src });
+        } else if (spec.field_is_hex[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "        .{s} = glow_demo_hex(\"{s}\"),\n", .{ face, face_src });
+        } else if (spec.field_is_u64[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "        .{s} = {d},\n", .{
+                face,
+                named_cast_demo_vals[@as(usize, @intCast(i))],
+            });
+        } else {
+            try append_print(out, &used, "        .{s} = {d},\n", .{
+                face,
+                named_cast_demo_vals[@as(usize, @intCast(i))],
+            });
+        }
+    }
+    try append_print(out, &used, "    }};\n    return if (", .{});
+    i = 0;
+    while (i < n) : (i += 1) {
+        var zf: [rm.max_name_len]u8 = undefined;
+        const face_src = rm.field_slice(spec, @as(usize, @intCast(i)));
+        const fl = try zig_safe_ident(face_src, &zf);
+        const face = zf[0..@as(usize, @intCast(fl))];
+        if (i != 0) try append_print(out, &used, " and ", .{});
+        if (spec.field_is_cord[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "std.mem.eql(u8, &casted.{s}, &glow_demo_cord(\"{s}\"))", .{ face, face_src });
+        } else if (spec.field_is_hex[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "std.mem.eql(u8, &casted.{s}, &glow_demo_hex(\"{s}\"))", .{ face, face_src });
+        } else if (spec.field_is_u64[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "casted.{s} == {d}", .{
+                face,
+                named_cast_demo_vals[@as(usize, @intCast(i))],
+            });
+        } else {
+            try append_print(out, &used, "casted.{s} == {d}", .{
+                face,
+                named_cast_demo_vals[@as(usize, @intCast(i))],
+            });
+        }
+    }
+    try append_print(out, &used, ") 0 else 1;\n}}\n", .{});
+    return used;
+}
+
+fn emit_enum_arms(spec: *const rm.ShapeSpec, out: []u8, used: *u32) LowerError!void {
+    var i: u32 = 0;
+    const n: u32 = @intCast(spec.field_count);
+    while (i < n) : (i += 1) {
+        var zf: [rm.max_name_len]u8 = undefined;
+        const fl = try zig_safe_ident(rm.field_slice(spec, @as(usize, @intCast(i))), &zf);
+        try append_print(out, used, "    {s},\n", .{zf[0..@as(usize, @intCast(fl))]});
+    }
+}
+
+fn emit_tagged_unit_cast(spec: *const rm.ShapeSpec, cast_mold: []const u8, out: []u8) LowerError!u32 {
+    const mold_name = rm.name_slice(spec);
+    var zt: [rm.max_name_len]u8 = undefined;
+    var ztag: [rm.max_name_len]u8 = undefined;
+    const tn = try zig_type_name(mold_name, &zt);
+    const tag0 = rm.field_slice(spec, 0);
+    const tlen = try zig_safe_ident(tag0, &ztag);
+    var used: u32 = 0;
+    try append_print(out, &used,
+        \\const std = @import("std");
+        \\
+        \\/// Lowered from Glow `+$ {s}` + `^-  {s}` — tagged named-cast (STOA81).
+        \\pub const {s} = enum(u8) {{
+        \\
+    , .{ mold_name, cast_mold, zt[0..@as(usize, @intCast(tn))] });
+    try emit_enum_arms(spec, out, &used);
+    try append_print(out, &used,
+        \\}};
+        \\
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const raw: u8 = 0;
+        \\    const casted: {s} = @enumFromInt(raw);
+        \\    return if (casted == .{s}) 0 else 1;
+        \\}}
+        \\
+    , .{ zt[0..@as(usize, @intCast(tn))], ztag[0..@as(usize, @intCast(tlen))] });
+    return used;
+}
+
+fn first_payload_arm(spec: *const rm.ShapeSpec) LowerError!u32 {
+    var i: u32 = 0;
+    const n: u32 = @intCast(spec.field_count);
+    while (i < n) : (i += 1) {
+        if (rm.arm_has_payload(spec, @as(usize, @intCast(i)))) return i;
+    }
+    return error.NamedCastNeedsPayloadArm;
+}
+
+const payload_demo_vals: [rm.max_payload_faces]u32 = .{ 5, 3, 7 };
+
+fn emit_union_arm(spec: *const rm.ShapeSpec, arm: u32, out: []u8, used: *u32) LowerError!void {
+    var zarm: [rm.max_name_len]u8 = undefined;
+    const al = try zig_safe_ident(rm.field_slice(spec, @as(usize, @intCast(arm))), &zarm);
+    if (rm.arm_has_payload(spec, @as(usize, @intCast(arm)))) {
+        try append_print(out, used, "    {s}: struct {{\n", .{zarm[0..@as(usize, @intCast(al))]});
+        var fi: u32 = 0;
+        const fc: u32 = @intCast(rm.payload_count(spec, @as(usize, @intCast(arm))));
+        const cord_bound = nest_type.aura_t_max_bytes;
+        const hex_bound = nest_type.aura_ux_max_bytes;
+        while (fi < fc) : (fi += 1) {
+            var zf: [rm.max_name_len]u8 = undefined;
+            const fl = try zig_safe_ident(rm.payload_face_slice(spec, @as(usize, @intCast(arm)), @as(usize, @intCast(fi))), &zf);
+            const face = zf[0..@as(usize, @intCast(fl))];
+            if (spec.payload_face_is_cord[@as(usize, @intCast(arm))][@as(usize, @intCast(fi))]) {
+                try append_print(out, used, "        {s}: [{d}]u8 = [_]u8{{0}} ** {d},\n", .{ face, cord_bound, cord_bound });
+            } else if (spec.payload_face_is_hex[@as(usize, @intCast(arm))][@as(usize, @intCast(fi))]) {
+                try append_print(out, used, "        {s}: [{d}]u8 = [_]u8{{0}} ** {d},\n", .{ face, hex_bound, hex_bound });
+            } else if (spec.payload_face_is_u64[@as(usize, @intCast(arm))][@as(usize, @intCast(fi))]) {
+                try append_print(out, used, "        {s}: u64 = 0,\n", .{face});
+            } else {
+                try append_print(out, used, "        {s}: u32 = 0,\n", .{face});
+            }
+        }
+        try append_print(out, used, "    }},\n", .{});
+    } else {
+        try append_print(out, used, "    {s},\n", .{zarm[0..@as(usize, @intCast(al))]});
+    }
+}
+
+fn emit_union_arms(spec: *const rm.ShapeSpec, out: []u8, used: *u32) LowerError!void {
+    var i: u32 = 0;
+    const n: u32 = @intCast(spec.field_count);
+    while (i < n) : (i += 1) {
+        try emit_union_arm(spec, i, out, used);
+    }
+}
+
+fn emit_payload_face_inits(spec: *const rm.ShapeSpec, demo_i: u32, face_count: u32, out: []u8, used: *u32) LowerError!void {
+    var fi: u32 = 0;
+    while (fi < face_count) : (fi += 1) {
+        const face_src = rm.payload_face_slice(spec, @as(usize, @intCast(demo_i)), @as(usize, @intCast(fi)));
+        var zf: [rm.max_name_len]u8 = undefined;
+        const fl = try zig_safe_ident(face_src, &zf);
+        const face = zf[0..@as(usize, @intCast(fl))];
+        if (fi != 0) try append_print(out, used, ", ", .{});
+        if (spec.payload_face_is_cord[@as(usize, @intCast(demo_i))][@as(usize, @intCast(fi))]) {
+            try append_print(out, used, ".{s} = glow_demo_cord(\"{s}\")", .{ face, face_src });
+        } else if (spec.payload_face_is_hex[@as(usize, @intCast(demo_i))][@as(usize, @intCast(fi))]) {
+            try append_print(out, used, ".{s} = glow_demo_hex(\"{s}\")", .{ face, face_src });
+        } else {
+            try append_print(out, used, ".{s} = {d}", .{ face, payload_demo_vals[@as(usize, @intCast(fi))] });
+        }
+    }
+}
+
+fn emit_payload_face_checks(spec: *const rm.ShapeSpec, demo_i: u32, face_count: u32, out: []u8, used: *u32) LowerError!void {
+    var fi: u32 = 0;
+    while (fi < face_count) : (fi += 1) {
+        const face_src = rm.payload_face_slice(spec, @as(usize, @intCast(demo_i)), @as(usize, @intCast(fi)));
+        var zf: [rm.max_name_len]u8 = undefined;
+        const fl = try zig_safe_ident(face_src, &zf);
+        const face = zf[0..@as(usize, @intCast(fl))];
+        if (fi != 0) try append_print(out, used, " and ", .{});
+        if (spec.payload_face_is_cord[@as(usize, @intCast(demo_i))][@as(usize, @intCast(fi))]) {
+            try append_print(out, used, "std.mem.eql(u8, &m.{s}, &glow_demo_cord(\"{s}\"))", .{ face, face_src });
+        } else if (spec.payload_face_is_hex[@as(usize, @intCast(demo_i))][@as(usize, @intCast(fi))]) {
+            try append_print(out, used, "std.mem.eql(u8, &m.{s}, &glow_demo_hex(\"{s}\"))", .{ face, face_src });
+        } else {
+            try append_print(out, used, "m.{s} == {d}", .{ face, payload_demo_vals[@as(usize, @intCast(fi))] });
+        }
+    }
+}
+
+fn emit_tagged_payload_cast(spec: *const rm.ShapeSpec, cast_mold: []const u8, out: []u8) LowerError!u32 {
+    const mold_name = rm.name_slice(spec);
+    const demo_i = try first_payload_arm(spec);
+    var zt: [rm.max_name_len]u8 = undefined;
+    var ztag: [rm.max_name_len]u8 = undefined;
+    const tn = try zig_type_name(mold_name, &zt);
+    const tlen = try zig_safe_ident(rm.field_slice(spec, @as(usize, @intCast(demo_i))), &ztag);
+    const face_count: u32 = @intCast(rm.payload_count(spec, @as(usize, @intCast(demo_i))));
+    // invariant: a payload arm carries at least one face, and the mold budget is what the
+    // emitted struct is sized for
+    assert(face_count >= 1);
+    assert(face_count <= rm.max_payload_faces);
+    const has_cord = rm.any_payload_cord_field(spec);
+    const has_hex = rm.any_payload_hex_field(spec);
+
+    var used: u32 = 0;
+    try append_print(out, &used,
+        \\const std = @import("std");
+        \\
+        \\/// Lowered from Glow `+$ {s}` + `^-  {s}` — payload tagged named-cast (STOA82/188).
+        \\pub const {s} = union(enum) {{
+        \\
+    , .{ mold_name, cast_mold, zt[0..@as(usize, @intCast(tn))] });
+    try emit_union_arms(spec, out, &used);
+    try append_print(out, &used, "}};\n\n", .{});
+    if (has_cord) try emit_bytes_demo_helper(out, &used, "glow_demo_cord", nest_type.aura_t_max_bytes);
+    if (has_hex) try emit_bytes_demo_helper(out, &used, "glow_demo_hex", nest_type.aura_ux_max_bytes);
+    try append_print(out, &used,
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const casted: {s} = .{{ .{s} = .{{ 
+    , .{ zt[0..@as(usize, @intCast(tn))], ztag[0..@as(usize, @intCast(tlen))] });
+    try emit_payload_face_inits(spec, demo_i, face_count, out, &used);
+    try append_print(out, &used,
+        \\ }} }};
+        \\    return switch (casted) {{
+        \\        .{s} => |m| if (
+    , .{ztag[0..@as(usize, @intCast(tlen))]});
+    try emit_payload_face_checks(spec, demo_i, face_count, out, &used);
+    try append_print(out, &used,
+        \\) 0 else 1,
+        \\        else => 1,
+        \\    }};
+        \\}}
+        \\
+    , .{});
+    return used;
+}
+
+pub fn lower_source_welcome(src: []const u8, out: []u8) LowerError!u32 {
+    // invariant: the emitter writes its opening bytes without checking, so an empty buffer
+    // would be written past rather than refused
+    assert(out.len >= 1);
+    if (src.len == 0) return error.EmptySource;
+    const parts = tokens.named_cast_parts(src) orelse return error.NotANamedCast;
+    // invariant: the mold is sliced out of src by this span, so an end past the source would
+    // hand back bytes it never held
+    assert(parts.mold_start + parts.mold_len <= src.len);
+    const mold_lo: usize = @as(usize, @intCast(parts.mold_start));
+    const mold_hi: usize = @as(usize, @intCast(parts.mold_start + parts.mold_len));
+    const mold_spec = try rm.parse_source(src[mold_lo..mold_hi]);
+
+    const cast_mold = tokens.slice_of(src, parts.cast_mold);
+    if (cast_mold.len == 0 or cast_mold.len > rm.max_name_len) return error.BadIdent;
+    const mold_name = rm.name_slice(&mold_spec);
+    if (!std.mem.eql(u8, cast_mold, mold_name)) return error.CastShapeMismatch;
+
+    return switch (mold_spec.body) {
+        .tuple => {
+            if (mold_spec.field_count == 0 or mold_spec.field_count > rm.max_fields)
+                return error.NamedCastNeedsTuple;
+            return emit_tuple_cast(&mold_spec, cast_mold, out);
+        },
+        .tagged => {
+            if (rm.any_payload(&mold_spec)) return emit_tagged_payload_cast(&mold_spec, cast_mold, out);
+            return emit_tagged_unit_cast(&mold_spec, cast_mold, out);
+        },
+    };
+}
+
+fn emit_cross_tuple(spec: *const CrossDeskSpec, mold_spec: *const rm.ShapeSpec, out: []u8) LowerError!u32 {
+    const mold_name = rm.name_slice(mold_spec);
+    const n: u32 = @intCast(mold_spec.field_count);
+    // invariant: the tuple type is emitted with one field per face and the mold budget is what
+    // the buffer below is sized for, while one face is where a tuple starts at all
+    assert(n >= 1);
+    assert(n <= rm.max_fields);
+    const has_cord = rm.any_cord_field(mold_spec);
+    const has_hex = rm.any_hex_field(mold_spec);
+    var zs: [max_stem_len]u8 = undefined;
+    var zt: [rm.max_name_len]u8 = undefined;
+    const sn = try zig_stem(spec, &zs);
+    const tn = try zig_type_name(mold_name, &zt);
+    const at = "@";
+    var used: u32 = 0;
+    try append_print(out, &used,
+        \\const std = {s}import("std");
+        \\const lib = {s}import("{s}.rye");
+        \\
+        \\/// Lowered from Glow `/+ {s}` + `^-  {s}` — cross-desk named-cast (STOA79/175/182/184).
+        \\
+    , .{
+        at,
+        at,
+        zs[0..@as(usize, @intCast(sn))],
+        stem_slice(spec),
+        cast_mold_slice(spec),
+    });
+    if (has_cord) try emit_bytes_demo_helper(out, &used, "glow_demo_cord", nest_type.aura_t_max_bytes);
+    if (has_hex) try emit_bytes_demo_helper(out, &used, "glow_demo_hex", nest_type.aura_ux_max_bytes);
+    try append_print(out, &used,
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const casted: lib.{s} = .{{
+        \\
+    , .{zt[0..@as(usize, @intCast(tn))]});
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        var zf: [rm.max_name_len]u8 = undefined;
+        const face_src = rm.field_slice(mold_spec, @as(usize, @intCast(i)));
+        const fl = try zig_safe_ident(face_src, &zf);
+        const face = zf[0..@as(usize, @intCast(fl))];
+        if (mold_spec.field_is_cord[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "        .{s} = glow_demo_cord(\"{s}\"),\n", .{ face, face_src });
+        } else if (mold_spec.field_is_hex[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "        .{s} = glow_demo_hex(\"{s}\"),\n", .{ face, face_src });
+        } else {
+            try append_print(out, &used, "        .{s} = {d},\n", .{
+                face,
+                named_cast_demo_vals[@as(usize, @intCast(i))],
+            });
+        }
+    }
+    try append_print(out, &used, "    }};\n    return if (", .{});
+    i = 0;
+    while (i < n) : (i += 1) {
+        var zf: [rm.max_name_len]u8 = undefined;
+        const face_src = rm.field_slice(mold_spec, @as(usize, @intCast(i)));
+        const fl = try zig_safe_ident(face_src, &zf);
+        const face = zf[0..@as(usize, @intCast(fl))];
+        if (i != 0) try append_print(out, &used, " and ", .{});
+        if (mold_spec.field_is_cord[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "std.mem.eql(u8, &casted.{s}, &glow_demo_cord(\"{s}\"))", .{ face, face_src });
+        } else if (mold_spec.field_is_hex[@as(usize, @intCast(i))]) {
+            try append_print(out, &used, "std.mem.eql(u8, &casted.{s}, &glow_demo_hex(\"{s}\"))", .{ face, face_src });
+        } else {
+            try append_print(out, &used, "casted.{s} == {d}", .{
+                face,
+                named_cast_demo_vals[@as(usize, @intCast(i))],
+            });
+        }
+    }
+    try append_print(out, &used, ") 0 else 1;\n}}\n", .{});
+    return used;
+}
+
+fn emit_cross_tagged_unit(spec: *const CrossDeskSpec, mold_spec: *const rm.ShapeSpec, out: []u8) LowerError!u32 {
+    const mold_name = rm.name_slice(mold_spec);
+    var zs: [max_stem_len]u8 = undefined;
+    var zt: [rm.max_name_len]u8 = undefined;
+    var ztag: [rm.max_name_len]u8 = undefined;
+    const sn = try zig_stem(spec, &zs);
+    const tn = try zig_type_name(mold_name, &zt);
+    const tlen = try zig_safe_ident(rm.field_slice(mold_spec, 0), &ztag);
+    const at = "@";
+    var used: u32 = 0;
+    try append_print(out, &used,
+        \\const std = {s}import("std");
+        \\const lib = {s}import("{s}.rye");
+        \\
+        \\/// Lowered from Glow `/+ {s}` + `^-  {s}` — cross-desk tagged named-cast (STOA81).
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const raw: u8 = 0;
+        \\    const casted: lib.{s} = @enumFromInt(raw);
+        \\    return if (casted == .{s}) 0 else 1;
+        \\}}
+        \\
+    , .{
+        at,
+        at,
+        zs[0..@as(usize, @intCast(sn))],
+        stem_slice(spec),
+        cast_mold_slice(spec),
+        zt[0..@as(usize, @intCast(tn))],
+        ztag[0..@as(usize, @intCast(tlen))],
+    });
+    return used;
+}
+
+fn emit_cross_tagged_payload(spec: *const CrossDeskSpec, mold_spec: *const rm.ShapeSpec, out: []u8) LowerError!u32 {
+    const mold_name = rm.name_slice(mold_spec);
+    const demo_i = try first_payload_arm(mold_spec);
+    var zs: [max_stem_len]u8 = undefined;
+    var zt: [rm.max_name_len]u8 = undefined;
+    var ztag: [rm.max_name_len]u8 = undefined;
+    const sn = try zig_stem(spec, &zs);
+    const tn = try zig_type_name(mold_name, &zt);
+    const tlen = try zig_safe_ident(rm.field_slice(mold_spec, @as(usize, @intCast(demo_i))), &ztag);
+    const face_count: u32 = @intCast(rm.payload_count(mold_spec, @as(usize, @intCast(demo_i))));
+    // invariant: a payload arm carries at least one face, and the mold budget is what the
+    // emitted struct is sized for
+    assert(face_count >= 1);
+    assert(face_count <= rm.max_payload_faces);
+    const has_cord = rm.any_payload_cord_field(mold_spec);
+    const has_hex = rm.any_payload_hex_field(mold_spec);
+    const at = "@";
+
+    var used: u32 = 0;
+    try append_print(out, &used,
+        \\const std = {s}import("std");
+        \\const lib = {s}import("{s}.rye");
+        \\
+        \\/// Lowered from Glow `/+ {s}` + `^-  {s}` — cross-desk payload tagged named-cast (STOA82/188).
+        \\
+    , .{
+        at,
+        at,
+        zs[0..@as(usize, @intCast(sn))],
+        stem_slice(spec),
+        cast_mold_slice(spec),
+    });
+    if (has_cord) try emit_bytes_demo_helper(out, &used, "glow_demo_cord", nest_type.aura_t_max_bytes);
+    if (has_hex) try emit_bytes_demo_helper(out, &used, "glow_demo_hex", nest_type.aura_ux_max_bytes);
+    try append_print(out, &used,
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const casted: lib.{s} = .{{ .{s} = .{{ 
+    , .{
+        zt[0..@as(usize, @intCast(tn))],
+        ztag[0..@as(usize, @intCast(tlen))],
+    });
+    try emit_payload_face_inits(mold_spec, demo_i, face_count, out, &used);
+    try append_print(out, &used,
+        \\ }} }};
+        \\    return switch (casted) {{
+        \\        .{s} => |m| if (
+    , .{ztag[0..@as(usize, @intCast(tlen))]});
+    try emit_payload_face_checks(mold_spec, demo_i, face_count, out, &used);
+    try append_print(out, &used,
+        \\) 0 else 1,
+        \\        else => 1,
+        \\    }};
+        \\}}
+        \\
+    , .{});
+    return used;
+}
+
+fn emit_cross_tagged(spec: *const CrossDeskSpec, mold_spec: *const rm.ShapeSpec, out: []u8) LowerError!u32 {
+    if (rm.any_payload(mold_spec)) return emit_cross_tagged_payload(spec, mold_spec, out);
+    return emit_cross_tagged_unit(spec, mold_spec, out);
+}
+
+pub fn lower_cross_desk_welcome(src: []const u8, lib_src: []const u8, out: []u8) LowerError!u32 {
+    // invariant: the emitter writes its opening bytes without checking, so an empty buffer
+    // would be written past rather than refused
+    assert(out.len >= 1);
+    if (src.len == 0) return error.EmptySource;
+    const spec = try parse_cross_desk(src);
+    const mold_spec = try bind_cross_desk(&spec, lib_src);
+    return switch (mold_spec.body) {
+        .tuple => emit_cross_tuple(&spec, &mold_spec, out),
+        .tagged => emit_cross_tagged(&spec, &mold_spec, out),
+    };
+}

@@ -1,0 +1,70 @@
+# .brix — Grain
+# Course descriptor: name, version, and the bricks (source files) Mantra tracks.
+# Format: one key-value pair per line, space-separated. Lines starting with
+# '#' are comments; blank lines are ignored.
+#
+# Molted 20260810.145743 from the elder "acme-owner" descriptor
+# (version 20260629.004912) for fascia health: current name (Grain), current
+# version, and the modules grown since June added as bricks. The elder
+# descriptor lives whole in git history (accrete-never-break); the old
+# identity-flavored name leaves the living tree.
+#
+# Keys:
+#   name     — the project name (one value)
+#   version  — descriptor version (Rye chronological stamp)
+#   file     — one tracked brick/source file (multiple, in order)
+#   alias    — typo resolution (from to). Seated 20260727.235754.
+
+name grain
+version 20260810.145743
+
+# Typo resolution (Brix) — Prim was a mis-hear of Prin
+alias Prim Prin
+
+# The six bodies and their synthesis (seated 20260827.212800, the maintainer's word). Three
+# presence-and-absence pairs -- Mind/Mystery, Sound/Silence, Dream/Hush -- and CHOIR, the seventh
+# launch that is not a seventh hand: one voice performing all six lanes in one bounded round, only
+# while every loop is stopped. Synonym discipline: "synthesis launch" and "the seventh seat" are
+# spoken forms of Choir; neither is a second implementation (alias-sameness).
+alias Synthesis Choir
+file tools/l/launch-choir-synthesis-chapter.rish
+
+# Rye compiler
+file rye/src/main.rye
+
+# Rishi shell
+file rishi/src/main.rye
+
+# Tally memory model
+file tally/seed.rye
+file tally/gardens.rye
+
+# Caravan supervision
+file caravan/seed.rye
+file caravan/bounded.rye
+file caravan/twin.rye
+file caravan/chain.rye
+
+# Mantra version control
+file mantra/src/main.rye
+
+# Gate trio — Rishi only (tools/*.rish)
+file tools/p/parity.rish
+
+# Ember, the inference vane (Lattice · Scribble · Lantern · Kiln) -- named 20260827, REDS %300;
+# elder name Q-vane stays a readable peer. The craft faculty is Kiln from 20260827.195316.
+file lattice/lattice_core.rye
+file scribble/scribble_core.rye
+file lantern/lantern_core.rye
+file ember/ember_core.rye
+
+# Identity and topology (Kumara · Comlink)
+file kumara/kumara.rye
+file comlink/topology.rye
+
+# Sundial — the health face
+file sundial/sundial.rye
+
+# Living documentation
+file construction/ROADMAP.md
+file construction/TASKS.md

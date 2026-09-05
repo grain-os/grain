@@ -1,0 +1,91 @@
+# The Exec Bit -- a mode is tracked content
+
+**Seated:** `20260823.025333` on the maintainer's word - **Status:** Living - **Kin:** [`reds-first`](reds-first.md) - [`docs-implementation-sync`](docs-implementation-sync.md) - [`collaboration`](collaboration.md) (*References are promises*) - **Witness:** [`../../tools/e/exec_bit_witness.rish`](../../tools/e/exec_bit_witness.rish)
+
+**A file's mode is content the repository tracks, and a rewrite preserves it.** When a tool
+rewrites a tracked file in place, it writes through the original inode -- `cat "$tmp" > "$f"` --
+so the mode the repository carries survives the write.
+
+The one shape to reach for, and the one to leave alone:
+
+```sh
+awk '...' "$f" > "$f.tmp" && cat "$f.tmp" > "$f" && rm -f "$f.tmp"   # mode survives
+awk '...' "$f" > "$f.tmp" && mv "$f.tmp" "$f"                        # mode is the tmp file's
+```
+
+`sed -i`, `perl -i`, and truncate-and-write all preserve the mode. `mv` and `cp` carry the
+source's mode instead, and that is the whole of the trap on disk.
+
+**Adopting a file out of another history is the same loss by a shorter road**, because **a blob
+carries no mode -- the tree object does.** Reach for the blob and the one thing only the tree knew
+stays behind:
+
+```sh
+git checkout <ref> -- <path>          # the tree is read: 100755 arrives 100755
+git show <ref>:<path> > <path>        # the blob is read: 100755 arrives 100644
+```
+
+`git cat-file -p <ref>:<path> >` loses it the same way, for the same reason. Proven on metal
+`20260827` in a throwaway pen -- one blob, `4163036efa`, two spellings, two modes. This is how a
+thirty-file adoption landed every file at `100644` in one commit, four of them carrying a shebang,
+and how the ratchet rose 57 to 61 on the next lap (REDS %292).
+
+## Why the rule exists
+
+On `20260823` a repoint pass rewrote 116 path literals across 58 tracked tool sources and, in the
+same commit, dropped mode `100755` to `100644` on **thirty-nine** tracked files. The rewrite moved
+a temporary over each original. Nothing in the diff said so -- a mode change moves no lines, so
+`git show --stat` reported `1 file changed, 0 insertions, 0 deletions` and the round read as a
+clean repoint. Every standing guard stayed green, because every standing guard read lines.
+
+One of the thirty-nine was `tools/ag/agent-jail.sh`, which the unattended loop invokes as
+`./tools/ag/agent-jail.sh`. The loop answered `Permission denied` once every twenty seconds through
+the night, and the chapter it was running stopped there until a hand ran `chmod +x`.
+
+## What stands, and how it is measured
+
+[`../../tools/e/exec_bit_witness.rish`](../../tools/e/exec_bit_witness.rish) over
+[`../../tools/fixtures/e/exec_bit_scan.sh`](../../tools/fixtures/e/exec_bit_scan.sh) gates two
+readings at zero and reports a third:
+
+| Reading | Held at | Measured `20260823.025333` |
+|---|---|---|
+| Directly invoked, carrying a shebang, at `100644` | **zero, enforced** | 0 of 18 |
+| Working-tree exec bit disagreeing with the index | **zero, enforced** | 0 of 13,650 |
+| Uninvoked shebang files at `100644` | ratchet under a ceiling that only falls | 57 (was 58 at seating) |
+
+**Directly invoked** means a living tracked file writes `./path` in command position -- the promise
+`./tools/ag/agent-jail.sh` makes to whoever clones. A path with its interpreter named ahead of it
+(`sh ./x`, `rishi run ./x`) needs no exec bit and passes free, which is why the fixture scans
+sit in the ratchet rather than the gate: every witness runs them as `run ["sh" "tools/..."]`.
+**They fall on touch, and that reaches birth as well** -- a fixture written today is written with
+the bit, since a new file at `100644` grows the population the ceiling exists to shrink. The
+ceiling fell 58 -> 57 on `20260824.112806` for exactly that reason, and the control's planted
+counts moved with it.
+
+The second reading is the early one. A mode that has drifted in the working tree is a mode about
+to be committed by accident, and the working tree is where repair costs one `chmod`. It makes a
+deliberate mode change loud, which is the point rather than a cost.
+
+[`../../tools/fixtures/e/exec_bit_control.sh`](../../tools/fixtures/e/exec_bit_control.sh) builds real
+git repositories in a temporary pen and proves sixteen behaviors -- five refusals bitten and
+eleven honest readings left free, the ratchet ceiling proven from both sides by planting
+fifty-eight files against a ceiling of fifty-seven, so no override exists and none is wanted.
+
+## What this does not reach
+
+**A shebang naming an interpreter this machine has**, and whether an executable file does anything
+worth doing. The guard proves the tree can run what it says to run, and stops there.
+
+**Dated testimony** keeps every reference it ever wrote, so a log invoking a script that has since
+moved gates nothing (accrete-never-break). Only living files make the promise.
+
+## Repair, when it reds
+
+```sh
+chmod +x <path> && git update-index --chmod=+x <path>
+```
+
+Both halves: the working tree so the next run works, and the index so a fresh clone inherits it.
+
+Canonical Cursor twin: [`../../.cursor/rules/exec-bit.mdc`](../../.cursor/rules/exec-bit.mdc).

@@ -1,0 +1,129 @@
+//! pond/apps/window_input.rye -- Dexter line editor (keyboard -> Rishi line).
+//!
+//! Composes key events into one submitted line for `runOneInput`. The Wayland
+//! seam in Brushstroke drains into these actions; this module stays pure so
+//! headless witnesses can replay the same path without a compositor.
+//!
+//! ZETA4: `utf8` inserts a bounded multi-byte sequence (emoji); backspace
+//! prefers a curated face suffix, else one UTF-8 codepoint.
+//! ZETA6: `newline` inserts `\n` for paragraphs; `submit` stays the send action.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const tally_copy = @import("tally_copy.rye");
+
+pub const max_line_len: u32 = 400;
+pub const max_utf8_insert: u32 = 8;
+
+pub const Utf8Insert = struct {
+    data: [max_utf8_insert]u8 = [_]u8{0} ** max_utf8_insert,
+    len: u8 = 0,
+
+    pub fn slice(self: *const Utf8Insert) []const u8 {
+        return self.data[0..self.len];
+    }
+};
+
+pub const Action = union(enum) {
+    char_: u8,
+    utf8: Utf8Insert,
+    backspace,
+    newline,
+    submit,
+};
+
+pub const LineEditor = struct {
+    buf: [max_line_len]u8 = undefined,
+    len: u32 = 0,
+    pending_submit: bool = false,
+
+    pub fn reset(self: *LineEditor) void {
+        self.len = 0;
+        self.pending_submit = false;
+    }
+
+    pub fn push_char(self: *LineEditor, ch: u8) void {
+        if (self.len >= max_line_len) return;
+        self.buf[self.len] = ch;
+        self.len += 1;
+    }
+
+    pub fn push_utf8(self: *LineEditor, bytes: []const u8) void {
+        // invariant: insert is bounded
+        assert(bytes.len > 0);
+        assert(bytes.len <= max_utf8_insert);
+        if (self.len + bytes.len > max_line_len) return;
+        tally_copy.copy_disjoint(u8, self.buf[self.len .. self.len + bytes.len], bytes);
+        self.len += @intCast(bytes.len);
+    }
+
+    pub fn backspace(self: *LineEditor) void {
+        if (self.len == 0) return;
+        const n = utf8_delete_len(self.buf[0..self.len]);
+        // invariant: delete within buffer
+        assert(n > 0);
+        assert(n <= self.len);
+        self.len -= n;
+    }
+
+    pub fn push_newline(self: *LineEditor) void {
+        self.push_char('\n');
+    }
+
+    pub fn submit(self: *LineEditor) void {
+        self.pending_submit = true;
+    }
+
+    pub fn prompt_slice(self: *const LineEditor) []const u8 {
+        return self.buf[0..self.len];
+    }
+
+    /// Count of `\n` bytes in the buffer (ZETA6 paragraph mark).
+    pub fn newline_count(self: *const LineEditor) u32 {
+        var n: u32 = 0;
+        var i: u32 = 0;
+        while (i < self.len) : (i += 1) {
+            if (self.buf[i] == '\n') n += 1;
+        }
+        return n;
+    }
+
+    pub fn apply_action(self: *LineEditor, action: Action) void {
+        switch (action) {
+            .char_ => |ch| self.push_char(ch),
+            .utf8 => |u| self.push_utf8(u.slice()),
+            .backspace => self.backspace(),
+            .newline => self.push_newline(),
+            .submit => self.submit(),
+        }
+    }
+
+    pub fn take_submitted_line(self: *LineEditor, garden: std.mem.Allocator) !?[]const u8 {
+        if (!self.pending_submit) return null;
+        self.pending_submit = false;
+        const raw = self.buf[0..self.len];
+        self.len = 0;
+        const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+        if (trimmed.len == 0) return null;
+        return try garden.dupe(u8, trimmed);
+    }
+};
+
+/// Bytes to remove from the end: one UTF-8 codepoint (1-4 bytes).
+fn utf8_delete_len(buf: []const u8) u32 {
+    // invariant: the buffer holds room for at least one byte, since a zero-length one would
+    // read a key into nothing and report it delivered
+    assert(buf.len > 0);
+    var i: usize = buf.len;
+    // Walk back continuation bytes (10xxxxxx).
+    while (i > 0) {
+        i -= 1;
+        const b = buf[i];
+        if (b & 0xC0 != 0x80) {
+            return @intCast(buf.len - i);
+        }
+        // Guard: orphan continuations -- delete one byte.
+        if (buf.len - i >= 4) return 1;
+    }
+    return 1;
+}

@@ -1,0 +1,132 @@
+# tools/l/birth_a_clone.rish -- give a fleet body its own tree, whole and proven.
+#
+# One tree per star (seated 20260829 on the maintainer's word, after REDS %291 bit four times in one
+# day through a shared checkout): every loop body works its own clone. This tool is the birth,
+# run FROM the field where rishi already lives:
+#
+#   rishi/bin/rishi run tools/l/birth_a_clone.rish /Users/<user>/grain-<body>
+#
+# What a birth does, in order: clone from the field's own objects with the anointed remotes
+# seated (xy, then gp405); point core.hooksPath at the tracked hooks so the walls travel;
+# init the four named vendor submodules over plain https with the host's global config held
+# aside (the card's own recipe -- a rewriting insteadOf cannot reach the public repos); copy
+# the vendored toolchain (403 MB, host-provisioned, untracked); bootstrap rye from source and
+# build rishi with it, so the newborn's binaries carry its own tree's provenance; then prove
+# the birth by running a real witness inside the newborn. What remains for a hand afterward
+# is only what custody keeps there: a codex login for a Codex seat, and the launch paste.
+#
+# KIN, the way home: the law is one-tree-per-star in the fleet re-map
+# (session-logs/date/20260829/20260829-194829_the-fleet-remapped-on-the-days-evidence.kyri);
+# the submodule recipe is the living card's Standing block; the hooks law is
+# .claude/rules/git-signing.md; grain-mind is the elder precedent this tool generalizes.
+
+say "birth-a-clone: one tree per star -- clone, remotes, hooks, submodules, toolchain, rye, rishi, witness."
+
+assert args.len == 1 else "birth-a-clone: name exactly one destination path"
+let dest = args[0]
+assert (run ["test" "-e" dest]).ok == false else "birth-a-clone: destination already exists -- a birth never overwrites"
+
+let field_run = run ["git" "rev-parse" "--show-toplevel"]
+assert field_run.ok else "birth-a-clone: run from inside the field"
+let field = trim field_run.out
+
+# The clone: local objects, then the anointed remotes replace the local origin, so the
+# newborn's history and its lanes both read exactly like every sibling's.
+let cl = run ["git" "clone" field dest]
+assert cl.ok else "birth-a-clone: the clone refused -- ${cl.err}"
+let rr = run ["git" "-C" dest "remote" "remove" "origin"]
+assert rr.ok else "birth-a-clone: could not remove the local origin"
+let ax = run ["git" "-C" dest "remote" "add" "xy" "git@github.com:acme-owner/grain.git"]
+assert ax.ok else "birth-a-clone: could not seat remote xy"
+let ag = run ["git" "-C" dest "remote" "add" "gp405" "git@github.com:acme-owner/grain.git"]
+assert ag.ok else "birth-a-clone: could not seat remote gp405"
+
+# The transport: .git contents are never cloned, so the newborn takes its own copy of the
+# field's repo-local ssh config (the key paths inside stay absolute to the host's shared
+# deploy keys) and points core.sshCommand at its own copy -- grain-mind's own precedent.
+let sc = run ["cp" (field + "/.git/ssh_config_jail") (dest + "/.git/ssh_config_jail")]
+assert sc.ok else "birth-a-clone: the ssh config copy refused"
+let scfg = run ["git" "-C" dest "config" "core.sshCommand" ("ssh -F " + dest + "/.git/ssh_config_jail")]
+assert scfg.ok else "birth-a-clone: could not seat core.sshCommand"
+
+let fx = run ["git" "-C" dest "fetch" "xy"]
+assert fx.ok else "birth-a-clone: the first fetch from xy refused -- ${fx.err}"
+let up = run ["git" "-C" dest "branch" "--set-upstream-to=xy/main" "main"]
+assert up.ok else "birth-a-clone: could not point main at xy/main"
+
+# The walls travel with the tree: hooksPath at the tracked hooks, exactly as the field keeps it.
+let hk = run ["git" "-C" dest "config" "core.hooksPath" "tools/hooks"]
+assert hk.ok else "birth-a-clone: could not seat the tracked hooks"
+
+# Signing is repo-local and never cloned, the same lesson the ssh step taught: the identity
+# and key id copy from the field, and gpg.program keeps the field's absolute wrapper -- host-
+# shared custody material behind per-clone config, so every newborn signs as the one keeper.
+fn field-conf name: trim (run ["git" "-C" field "config" "--local" name]).out
+
+# AN EMPTY INHERITED VALUE PASSES EVERY ASSERT (REDS %418). `git config user.name ""` SUCCEEDS, so
+# copying a field that carries nothing seats nothing and the check below reads ok -- which is how
+# grain-pheromone came to hold an empty user.name and user.email, and only found out on the first
+# lap that tried to close a round. The values are read and refused BEFORE they are seated.
+let f_key = field-conf "user.signingkey"
+let f_name = field-conf "user.name"
+let f_mail = field-conf "user.email"
+let f_gpg = field-conf "gpg.program"
+assert f_key != "" else "birth-a-clone: the field carries no user.signingkey -- a newborn that cannot sign cannot close a round"
+assert f_name != "" else "birth-a-clone: the field carries no user.name"
+assert f_mail != "" else "birth-a-clone: the field carries no user.email"
+assert f_gpg != "" else "birth-a-clone: the field carries no gpg.program"
+
+# AND THE WRAPPER IT NAMES MUST BE THERE. `gpg.program` is an ABSOLUTE path into the field's own
+# tree, deliberately -- one keeper, custody material behind per-clone config. An absolute path is
+# also the one thing a rename breaks silently: grain-harvest became grain-petrichor on `20260904`
+# and pheromone's config went on naming a directory that no longer existed, through a fetch, a
+# sign, and a commit, each refusing for its own reason. `tracked_link_scan` cannot reach an
+# untracked `.git/config`, so nothing in the tree could have said so.
+let gpg_here = run ["test" "-x" f_gpg]
+assert gpg_here.ok else "birth-a-clone: gpg.program names ${f_gpg}, which is not an executable file -- a rename of the field leaves this stale and every commit here would refuse"
+
+let sg1 = run ["git" "-C" dest "config" "user.signingkey" f_key]
+assert sg1.ok else "birth-a-clone: could not seat user.signingkey"
+let sg2 = run ["git" "-C" dest "config" "user.name" f_name]
+assert sg2.ok else "birth-a-clone: could not seat user.name"
+let sg3 = run ["git" "-C" dest "config" "user.email" f_mail]
+assert sg3.ok else "birth-a-clone: could not seat user.email"
+let sg4 = run ["git" "-C" dest "config" "gpg.program" f_gpg]
+assert sg4.ok else "birth-a-clone: could not seat gpg.program"
+let sg5 = run ["git" "-C" dest "config" "commit.gpgsign" "true"]
+assert sg5.ok else "birth-a-clone: could not seat commit.gpgsign"
+
+# The four named submodules, over plain https with the host's global config held aside.
+let sm = run ["env" "GIT_CONFIG_GLOBAL=/dev/null" "git" "-C" dest "submodule" "update" "--init" "vendor/microkit" "vendor/monocypher" "vendor/pqclean" "vendor/sel4"]
+assert sm.ok else "birth-a-clone: the named submodules refused -- ${sm.err}"
+
+# The toolchain is host-provisioned and untracked; the newborn takes the field's copy.
+# Refuse a missing or dangling source before the copy: a renamed checkout's leftover
+# RYE_ZIG is a different fault, pinned on the bootstrap line below.
+let zig_src = field + "/vendor/zig-toolchain/zig"
+assert (run ["test" "-x" zig_src]).ok else "birth-a-clone: the field has no executable vendor/zig-toolchain/zig"
+let tc = run ["cp" "-R" (field + "/vendor/zig-toolchain") (dest + "/vendor/zig-toolchain")]
+assert tc.ok else "birth-a-clone: the toolchain copy refused"
+let zig_dest = dest + "/vendor/zig-toolchain/zig"
+assert (run ["test" "-x" zig_dest]).ok else "birth-a-clone: the copied toolchain is not executable -- if vendor/zig-toolchain is a symlink to a renamed checkout, retarget it or run sh tools/f/fetch-toolchain.sh in the field"
+
+# The newborn builds its own rye from its own source, then its own rishi with that rye --
+# binaries carrying the tree's provenance rather than another checkout's.
+# Pin RYE_ZIG to the newborn. rye/bootstrap.sh honors a pre-set RYE_ZIG, and a pier
+# shell may still export the elder checkout path (grain-harvest after the petrichor
+# mv, 20260904). The rishi build already pinned; the bootstrap did not.
+let ry = run ["sh" "-c" ("cd " + dest + " && env RYE_ZIG=" + zig_dest + " sh rye/bootstrap.sh")]
+assert ry.ok else "birth-a-clone: the rye bootstrap refused -- ${ry.err}"
+# The emit directory is untracked and must exist before the build asks for it -- %337's own
+# lesson, met again at birth.
+let rb = run ["mkdir" "-p" (dest + "/rishi/bin")]
+assert rb.ok else "birth-a-clone: could not make rishi/bin"
+let ri = run ["sh" "-c" ("cd " + dest + " && env RYE_ZIG=vendor/zig-toolchain/zig rye/bin/rye build rishi/src/main.rye -femit-bin=rishi/bin/rishi")]
+assert ri.ok else "birth-a-clone: the rishi build refused -- ${ri.err}"
+
+# The proof: a real witness runs GREEN inside the newborn, on the newborn's own binaries.
+let wt = run ["sh" "-c" ("cd " + dest + " && rishi/bin/rishi run tools/w/wire_lab_fn_drift_witness.rish")]
+assert wt.ok else "birth-a-clone: the newborn's witness refused -- ${wt.out}"
+assert wt.out contains "GREEN: wire-lab-fn" else "birth-a-clone: the newborn's witness must speak GREEN"
+
+say "GREEN: birth-a-clone -- ${dest} stands whole: remotes xy and gp405, tracked hooks, four submodules, its own rye and rishi, one witness GREEN inside it. A codex login and the launch paste remain a hand's."

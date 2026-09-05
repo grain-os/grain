@@ -1,0 +1,145 @@
+# tame_style_scan_bans.rish -- TAME ban patterns over the scan roster (native bans half).
+#
+# File enumeration uses find (list-dir does not recurse). Fixed-string and
+# compound-assert bans use grep over the find set -- a thin host seam for
+# multi-file greps. Advise materializes the roster in-process again under
+# max_list_items=1024 (512 on 20260724 for advise; 1024 on 20260725 for doorway).
+# Mode router: tools/t/tame_style_scan.rish - advise: tools/t/tame_style_scan_advise.rish
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/t/tame_style_scan_bans.rish
+#
+# ) == error. / ) != error. skip // comment lines (e145) -- a /// that names the
+# ban is not a violation. Planted pair:
+#   tools/t/tame_style_ban_err_eq_comment_selftest.rish
+
+let find_rye = "find mantra caravan linengrow comlink rishi/src tally aurora pond brushstroke image mikrophone rye/src amphora glow mycelium constel lattice ember lantern scribble -name '*.rye' ! -type l ! -path '*/.cache/*' ! -path '*/bin/*' 2>/dev/null"
+let ban_nc = "tools/fixtures/t/tame_style_ban_noncomment_files.sh"
+
+# THE COMPOUND-ASSERT ROSTER READS THE SAME ROOMS AS EVERY OTHER BAN, from 20260828.
+# It was held narrower for exactly one day. The roster above widened on 20260827 to the seven
+# rooms it had never read -- glow, mycelium, constel, lattice, ember, lantern, scribble -- and
+# seven of the eight bans were already clean there, gaining 424 files of coverage for free. The
+# eighth was not: those rooms carried 104 genuine compound asserts by that hour's count, and a
+# ban with 104 violations is a ratchet wearing a ban's clothes. So the rooms were split smallest
+# first -- glow's 10 and mycelium's 11 that lap, constel's last 130 on 20260828 -- and when the
+# last room reached zero the second roster had nothing left to hold out. It is DELETED rather
+# than widened: two rosters that must agree are one roster plus a bug waiting for the day they
+# stop agreeing, and this pass proved that by having to edit both.
+#
+# The check reads code rather than text (REDS %304). tools/fixtures/t/tame_style_compound_assert.sh
+# blanks quoted content and THEN the trailing // comment before looking, so neither a string
+# literal (six Glow lowering witnesses assert a generated source CONTAINS "pair.p == 5 and
+# pair.q == 3") nor English prose after the statement is read as a conjunction -- while a call
+# standing left of the `and`, which the elder `[^)]*` grep skipped past, is still bitten.
+
+let hits_err_eq = run ["sh" "-c" "sh ${ban_nc} ') == error.' $(${find_rye}) | head -8"]
+if hits_err_eq.out != "" then say "BAN [) == error.]:"
+if hits_err_eq.out != "" then say hits_err_eq.out
+assert hits_err_eq.out == "" else "TAME ban: ) == error."
+
+let hits_err_ne = run ["sh" "-c" "sh ${ban_nc} ') != error.' $(${find_rye}) | head -8"]
+if hits_err_ne.out != "" then say "BAN [) != error.]:"
+if hits_err_ne.out != "" then say hits_err_ne.out
+assert hits_err_ne.out == "" else "TAME ban: ) != error."
+
+let hits_qassert = run ["sh" "-c" "grep -rlF 'std.debug.assert(' $(${find_rye}) 2>/dev/null | head -8"]
+if hits_qassert.out != "" then say "BAN [std.debug.assert(]:"
+if hits_qassert.out != "" then say hits_qassert.out
+assert hits_qassert.out == "" else "TAME ban: std.debug.assert("
+
+let hits_self = run ["sh" "-c" "grep -rlF 'Self = @This()' $(${find_rye}) 2>/dev/null | head -8"]
+if hits_self.out != "" then say "BAN [Self = @This()]:"
+if hits_self.out != "" then say hits_self.out
+assert hits_self.out == "" else "TAME ban: Self = @This()"
+
+let hits_using = run ["sh" "-c" "grep -rlF 'usingnamespace' $(${find_rye}) 2>/dev/null | head -8"]
+if hits_using.out != "" then say "BAN [usingnamespace]:"
+if hits_using.out != "" then say hits_using.out
+assert hits_using.out == "" else "TAME ban: usingnamespace"
+
+let hits_not_comptime = run ["sh" "-c" "grep -rlF '!comptime' $(${find_rye}) 2>/dev/null | head -8"]
+if hits_not_comptime.out != "" then say "BAN [!comptime]:"
+if hits_not_comptime.out != "" then say hits_not_comptime.out
+assert hits_not_comptime.out == "" else "TAME ban: !comptime"
+
+let hits_cf = run ["sh" "-c" "grep -rlF 'copyForwards' $(${find_rye}) 2>/dev/null | head -8"]
+if hits_cf.out != "" then say "BAN [copyForwards]:"
+if hits_cf.out != "" then say hits_cf.out
+assert hits_cf.out == "" else "TAME ban: copyForwards"
+
+let hits_cb = run ["sh" "-c" "grep -rlF 'copyBackwards' $(${find_rye}) 2>/dev/null | head -8"]
+if hits_cb.out != "" then say "BAN [copyBackwards]:"
+if hits_cb.out != "" then say hits_cb.out
+assert hits_cb.out == "" else "TAME ban: copyBackwards"
+
+let hits_fixme = run ["sh" "-c" "grep -rlF 'FIXME' $(${find_rye}) 2>/dev/null | head -8"]
+if hits_fixme.out != "" then say "BAN [FIXME]:"
+if hits_fixme.out != "" then say hits_fixme.out
+assert hits_fixme.out == "" else "TAME ban: FIXME"
+
+let hits_dbg = run ["sh" "-c" "grep -rlF 'dbg(' $(${find_rye}) 2>/dev/null | head -8"]
+if hits_dbg.out != "" then say "BAN [dbg(]:"
+if hits_dbg.out != "" then say hits_dbg.out
+assert hits_dbg.out == "" else "TAME ban: dbg("
+
+let compound = run ["sh" "-c" "sh tools/fixtures/t/tame_style_compound_assert.sh $(${find_rye}) 2>/dev/null | head -8"]
+if compound.out != "" then say "BAN [compound assert — split so the failing half is named]:"
+if compound.out != "" then say compound.out
+assert compound.out == "" else "TAME ban: compound assert"
+
+# Glow TAME overflow seat (STOA96 / STOA105 / STOA117): lower_shape -
+# lower_shop_gate - lower_shop_nest ride one-file ban passes beside the shell
+# roster greps above (files outside the historic find roots).
+let shape_lower = "glow/lower_shape.rye"
+assert ((read-file shape_lower) contains ") == error.") == false else "TAME ban on lower_shape: ) == error."
+assert ((read-file shape_lower) contains ") != error.") == false else "TAME ban on lower_shape: ) != error."
+assert ((read-file shape_lower) contains "std.debug.assert(") == false else "TAME ban on lower_shape: std.debug.assert("
+assert ((read-file shape_lower) contains "Self = @This()") == false else "TAME ban on lower_shape: Self = @This()"
+assert ((read-file shape_lower) contains "usingnamespace") == false else "TAME ban on lower_shape: usingnamespace"
+assert ((read-file shape_lower) contains "!comptime") == false else "TAME ban on lower_shape: !comptime"
+assert ((read-file shape_lower) contains "copyForwards") == false else "TAME ban on lower_shape: copyForwards"
+assert ((read-file shape_lower) contains "copyBackwards") == false else "TAME ban on lower_shape: copyBackwards"
+assert ((read-file shape_lower) contains "FIXME") == false else "TAME ban on lower_shape: FIXME"
+assert ((read-file shape_lower) contains "dbg(") == false else "TAME ban on lower_shape: dbg("
+let shape_compound = run ["sh" "-c" "grep -Hn 'assert(.* and .*)' glow/lower_shape.rye 2>/dev/null | head -8"]
+assert shape_compound.out == "" else "TAME ban on lower_shape: compound assert"
+
+let bartis = "glow/lower_shop_gate.rye"
+assert ((read-file bartis) contains ") == error.") == false else "TAME ban on lower_shop_gate: ) == error."
+assert ((read-file bartis) contains ") != error.") == false else "TAME ban on lower_shop_gate: ) != error."
+assert ((read-file bartis) contains "std.debug.assert(") == false else "TAME ban on lower_shop_gate: std.debug.assert("
+assert ((read-file bartis) contains "Self = @This()") == false else "TAME ban on lower_shop_gate: Self = @This()"
+assert ((read-file bartis) contains "usingnamespace") == false else "TAME ban on lower_shop_gate: usingnamespace"
+assert ((read-file bartis) contains "!comptime") == false else "TAME ban on lower_shop_gate: !comptime"
+assert ((read-file bartis) contains "copyForwards") == false else "TAME ban on lower_shop_gate: copyForwards"
+assert ((read-file bartis) contains "copyBackwards") == false else "TAME ban on lower_shop_gate: copyBackwards"
+assert ((read-file bartis) contains "FIXME") == false else "TAME ban on lower_shop_gate: FIXME"
+assert ((read-file bartis) contains "dbg(") == false else "TAME ban on lower_shop_gate: dbg("
+let bartis_compound = run ["sh" "-c" "grep -Hn 'assert(.* and .*)' glow/lower_shop_gate.rye 2>/dev/null | head -8"]
+assert bartis_compound.out == "" else "TAME ban on lower_shop_gate: compound assert"
+
+let barket = "glow/lower_shop_nest.rye"
+assert ((read-file barket) contains ") == error.") == false else "TAME ban on lower_shop_nest: ) == error."
+assert ((read-file barket) contains ") != error.") == false else "TAME ban on lower_shop_nest: ) != error."
+assert ((read-file barket) contains "std.debug.assert(") == false else "TAME ban on lower_shop_nest: std.debug.assert("
+assert ((read-file barket) contains "Self = @This()") == false else "TAME ban on lower_shop_nest: Self = @This()"
+assert ((read-file barket) contains "usingnamespace") == false else "TAME ban on lower_shop_nest: usingnamespace"
+assert ((read-file barket) contains "!comptime") == false else "TAME ban on lower_shop_nest: !comptime"
+assert ((read-file barket) contains "copyForwards") == false else "TAME ban on lower_shop_nest: copyForwards"
+assert ((read-file barket) contains "copyBackwards") == false else "TAME ban on lower_shop_nest: copyBackwards"
+assert ((read-file barket) contains "FIXME") == false else "TAME ban on lower_shop_nest: FIXME"
+assert ((read-file barket) contains "dbg(") == false else "TAME ban on lower_shop_nest: dbg("
+let barket_compound = run ["sh" "-c" "grep -Hn 'assert(.* and .*)' glow/lower_shop_nest.rye 2>/dev/null | head -8"]
+assert barket_compound.out == "" else "TAME ban on lower_shop_nest: compound assert"
+
+# tools/*.py -- blocking at zero (Python-at-seam law). Named exempts live in
+# tools/fixtures/t/tools_py_exempt.txt (reason comment per entry). cast_a_chart.py
+# stays outside tools/ and needs no entry. Negative selftest:
+# tools/t/tame_style_tools_py_ban_selftest.rish
+let tools_py_ban = run ["sh" "tools/fixtures/t/tools_py_ban_scan.sh"]
+if tools_py_ban.out != "" then say tools_py_ban.out
+assert tools_py_ban.ok else "TAME ban: tools/*.py present (target zero; name an exempt deliberately)"
+assert tools_py_ban.out contains "TOOLS_PY_OK" else "TAME ban: tools/*.py scan missing TOOLS_PY_OK"
+
+say "GREEN: TAME style bans clean on scan roster · lower_shape · lower_shop_gate · lower_shop_nest overflow seats · tools/*.py zero."

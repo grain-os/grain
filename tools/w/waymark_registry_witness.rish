@@ -1,0 +1,41 @@
+# waymark_registry_witness.rish -- prove the immutable waymark registry.
+#
+#   rishi/bin/rishi run tools/w/waymark_registry_witness.rish
+#
+# The registry construction/waymark-registry.bron is the single, sealed, canonical source
+# of truth for every waymark ever drawn -- living, retired, abandoned, transient,
+# hand-seated. This witness proves two things on metal, so the registry can be
+# trusted without reading the mutable history that produced it:
+#
+#   SEAL_OK    -- SHA3-512 of the sealed body equals the recorded `seal`; any edit
+#                 to any row breaks it (immutability, the resins/proof discipline).
+#   DERIVE_OK  -- every corpus-drawn row re-derives: SHA3-512(input)[:8] hex, mod
+#                 corpus_size, +1 = the recorded index; corpus[index] = the mark
+#                 (the same oracle waymark_derive.rish uses).
+#
+# Once GREEN, the elder names scattered in old logs and history are redundant --
+# this file, sealed and re-derivable, holds the canonical naming truth. The crypto
+# lives in tools/fixtures/w/waymark_registry_verify.sh; this witness runs it and
+# asserts. Corpus pin: tools/fixtures/f/flw-four-letter.txt (naming-grade, SHA3-512).
+
+let reg = run ["test" "-f" "construction/waymark-registry.bron"]
+assert reg.ok else "construction/waymark-registry.bron not found -- run from the repo root"
+
+let verify = run ["sh" "tools/fixtures/w/waymark_registry_verify.sh"]
+assert verify.ok else "registry verification failed: ${verify.out}"
+assert (verify.out contains "SEAL_OK") else "seal mismatch -- the registry body was edited without resealing"
+assert (verify.out contains "DERIVE_OK") else "a corpus row did not re-derive from its input"
+assert (verify.out contains "REGISTRY_GREEN") else "registry verification did not reach GREEN"
+say "${verify.out}"
+
+# COMPLETENESS -- every mark the rule table seats must have a row here.
+# The seal proves nothing was EDITED and the re-derive proves every row present is honest, and
+# neither can see a mark that is simply ABSENT: a missing row is well-formed. AHOY stood in the
+# rule table and in 24 living files with no row in this registry, and this witness was GREEN the
+# whole time (REDS %298's class -- the guard reads structure, and the absence is well-formed).
+let whole = run ["sh" "tools/fixtures/w/waymark_table_registry_completeness.sh"]
+say whole.out
+assert whole.ok else "a waymark seated in the rule table has no row in the registry the rule calls the authority -- derive it and re-seal"
+assert (whole.out contains "verdict=ok") else "the completeness read must balance before it is believed"
+
+say "GREEN: waymark registry sealed, every corpus mark re-derived on metal, and every mark the rule table seats present here -- the canonical naming truth stands on its own."

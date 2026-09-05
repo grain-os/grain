@@ -1,0 +1,339 @@
+# tools/q/qa_report_card_witness.rish -- quality assurance, as a grade a writer can aim at.
+#
+# WHY THIS RUNG. This tree measured its prose one way: the share of sentences carrying a negative,
+# held at or under 20% for a Door document. That number is true and it is also backwards. A reader
+# told to hold "20% negative" is being told what the page failed to avoid, and a writer aiming at it
+# is aiming at a ceiling rather than at a standard. Read the same measurement the other way up --
+# 100 minus that share -- and 20% becomes 80, a B, which is a grade a person has known since school
+# and can aim at without translating. the maintainer asked for exactly that flip on 20260824, and for the
+# grade to reach past prose to code comments and to design.
+#
+# WHAT A REPORT CARD IS. Four readings of one artifact, each 0 to 100, meaned into one grade.
+#   Register  counted   100 minus the negative-sentence share, the same reading prose_register
+#                       gates, lifted from that scan rather than copied beside it -- floor and all,
+#                       so a page too short to carry a share has it reported rather than scored.
+#   Reach     counted   Flesch-Kincaid grade and cross-references per hundred words, against the
+#                       budget its setting carries -- unless the page declares itself an index AND
+#                       measures like one, where the density is reported rather than scored.
+#   Truth     half      counted: every relative link resolved as written, root-relative, or by the
+#                       fold rule. Judged: whether a behavioral claim is still honestly true.
+#   Service   judged    whether the artifact helps the work actually in front of us, read against
+#                       construction/ITINERARY.md. The tool prints the inputs and stops there.
+#
+# Truth is a gate rather than a quarter: below 60 the whole card reads F, because a page whose
+# claims have gone false costs a reader more than an absent page. Honesty first, written into the
+# arithmetic rather than left to a habit.
+#
+# FOUR READINGS THAT LEARNED AN HONEST DENOMINATOR, 20260825. A meter that instructs a repair which
+# would make the artifact worse is the thing to fix, and each of these was one reading short of it.
+#
+#   An INDEX is read as one. A cross-reference budget of one per hundred words is written for prose;
+#   on an index the links ARE the content. docs/README.md carries 10 words and 5 links, read 50 per
+#   100w, and floored Reach at zero -- instructing a writer to pad an index with prose. The card now
+#   reads the page's own declaration the way declared_ceiling reads its own limit, under TWO
+#   conditions, because a self-declared exemption is a door and a door beside a wall makes the wall a
+#   habit: the page must DECLARE itself an index in its header (`**Depth:** routing`, `**Kind:** ...
+#   index`) AND MEASURE as one, under 100 words of prose -- one full unit of the denominator the rate
+#   is expressed in. Measured over every living page: four declare, three carry 13, 13, and 10 words,
+#   and the fourth carries 193 and stays graded at an A.
+#
+#   A PLACEHOLDER SHAPE is an illustration. `date/YYYYMMDD/name` is a shape with letters standing
+#   where digits go, and .claude/rules/stamp-and-name.md seats that spelling and asks for it by name.
+#   construction/CHECKPOINTS.md sat at Truth 60, one point off the F gate, for writing two of them.
+#   Only YYYYMMDD and HHMMSS count, the two runs that law spells inside a path shape; zero tracked
+#   paths in this tree carry either literally. A FABRICATED stamp naming no file still costs twenty,
+#   which is the half that keeps this a reading rather than an escape hatch.
+#
+#   A SHARE NEEDS A DENOMINATOR. The register scan's teaching tier has always skipped a page under
+#   eight sentences -- "too short to read a share from honestly" -- and the card citing that scan
+#   was dropping the floor, so one page could be unmeasurable to one reading and scored 0 by the
+#   other. Measured 20260825: 27 living teaching pages sit under the floor, six of them reading
+#   100% off a SINGLE sentence. The floor is now a named constant in the scan, REGISTER_MIN_SENTENCES,
+#   and the card CITES it the way it already cites measure() -- losing it makes the card refuse.
+#   One condition here rather than two, because a sentence count is measured rather than declared,
+#   so no page can assert its way under it. The 20% wall on the twelve door documents is untouched.
+#
+#   A PROGRAM CITES IN ITS COMMENTS. Truth read every `](` in a file, and outside prose that pattern
+#   is mostly something else: a fixture planted in a pen, a fragment of a page the file emits (whose
+#   paths are relative to where the OUTPUT lands), or `x[1](32000)` arithmetic. So in a program a
+#   citation is a path named on a comment line, outside backticks, that looks like a path -- and a
+#   SYMLINK's citations belong to the body that wrote them. Six symlinked doors read as eleven broken
+#   citations on 20260825, and repairing them would have written through the links into six correct
+#   bodies. Reading the data before acting on it is what stopped that, the same way REDS %213 did.
+#
+# A TABLE IS NOT A PARAGRAPH, 20260831. Both counted readings are computed over SENTENCES, and a
+# reference table has none: this tree writes its key lists without terminal punctuation, so a run of
+# them merges into whatever sentence abuts it and the card weighs a head as if it held a handful of
+# enormous ones. Twenty-eight such lines moved one real scan from C 74 to A 91 with its content
+# unchanged (REDS %397). A reference block is now held out of both readings and REPORTED beside the
+# prose, the way declaration docs already are, and what counts as one is read off the line's own
+# face -- an entry is a bare identifier followed by two or more spaces, a continuation is indented
+# past that entry's key column, and a block is two or more entries sharing one key column. TWO
+# entries rather than one, because a lone double-spaced line is prose far more often than a table.
+# Measured across the tree: 154 program heads carry a block, 928 lines in all, and holding them out
+# moves 130 of them -- 57 across the B door, one below it, mean +7.2. Exactly one living non-dated
+# prose file of 1,503 carries a block at all, so the reading is surgical rather than sweeping.
+#
+# WHAT IS PROVEN, on metal. One hundred and seventeen behaviors in a throwaway pen -- the control's own
+# yes/no readings, counted rather than recited, after this file carried 72 in one place and 79 in
+# another.
+# The scale at every one of its
+# nine boundaries from both sides, and no minus grade anywhere. The register flip proven to BE the
+# register scan's own number rather than a second measurement -- and proven load-bearing, since
+# removing measure() from that scan makes the card refuse. Reach falling when a page reaches past
+# its reader. Meter carrying no register or reach budget, because refusal-first prose is the subject
+# there. Truth counting a link that resolves nowhere, leaving a resolving one alone, resolving a
+# dated reference by the fold rule, and reading past an http link it was never able to check. The
+# composite as the mean of four, and the truth gate held at 60 and bitten at 59. The card refusing
+# to invent a Service it did not measure, refusing an absent path, and refusing an unknown setting.
+#
+# And the two new readings proven from BOTH sides. A declaring short page read as an index; a
+# declaring LONG page still graded and still penalized; a short page declaring nothing still
+# penalized for its link density; a declaration in the body reaching nothing. A placeholder costing nothing and
+# named; a fabricated stamp still costing twenty and still named. Pointed at a copy of the card
+# carrying the old rule, the control refuses 13 of those 17 and passes exactly the 4 that describe
+# behavior which must NOT change -- so it is proven to bite rather than assumed to.
+#
+# And a program's prose is whatever ITS OWN language marks as a comment. Glow opens one with `::`,
+# as do the `.brush` placards, and the extractor knew only `//` and `#` -- so 438 tracked `.glow`
+# files and 8 `.brush` ones measured zero words, and all 34 residents of the shape museum graded
+# C+ 75 whatever they said (REDS %358). Proven from both sides: a placard behind a mark the card
+# knows is read and weighed, the same placard behind a mark it does not know reads nothing, and a
+# `::` sitting mid-sentence in a `//` comment stays prose rather than becoming a second head to
+# strip.
+#
+# AND A NOTATION'S PROSE IS ITS COMMENT BLOCK, WHILE ITS RECORDS ARE DATA. Kyri and Bron open a
+# comment with `#` and close a record with nothing, so a `.kyri` read as a document lost its whole
+# argument to the heading rule and read its records as ONE pseudo-sentence: 498 comment lines and
+# 7,271 words dropped from `construction/standing-equipment.kyri`, 457 records read as a single
+# 915-word sentence, a reading grade of 327, and the same C+ 75 the shape museum wore one family
+# earlier -- nineteen notation files, one number (REDS %400). Both repairs above taught the PROGRAM
+# extractor a new mark; a notation classifies as prose, where no extractor runs, so the third family
+# arrived through the one door neither repair covered. Proven from both sides: two rosters with
+# identical records and opposite heads that the card now tells apart and the elder card could not,
+# two hundred more records moving neither the sentence count nor the grade, and the elder reading
+# shown answering one sentence, which is the fault's own signature.
+#
+# WHICH SETTING A NOTATION TAKES, decided by grammar rather than by the typed word (20260831). The
+# repair above made a roster's document readable and left the escape hatch beside it: `--setting
+# meter` sets register and reach both to 100, so every one of those nineteen files read EXACTLY 94
+# with Service held at 75 -- one number across nineteen different inputs, which is the disconnected
+# reading the repair had just removed, available for the typing. The card now asks the file. A
+# notation carrying a comment block has a document, so Meter is refused and the reading falls to
+# Field, this card's own default, since Meter carries no ceiling to fall back on. A notation with no
+# comment block is all record, so the free pass stands. The split is the family's, not an
+# invention: measured across all 4,090 tracked `.bron` and `.kyri` files, 3,983 carry zero comment
+# lines -- 3,928 session logs, which `.claude/rules/session-logs.md` already seats at Meter, plus 55
+# data corpora -- and 107 carry a document. At Field the nineteen read 81 to 92, an eleven-point
+# spread, every one at or above B, so the class never needed the relief. Field rather than Door
+# because twelve of the nineteen exceed Door's 20% register ceiling and eight exceed its grade
+# ceiling of 9; a typed `--setting door` is still honored, since whether that ceiling of 9 is right
+# at all is its own open question and settling it inside this repair would be reaching.
+#
+# AND THE GRADE CARRIES THE FLOOR THE REGISTER READING ALREADY HELD (REDS %407, 20260831). The lap
+# opened on a question: should a record-only notation DEFAULT to Meter, given that 3,928 session
+# logs sit between a card grading at Field and a rule seating logs at Meter. Measurement answered a
+# different one. A reading grade is two rates -- words per sentence, syllables per word -- so it
+# wants a denominator exactly as a share does, and one of the card's two scored readings checked
+# that denominator while the other scored on. Across 385 sampled artifacts (55 record-only notation
+# files, a 60-log sample, 163 programs, all 107 documented notation files), 207 sat under the
+# register scan's own eight-sentence floor and 137 of them still took a scored Reach below 100.
+# Seventeen carried zero words of prose and read reach=0, the lowest point on the scale, for a page
+# the card had read nothing of. A one-line module head shows it plainest:
+# active-designing/docs/glow/fixtures/anchor_bad.rye printed `meter_reach=100 (0 words reported, not
+# scored)` beside `reach=0 (grade 0 against 9 ... 0 words)` in one run. Data corpora show it
+# largest, where the syllable heuristic counts vowel groups inside a 128-character hex string --
+# mycelium/corpora/braid_dag.bron reads 6.1 syllables per word and a grade of 59 over 30 words --
+# and 41 of the 55 record-only files read D+ on that alone.
+#
+# So the grade term takes the same cited floor, and the cross-reference term keeps the index door it
+# already had. Two terms, two doors, deliberately independent: a twenty-word page with five links
+# keeps its link penalty, because a rate stays a rate, while it stops being graded on a readability
+# score twenty words can carry. That independence is what let this land beside a decision the index
+# door made on purpose, and all four of that door's legs still pass unchanged. Session logs stand
+# exactly where they stood -- 0 of 60 sat under the floor with a scored grade -- so measurement
+# answers the door that sent this lap out: a record-only notation already reads correctly at Field,
+# and defaulting the family to Meter would hand 3,985 files the constant the repair one row above
+# had just removed.
+#
+# WHAT IS REPORTED, as a ratchet under a ceiling that only ever falls. The twelve-document door
+# roster, read as report cards, counted where the COUNTED half alone puts a page below B. One at
+# seating, docs/README.md, and the ceiling fell to ZERO on 20260825 when the index reading landed --
+# by measurement rather than by editing the page, which is the whole point of fixing the meter.
+#
+# WHAT IS NOT GATED, and why. A grade is not a gate. The register share already has its wall at
+# tools/p/prose_register_witness.rish, and a second hard ceiling on the same pages would red the
+# tree on readings it never agreed to hold. The card exists to aim a writer; a ratchet aims without
+# refusing.
+#
+# WHAT IS NOT PROVEN. That an A page is a good page. Four honest proxies, two counted, and the
+# second thing to read is always the artifact itself.
+#
+# Style: context/GAUGE_STYLE.md - Rule: .claude/rules/quality-assurance.md
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/q/qa_report_card_witness.rish
+
+say "qa-report-card: Language EN -- a ceiling tells a writer what to avoid; a grade tells them what to reach for."
+say "qa-report-card: Style Gauge -- the same measurement read the other way up, and two more beside it."
+say "qa-report-card: Lens TAME -- honesty first: a page whose claims have gone false reads F whatever else it scores."
+
+let scan = run ["sh" "tools/fixtures/q/qa_report_card_scan.sh"]
+assert scan.ok else "qa-report-card: more door documents sit below B on their counted half than the ceiling allows"
+say scan.out
+assert scan.out contains "verdict=ok" else "qa-report-card: the roster reading must balance before it is believed"
+say "field GREEN -- every front door read as a report card, and the ratchet holds"
+
+let control = run ["sh" "tools/fixtures/q/qa_report_card_control.sh"]
+assert control.ok else "qa-report-card: the control must complete"
+say control.out
+assert control.out contains "scale_exact=yes" else "qa-report-card: the scale must read exactly at all nine boundaries, from both sides"
+assert control.out contains "no_minus_grades=yes" else "qa-report-card: this scale carries no minus grades, by the maintainer's word"
+assert control.out contains "warm_register_high=yes" else "qa-report-card: affirmative prose must grade high"
+assert control.out contains "cold_register_low=yes" else "qa-report-card: refusal-led prose must grade low"
+assert control.out contains "register_discriminates=yes" else "qa-report-card: the register reading must tell the two apart"
+assert control.out contains "register_is_the_flip=yes" else "qa-report-card: register is 100 minus the register scan's own number, never a second measurement"
+assert control.out contains "register_source_load_bearing=yes" else "qa-report-card: the register reading is cited, so losing its source must refuse rather than guess"
+assert control.out contains "reach_falls_on_links=yes" else "qa-report-card: a page reaching past its reader must lose reach"
+assert control.out contains "reach_under_full=yes" else "qa-report-card: reach over budget must read under 100"
+assert control.out contains "meter_register_free=yes" else "qa-report-card: Meter carries no register budget -- refusal is its subject"
+assert control.out contains "meter_reach_free=yes" else "qa-report-card: Meter carries no reach budget either"
+assert control.out contains "resolving_link_free=yes" else "qa-report-card: a link that lands must cost nothing"
+assert control.out contains "unresolved_link_counted=yes" else "qa-report-card: a link that lands nowhere must cost twenty points"
+assert control.out contains "unresolved_named=yes" else "qa-report-card: an unresolved link must be named, so it can be repaired"
+assert control.out contains "fold_rule_resolves=yes" else "qa-report-card: a dated reference whose room folded is resolved, never counted as gone"
+assert control.out contains "web_link_free=yes" else "qa-report-card: an http link is not a path this tree can resolve"
+assert control.out contains "composite_is_mean=yes" else "qa-report-card: four hundreds must mean to a hundred"
+assert control.out contains "mean_of_four_reads=yes" else "qa-report-card: the composite must be the mean of the four readings"
+assert control.out contains "gate_holds_at_60=yes" else "qa-report-card: the truth gate must hold at sixty"
+assert control.out contains "gate_bites_at_59=yes" else "qa-report-card: the truth gate must bite at fifty-nine, so no override exists"
+assert control.out contains "gate_reads_F=yes" else "qa-report-card: a gated card reads F whatever else it scored"
+assert control.out contains "service_left_judged=yes" else "qa-report-card: Service is supplied by a reader, never invented by the tool"
+assert control.out contains "composite_left_judged=yes" else "qa-report-card: an unjudged card must print judged rather than a number"
+assert control.out contains "service_inputs_reported=yes" else "qa-report-card: the tool must hand the judge the inputs it counted"
+assert control.out contains "absent_path_refused=yes" else "qa-report-card: an absent artifact must refuse rather than read zero"
+assert control.out contains "unknown_setting_refused=yes" else "qa-report-card: an unknown setting must refuse rather than default"
+assert control.out contains "declared_and_short_reads_index=yes" else "qa-report-card: a page that declares an index in its header and measures under the prose floor must be read as one"
+assert control.out contains "index_density_reported=yes" else "qa-report-card: an index's link density is reported rather than scored -- the links ARE its content"
+assert control.out contains "index_density_named=yes" else "qa-report-card: the card must say the density was reported, so a reader sees what was read past"
+assert control.out contains "declared_but_long_stays_graded=yes" else "qa-report-card: a declaring page carrying real prose stays graded -- the floor is what keeps the declaration from being an exemption"
+assert control.out contains "declared_but_long_penalized=yes" else "qa-report-card: and it must actually lose reach, or the floor proves nothing"
+assert control.out contains "undeclared_short_stays_graded=yes" else "qa-report-card: a short page that declares nothing stays graded -- the word count alone is no exit either"
+assert control.out contains "undeclared_short_penalized=yes" else "qa-report-card: and it must actually lose reach, or the declaration proves nothing"
+assert control.out contains "body_declaration_ignored=yes" else "qa-report-card: the declaration is read in the header alone, so a body discussing indexes declares nothing"
+assert control.out contains "body_declaration_stays_graded=yes" else "qa-report-card: a body declaration must not reach the grade"
+assert control.out contains "meter_names_its_mode=yes" else "qa-report-card: Meter names its own mode rather than borrowing either of the other two"
+assert control.out contains "placeholder_costs_nothing=yes" else "qa-report-card: a placeholder shape is an illustration of a path, never a citation of one"
+assert control.out contains "placeholder_named=yes" else "qa-report-card: an illustration must be named, so a reader sees what the card read past"
+assert control.out contains "placeholder_counted=yes" else "qa-report-card: the card must count the illustrations it read past"
+assert control.out contains "placeholder_not_cited=yes" else "qa-report-card: an illustration leaves the cited denominator, rather than resolving inside it"
+assert control.out contains "hhmmss_placeholder_free=yes" else "qa-report-card: both runs the naming law spells inside a path shape are illustrations"
+assert control.out contains "fabricated_stamp_still_counted=yes" else "qa-report-card: a real-looking stamp naming no file is still a broken citation -- this is the half that keeps the reading from being an escape"
+assert control.out contains "fabricated_stamp_named=yes" else "qa-report-card: and it must still be named, so it can be repaired"
+assert control.out contains "floor_is_cited=yes" else "qa-report-card: the register floor is read out of prose_register_scan.sh, never spelled beside it"
+assert control.out contains "under_floor_reported=yes" else "qa-report-card: a page under the sentence floor has its share reported rather than scored"
+assert control.out contains "under_floor_not_scored=yes" else "qa-report-card: and it must cost nothing -- one negative sentence out of one is a rounding error, not a register"
+assert control.out contains "under_floor_named=yes" else "qa-report-card: the card must say the share was reported, so a reader still sees it"
+assert control.out contains "under_floor_share_still_shown=yes" else "qa-report-card: the denominator stays visible even where the share is unscored"
+assert control.out contains "at_floor_scored=yes" else "qa-report-card: a page AT the floor is scored -- the boundary is read from both sides"
+assert control.out contains "at_floor_scored_low=yes" else "qa-report-card: and refusal-led prose at the floor must still grade low"
+assert control.out contains "at_floor_denominator=yes" else "qa-report-card: the sentence at the floor must reach the denominator"
+assert control.out contains "meter_names_register_mode=yes" else "qa-report-card: Meter names its own register mode rather than borrowing another"
+assert control.out contains "floor_source_load_bearing=yes" else "qa-report-card: the floor is cited, so losing its source must refuse rather than guess"
+assert control.out contains "program_cites_in_comments=yes" else "qa-report-card: in a program a citation is a path named in a comment, never a fragment of what the program emits"
+assert control.out contains "program_body_truth_clean=yes" else "qa-report-card: a program whose comment citations resolve must read clean"
+assert control.out contains "code_and_math_left_out=yes" else "qa-report-card: an emitted row and array-index arithmetic must both stay out of the denominator"
+assert control.out contains "symlink_named=yes" else "qa-report-card: a symlink must be named, so a reader knows which of two doors was measured"
+assert control.out contains "symlink_reads_the_body=yes" else "qa-report-card: a relative citation belongs to the body that wrote it, never to the door it was reached through"
+assert control.out contains "body_break_seen=yes" else "qa-report-card: resolving a link is a correction, so a real break in the body must still be seen"
+assert control.out contains "body_break_seen_through_door=yes" else "qa-report-card: and seen through the door as well, or the resolution is an exemption"
+assert control.out contains "prose_cites_everywhere=yes" else "qa-report-card: a prose file cites everywhere -- the program rule is kept away from prose deliberately"
+assert control.out contains "heading_link_still_counted=yes" else "qa-report-card: a Markdown heading begins with a comment mark, and its link must still count"
+assert control.out contains "quoted_syntax_free=yes" else "qa-report-card: a page quoting link syntax inside backticks cites nothing -- the grep runs straight through a span"
+assert control.out contains "quoted_syntax_not_cited=yes" else "qa-report-card: and the quoted span leaves the denominator rather than resolving inside it"
+assert control.out contains "real_link_beside_quote_counted=yes" else "qa-report-card: a real broken link beside a quoted one still costs twenty -- quoting is no way to stop being read"
+assert control.out contains "real_link_beside_quote_named=yes" else "qa-report-card: and it must still be named, so it can be repaired"
+assert control.out contains "glow_prose_read=yes" else "qa-report-card: a Glow placard's :: prose must be read as prose"
+assert control.out contains "glow_words_counted=yes" else "qa-report-card: a Glow placard must measure more than zero words"
+assert control.out contains "unknown_mark_reads_nothing=yes" else "qa-report-card: the comment-mark clause must be load-bearing -- an unknown mark reads nothing"
+assert control.out contains "midline_unstripped=yes" else "qa-report-card: :: mid-sentence is prose, never a second comment head"
+assert control.out contains "midline_still_read=yes" else "qa-report-card: a // comment mentioning :: keeps its whole sentence"
+assert control.out contains "program_setting_independent=yes" else "qa-report-card: a program's grammar chooses its settings, never the caller's word"
+assert control.out contains "program_head_is_door=yes" else "qa-report-card: the module head must be read at Door"
+assert control.out contains "program_bounds_are_meter=yes" else "qa-report-card: invariant bounds must be read at Meter"
+assert control.out contains "program_decl_reported=yes" else "qa-report-card: declaration docs belong to neither pole and must stay visible"
+assert control.out contains "program_meter_unscored=yes" else "qa-report-card: Meter bound prose is reported rather than simplified"
+assert control.out contains "program_meter_cannot_lower_door=yes" else "qa-report-card: refusal-heavy bound prose must not lower the Door reading"
+assert control.out contains "program_door_still_scored=yes" else "qa-report-card: a weak module head must still lower the card when the caller asks for Meter"
+assert control.out contains "notation_comment_read=yes" else "qa-report-card: a notation file keeps its document behind `#`, so that block must be read rather than dropped as a heading"
+assert control.out contains "notation_register_discriminates=yes" else "qa-report-card: two rosters with identical records and opposite heads must not read the same register"
+assert control.out contains "notation_counts_reported=yes" else "qa-report-card: the card must name how many lines it read as document and how many it counted as data"
+assert control.out contains "notation_records_are_data=yes" else "qa-report-card: two hundred more records must move neither the sentence count nor the grade"
+assert control.out contains "notation_document_refuses_meter=yes" else "qa-report-card: a notation carrying a comment block has a document to read, so Meter's free pass must be refused rather than granted"
+assert control.out contains "notation_refused_meter_falls_to_field=yes" else "qa-report-card: Meter carries no ceiling to fall back on, so a refused notation reads at the card's own default"
+assert control.out contains "notation_meter_cannot_lift_field=yes" else "qa-report-card: the typed word must not move the reading -- the same bytes read the same letter at meter and at field"
+assert control.out contains "notation_meter_refusal_named=yes" else "qa-report-card: the card must say which half of the grammar answered, rather than quietly reading something else"
+assert control.out contains "notation_record_only_keeps_meter=yes" else "qa-report-card: a notation with no comment block is all record, and Meter is right for it -- a session log stays unmoved"
+assert control.out contains "notation_free_pass_named=yes" else "qa-report-card: the free pass must name itself too, since a silent grant reads exactly like a silent refusal"
+assert control.out contains "notation_elder_meter_was_constant=yes" else "qa-report-card: the elder meter test must be shown returning one number for two opposite rosters"
+assert control.out contains "notation_meter_repair_bites=yes" else "qa-report-card: the repaired card must read a documented roster differently than the elder one, or it is a rewording"
+assert control.out contains "notation_fields_still_read=yes" else "qa-report-card: a long field value is prose and stays read, whatever the comment block holds"
+assert control.out contains "notation_elder_was_blind=yes" else "qa-report-card: the elder classifier must be shown unable to tell the two plants apart"
+assert control.out contains "notation_elder_read_one_sentence=yes" else "qa-report-card: the elder reading must be shown answering one sentence, which is the fault's own signature"
+assert control.out contains "table_leaves_prose_unmoved=yes" else "qa-report-card: one paragraph must read one grade whether or not a punctuation-free table sits beside it"
+assert control.out contains "paragraph_holds_no_table=yes" else "qa-report-card: ordinary prose holds no reference block, so nothing is quietly held out of it"
+assert control.out contains "table_counted=yes" else "qa-report-card: the held-out lines must be counted"
+assert control.out contains "table_named=yes" else "qa-report-card: and named on the card, so a reader sees what was read past"
+assert control.out contains "hold_out_load_bearing=yes" else "qa-report-card: with the block scored inside the prose the same two files must disagree -- a hold-out proven only in the passing direction cannot be told from one that does nothing"
+assert control.out contains "lone_entry_stays_prose=yes" else "qa-report-card: one entry is not a block -- a lone double-spaced line is prose far more often than a table"
+assert control.out contains "two_entries_make_a_block=yes" else "qa-report-card: and the second entry must make a block, or the threshold proves nothing"
+assert control.out contains "continuation_rides_along=yes" else "qa-report-card: a wrapped description rides with the entry that opened it, or every wrap breaks its own run"
+assert control.out contains "blank_ends_a_block=yes" else "qa-report-card: a blank line ends a block, because a blank line is how this tree ends a table"
+assert control.out contains "key_column_binds_a_block=yes" else "qa-report-card: entries at different key columns are different tables, never one block"
+assert control.out contains "prose_table_held_out=yes" else "qa-report-card: a prose file's reference block is read the same way a program's is"
+assert control.out contains "fence_left_alone=yes" else "qa-report-card: a fenced listing is already read past, so reaching in would inflate the count and move no grade"
+assert control.out contains "reference_source_load_bearing=yes" else "qa-report-card: the reference reading is cited, so losing its source must refuse rather than guess a zero"
+assert control.out contains "table_leaves_prose_unmoved=yes" else "qa-report-card: one paragraph must read one grade whether or not a punctuation-free table sits beside it"
+assert control.out contains "paragraph_holds_no_table=yes" else "qa-report-card: ordinary prose holds no reference block, so nothing is quietly held out of it"
+assert control.out contains "table_counted=yes" else "qa-report-card: the held-out lines must be counted"
+assert control.out contains "table_named=yes" else "qa-report-card: and named on the card, so a reader sees what was read past"
+assert control.out contains "hold_out_load_bearing=yes" else "qa-report-card: with the block scored inside the prose the same two files must disagree -- a hold-out proven only in the passing direction cannot be told from one that does nothing"
+assert control.out contains "lone_entry_stays_prose=yes" else "qa-report-card: one entry is not a block -- a lone double-spaced line is prose far more often than a table"
+assert control.out contains "two_entries_make_a_block=yes" else "qa-report-card: and the second entry must make a block, or the threshold proves nothing"
+assert control.out contains "continuation_rides_along=yes" else "qa-report-card: a wrapped description rides with the entry that opened it, or every wrap breaks its own run"
+assert control.out contains "blank_ends_a_block=yes" else "qa-report-card: a blank line ends a block, because a blank line is how this tree ends a table"
+assert control.out contains "key_column_binds_a_block=yes" else "qa-report-card: entries at different key columns are different tables, never one block"
+assert control.out contains "prose_table_held_out=yes" else "qa-report-card: a prose file's reference block is read the same way a program's is"
+assert control.out contains "fence_left_alone=yes" else "qa-report-card: a fenced listing is already read past, so reaching in would inflate the count and move no grade"
+assert control.out contains "reference_source_load_bearing=yes" else "qa-report-card: the reference reading is cited, so losing its source must refuse rather than guess a zero"
+assert control.out contains "deps_list_is_complete=yes" else "qa-report-card: a pen built from nothing but --deps must run the card, or the list has gone stale"
+assert control.out contains "deps_list_is_named=yes" else "qa-report-card: --deps must name every reading the card cites, not one of them"
+assert control.out contains "deps_list_resolves=yes" else "qa-report-card: every path --deps names must exist"
+assert control.out contains "grade_floor_frees_the_corpus=yes" else "qa-report-card: a reading grade needs a denominator, so prose under the register scan's own floor is reported rather than scored"
+assert control.out contains "grade_floor_names_the_grade=yes" else "qa-report-card: the grade must still be printed when it is not scored, the same way the register share is"
+assert control.out contains "empty_prose_reads_full=yes" else "qa-report-card: a file with nothing to read cannot be unreadable -- zero words must not score zero"
+assert control.out contains "floors_agree_across_readings=yes" else "qa-report-card: one card reading one prose_path must not report one scored reading and score the other"
+assert control.out contains "long_prose_still_graded=yes" else "qa-report-card: prose that clears the floor is graded exactly as before, or the floor is an exemption"
+assert control.out contains "link_penalty_survives_the_floor=yes" else "qa-report-card: the grade floor and the index door are separate terms -- a short undeclared page keeps its link penalty"
+assert control.out contains "elder_grade_scored_the_unmeasurable=yes" else "qa-report-card: the elder card must be shown scoring a grade it had no denominator for, and an empty file at zero"
+assert control.out contains "grade_floor_repair_bites=yes" else "qa-report-card: the repaired card must read the corpus and the empty file differently than the elder one, or it is a rewording"
+assert control.out contains "control_verdict=ok" else "qa-report-card: the control must agree with itself"
+say "one hundred and seventeen behaviors proven in a throwaway pen, the scale read at every boundary from both sides"
+
+# THE JUDGED READING NAMES ITS OWN SCALE (REDS %361). The composite is the mean of four readings on
+# one 0-100 scale, so `--service` is 0-100 -- and that clause lived in exactly one place, the loop's
+# seat prompt, while this card, the rules, and the tool's usage line all dropped it. A hand reading
+# any of those answers three of four, the tool reads 3 of 100, and a page that grades A+ returns C+,
+# which under the Standing block pushes a molt frame. Both branches are read, because the judged
+# branch is where a hand learns what to hand in.
+let scaled = run ["sh" "tools/fixtures/q/qa_report_card.sh" "construction/standing-equipment.kyri" "--setting" "meter" "--service" "50"]
+assert scaled.ok else "qa-report-card: the card must run on a real living path -- ${scaled.out}"
+assert scaled.out contains "service_scale=0-100" else "qa-report-card: the judged reading must print its scale beside itself, never only in the arithmetic"
+assert scaled.out contains "worth 25 each" else "qa-report-card: the scale must say how the four questions divide, since four is what a hand counts"
+
+let judged = run ["sh" "tools/fixtures/q/qa_report_card.sh" "construction/standing-equipment.kyri" "--setting" "meter"]
+assert judged.ok else "qa-report-card: the card must run with the judged reading withheld -- ${judged.out}"
+assert judged.out contains "service_scale=0-100" else "qa-report-card: the branch that asks for the judgment must name the scale it wants"
+say "the judged reading carries its own scale, in both the given and the withheld branch"
+
+say "GREEN: qa-report-card -- quality assurance, as a grade a writer can aim at."

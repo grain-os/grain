@@ -1,0 +1,305 @@
+# tools/s/standing_equipment_witness.rish -- the roster of standing guards is a list, not a sentence.
+#
+# WHY THIS RUNG. The standing-equipment roster lived in one paragraph of construction/ITINERARY.md. A
+# paragraph can be read and it can be believed; it cannot be run, counted, or dated. The tree paid
+# for that twice in two consecutive rounds. REDS %147 found eight standing witnesses each holding a
+# count its source had moved past. REDS %149 found the living-pin bound guard unrun for four laps
+# while construction/REDS.md sat 2,050 bytes over the bound that guard exists to hold. Each was caught by a
+# hand that happened to run something, which is the definition of a lantern rather than a loom.
+#
+# The grain already seats the sibling strand: a guard that cannot red guards nothing (REDS row 59).
+# Two rounds have now taught the strand beside it -- a guard that is never run guards nothing
+# either -- so the roster becomes a file a program reads, and the running of it leaves a record.
+#
+# WHAT IS PROVEN, on metal.
+#   Every `path` in construction/standing-equipment.kyri names a file that exists on disk, so the roster
+#   can never name equipment the tree has moved or renamed away from underneath it.
+#   Every `guard` record carries exactly one `path`, so a half-written row is refused rather than
+#   silently skipped by a runner reading the same file.
+#   Every `tier` names a cadence the runner honors -- `lap` or `cadence`, with an absent field
+#   meaning `lap`. A guard seated on a tier no runner knows would run on no lap at all, in silence,
+#   which is REDS %219 wearing a field name.
+#   Every `ran` line in the run card names a guard the roster actually seats.
+#   No run-card line records a red or an absent guard.
+#   Every `capability` names one the runner probes -- `ipv6` today. A capability is a tier for what
+#   a host CAN DO, beside `host` for PLACE and `tier` for TIME, and its probe answers present,
+#   absent, or UNKNOWN. An unknown RUNS the guard, because skipping on an unknown is how a
+#   capability tier stops being a cadence and becomes an exemption.
+#   The behaviors are proven on throwaway rosters in a temporary pen and counted by the control's
+#   own `control_verdict` line rather than recited here -- this paragraph said `forty-three` while
+#   the control ran more, which is the drift a witness header can least afford. Refusals are
+#   planted and then removed, the runner is driven over planted rosters with a stub interpreter
+#   since a tier is only a cadence if the program reading it actually selects by it, and a share of
+#   the cases run inside a real git repository the control creates and throws away, because some of
+#   the runner's refusals are about the repository rather than the roster: the tree digest (a stub
+#   guard writing nothing leaves it still, one writing a file moves it) and the unclosed lap (a
+#   clean cold open runs its guard, one staged path refuses the same pass before any guard starts,
+#   `--hot` passes that same tree, a guard asked for by name runs free over it, and `--hot --all`
+#   still selects every tier).
+#
+#   ONE PASS AT A TIME. The runner takes a directory lock at zero wait before it measures anything,
+#   and a second pass in the same tree refuses under `run_verdict=run_in_flight` naming the pid that
+#   holds it. Two cold passes ran in one tree for fifty minutes with nothing to say so, while a
+#   choir that clears its own bin directory before it sings deleted binaries the other pass was
+#   using (REDS %359). The lock primitive is proven in tools/fixtures/s/shell_portable_control.sh;
+#   what is proven here is the runner's use of it, and the load-bearing case is that a refusing
+#   pass leaves the holder's lock exactly where it found it -- a release armed on the refusing side
+#   would walk a third pass straight in. The refusal also reads WHOSE LAP the holder is running
+#   for: a pass whose parent has exited is one whose output reaches nobody, and whose lock outlives
+#   the lap that took it, so the refusal names that and names `kill -TERM` as the repair -- the
+#   signal the runner's own trap answers, where SIGKILL leaves the lock behind. It reaps nothing:
+#   an orphan is still a live writer (REDS %291). Both sides are proven, since a reading that
+#   answered `gone` for every holder would tell a hand nothing.
+#
+#   A full-roster pass opening on a dirty index means a lap ended at `git add`, which left this
+#   tree's generated pages stale three times (REDS %188, %220, %223). The runner refuses it under
+#   `run_verdict=lap_unclosed`. The refusal is proven beside the case it must NOT bite, since a
+#   guard that always refuses cannot be told from one that reads the index at all.
+#
+# WHAT IS REPORTED RATHER THAN GATED. How many rostered guards have never run on this pier -- in
+# total and for the cadence tier alone, which is where a guard can go quiet without anyone
+# noticing -- and the oldest recorded run. A fresh clone has genuinely run nothing, so `never run here` is an
+# honest reading rather than a defect, and gating it would red every clone on the day it lands.
+# The number is printed because a lap can act on a number it can see; the roster in prose offered
+# no number at all.
+#
+# WHAT IS NOT PROVEN. That the roster is COMPLETE -- a guard nobody adds here is a guard this rung
+# says nothing about. Completeness is a judgment, and this proves the mechanical half beneath it.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/s/standing_equipment_witness.rish
+#
+# To refresh the run card, which is untracked by design:
+#   sh tools/fixtures/s/standing_equipment_run.sh              # cold open -- the every-lap tier
+#   sh tools/fixtures/s/standing_equipment_run.sh --hot        # after `git add` -- staged paths are mine
+#   sh tools/fixtures/s/standing_equipment_run.sh --all        # every tier, choirs included
+
+say "standing-equipment: Language EN -- the roster of what guards this tree stood in a paragraph, so nothing could run it, count it, or say when each guard last answered."
+say "standing-equipment: Style Radiant -- the roster is a file now, every path in it is real, and running it leaves a record on disk rather than in the memory of a round."
+say "standing-equipment: Lens TAME -- safety first: a guard that cannot red guards nothing, and a guard that is never run guards nothing either."
+
+let scan = run ["sh" "tools/fixtures/s/standing_equipment_scan.sh"]
+assert scan.ok else "standing-equipment: the roster names something the tree cannot honor -- read the scan's own lines"
+say scan.out
+assert scan.out contains "guards_path_missing=0" else "standing-equipment: every rostered path must name a file that exists"
+assert scan.out contains "guards_half_written=0" else "standing-equipment: every guard record must carry exactly one path"
+assert scan.out contains "guards_unknown_tier=0" else "standing-equipment: every tier must name a cadence the runner honors"
+assert scan.out contains "runs_unrostered=0" else "standing-equipment: a run card may only name guards the roster seats"
+assert scan.out contains "runs_red=0" else "standing-equipment: a recorded red is a stopped line, never a passing roster"
+assert scan.out contains "verdict=ok" else "standing-equipment: the scan must balance before it is believed"
+say "field GREEN -- every rostered guard names a real file, and no recorded run is red"
+
+let control = run ["sh" "tools/fixtures/s/standing_equipment_control.sh"]
+assert control.ok else "standing-equipment: the control must complete"
+say control.out
+assert control.out contains "agreeing_free=yes" else "standing-equipment: a whole roster over real paths must pass free"
+assert control.out contains "absent_path_refused=yes" else "standing-equipment: a rostered path absent from disk must be refused"
+assert control.out contains "half_row_refused=yes" else "standing-equipment: a guard record with no path must be refused"
+assert control.out contains "unrostered_run_refused=yes" else "standing-equipment: a run naming an unrostered guard must be refused"
+assert control.out contains "recorded_red_refused=yes" else "standing-equipment: a recorded red verdict must be refused"
+assert control.out contains "absent_card_free=yes" else "standing-equipment: a pier that has run nothing yet is honest, never broken"
+assert control.out contains "never_run_counted=yes" else "standing-equipment: the never-run count must read what the card omits"
+assert control.out contains "recorded_run_counted=yes" else "standing-equipment: a recorded run must lower the never-run count"
+assert control.out contains "two_path_row_refused=yes" else "standing-equipment: a guard record carrying two paths must be refused"
+assert control.out contains "known_tier_free=yes" else "standing-equipment: a roster naming a tier the runner knows must pass free"
+assert control.out contains "lap_counted=yes" else "standing-equipment: the every-lap tier must be counted on its own line"
+assert control.out contains "cadence_counted=yes" else "standing-equipment: the cadence tier must be counted on its own line"
+assert control.out contains "cadence_never_run_counted=yes" else "standing-equipment: a cadence guard the card never names must be counted"
+assert control.out contains "cadence_run_lowers_count=yes" else "standing-equipment: a recorded cadence run must lower that count"
+assert control.out contains "tiered_card_free=yes" else "standing-equipment: a card carrying tiers must pass free"
+assert control.out contains "seconds_totalled=yes" else "standing-equipment: a card carrying elapsed seconds must total them"
+assert control.out contains "slowest_named=yes" else "standing-equipment: the slowest guard must be named, not only counted"
+assert control.out contains "seconds_present_counted=yes" else "standing-equipment: a row carrying its seconds must count as present"
+assert control.out contains "timed_card_free=yes" else "standing-equipment: a card carrying elapsed seconds must pass free"
+assert control.out contains "zero_second_guard_named=yes" else "standing-equipment: a guard timed at zero must still be named as the slowest"
+assert control.out contains "zero_second_not_absent=yes" else "standing-equipment: a guard timed at zero is measured, never absent"
+assert control.out contains "untimed_counted_absent=yes" else "standing-equipment: a row written before the field must count absent"
+assert control.out contains "untimed_totals_zero=yes" else "standing-equipment: an untimed card must total zero rather than guess"
+assert control.out contains "untimed_names_nobody=yes" else "standing-equipment: an untimed card must name no slowest guard"
+assert control.out contains "untimed_card_free=yes" else "standing-equipment: a card written before the field must pass free"
+assert control.out contains "runner_records_seconds=yes" else "standing-equipment: the runner must write each guard's elapsed seconds"
+assert control.out contains "runner_totals_seconds=yes" else "standing-equipment: a pass must report its own total cost"
+assert control.out contains "unknown_tier_refused=yes" else "standing-equipment: a tier no runner honors must be refused"
+assert control.out contains "unknown_tier_counted=yes" else "standing-equipment: an unknown tier must be counted as well as refused"
+assert control.out contains "default_is_lap=yes" else "standing-equipment: a bare run must select the every-lap tier"
+assert control.out contains "default_runs_lap_only=yes" else "standing-equipment: a bare run must leave the cadence tier alone"
+assert control.out contains "default_card_lap_only=yes" else "standing-equipment: a bare run must record only what it ran"
+assert control.out contains "no_git_reads_zero=yes" else "standing-equipment: a pen outside a repository must read zero staged rather than refuse"
+assert control.out contains "tier_selects_one=yes" else "standing-equipment: --tier must select exactly that tier"
+assert control.out contains "card_keeps_untouched=yes" else "standing-equipment: a pass must keep the card lines of guards it did not run"
+assert control.out contains "all_runs_every_tier=yes" else "standing-equipment: --all must run every tier"
+assert control.out contains "name_selects_any_tier=yes" else "standing-equipment: a guard named by hand runs whatever its tier"
+assert control.out contains "name_runs_only_that_guard=yes" else "standing-equipment: a guard named by hand runs alone"
+assert control.out contains "absent_path_reds_runner=yes" else "standing-equipment: a rostered path absent from disk must red the runner"
+
+# The tree digest, both sides, on a real git repository the control builds and throws away. A lap
+# that begins editing while the roster runs gets verdicts spread across two trees, which is REDS
+# %221 -- so the runner measures the tree at the open and again at the close and says when it moved.
+assert control.out contains "real_repo_digests=yes" else "standing-equipment: inside a repository the runner must digest the tree rather than read nogit"
+assert control.out contains "still_tree_reads_no=yes" else "standing-equipment: a tree that stands still must read tree_moved=no"
+assert control.out contains "still_tree_passes=yes" else "standing-equipment: a still tree with green guards must pass"
+assert control.out contains "moved_tree_reads_yes=yes" else "standing-equipment: a tree changed under the run must read tree_moved=yes"
+assert control.out contains "moved_tree_refuses=yes" else "standing-equipment: a moved tree must refuse under run_verdict=tree_moved"
+assert control.out contains "moved_tree_keeps_lines=yes" else "standing-equipment: a moved tree must still print every guard line it learned"
+assert control.out contains "red_outranks_moved=yes" else "standing-equipment: a guard red is the louder finding and keeps the verdict"
+
+# The digest reads CONTENT, not only the status letter (REDS %380). Porcelain names a path and a
+# status letter and nothing else, so a file already dirty reads the same however often its bytes
+# change. Each refusal below is proven with the file dirty BEFORE the pass opens, so only the bytes
+# can move; the welcomes keep an ordinary dirty round free, since a reading that refused every
+# staged round would be turned off within the week. Run against the elder runner this same control
+# answers no to all six refusals and yes to all four welcomes, which is what makes them load-bearing.
+assert control.out contains "porcelain_blind_to_content=yes" else "standing-equipment: the control must show the status letter standing still across a content edit"
+assert control.out contains "modified_rewrite_moves=yes" else "standing-equipment: rewriting an already-modified file under the run must move the digest"
+assert control.out contains "modified_rewrite_refuses=yes" else "standing-equipment: rewriting an already-modified file under the run must refuse under run_verdict=tree_moved"
+assert control.out contains "untracked_rewrite_moves=yes" else "standing-equipment: rewriting an already-untracked file under the run must move the digest"
+assert control.out contains "restaged_rewrite_moves=yes" else "standing-equipment: re-staging an edit under a --hot pass must move the digest"
+assert control.out contains "restaged_rewrite_refuses=yes" else "standing-equipment: re-staging an edit under a --hot pass must refuse under run_verdict=tree_moved"
+assert control.out contains "staged_modified_rewrite_moves=yes" else "standing-equipment: rewriting a staged-and-modified file under the run must move the digest"
+assert control.out contains "dirty_still_tree_reads_no=yes" else "standing-equipment: a dirty tree that stands still must read tree_moved=no"
+assert control.out contains "dirty_still_tree_passes=yes" else "standing-equipment: a dirty tree that stands still must pass"
+assert control.out contains "staged_still_tree_reads_no=yes" else "standing-equipment: a staged tree standing still under --hot must read tree_moved=no"
+assert control.out contains "staged_still_tree_passes=yes" else "standing-equipment: a staged tree standing still under --hot must pass"
+
+# The unclosed lap, both sides, on the same real repository. A reading on line one persuaded and the
+# class fired again eleven hours later (REDS %223), so the runner refuses rather than reports -- and
+# the refusal is proven against a clean cold open, which it must leave entirely alone.
+assert control.out contains "clean_cold_reads_zero=yes" else "standing-equipment: a clean cold open must read zero staged"
+assert control.out contains "clean_cold_passes=yes" else "standing-equipment: a clean cold open must run its guards and pass"
+assert control.out contains "staged_cold_refuses=yes" else "standing-equipment: a full-roster pass over a dirty index must refuse under run_verdict=lap_unclosed"
+assert control.out contains "staged_cold_refuses_early=yes" else "standing-equipment: the unclosed lap must refuse before the first guard runs"
+assert control.out contains "staged_cold_skips_digest=yes" else "standing-equipment: a refused pass measured nothing, so it prints no tree digest"
+assert control.out contains "staged_hot_passes=yes" else "standing-equipment: --hot must pass the same tree, since the staged paths are the round's own"
+assert control.out contains "hot_still_reads_staged=yes" else "standing-equipment: --hot must still report the staged count it declines to refuse over"
+assert control.out contains "staged_named_guard_free=yes" else "standing-equipment: a guard asked for by name is no lap open and runs free"
+assert control.out contains "hot_composes_with_all=yes" else "standing-equipment: --hot must compose with --all"
+
+# The capability tier, in all three of its probe answers (seated 20260829). `host` is a tier for
+# PLACE and `tier` is a tier for TIME; this is a tier for what a host CAN DO, and the roster's own
+# note under comlink_r1_dual_stack asked for the word rather than guessing at it. The control
+# shadows `ip` and `ifconfig` on PATH to hand the probe a fake host, so absence is planted without
+# any override existing inside the runner.
+assert control.out contains "capability_present_runs=yes" else "standing-equipment: a capability the host has must run its guard like any other row"
+assert control.out contains "capability_present_skips_none=yes" else "standing-equipment: a present capability must skip nothing"
+assert control.out contains "capability_absent_skips=yes" else "standing-equipment: a capability the host lacks must skip its guard"
+assert control.out contains "capability_absent_counted=yes" else "standing-equipment: a capability skip must be counted"
+assert control.out contains "capability_absent_named=yes" else "standing-equipment: a capability skip must name the guard and the capability, never merely count"
+assert control.out contains "capability_absent_still_passes=yes" else "standing-equipment: a capability skip is a cadence rather than a fault, so the pass still reads ok"
+assert control.out contains "capability_absent_card_silent=yes" else "standing-equipment: a skipped guard must write no run-card line, since it did not run"
+assert control.out contains "capability_by_name_runs=yes" else "standing-equipment: a guard asked for by name runs wherever it stands, capability or no"
+assert control.out contains "capability_by_name_unfiltered=yes" else "standing-equipment: a by-name run must not report a skip it did not make"
+
+# The third answer is the safety of the whole field. A probe that cannot read the host answers
+# UNKNOWN and the guard RUNS -- because skipping on an unknown is how a capability tier stops being
+# a cadence and becomes an exemption, thinning a roster to nothing while every meter reads green.
+assert control.out contains "capability_unknown_runs=yes" else "standing-equipment: a capability the probe cannot read must RUN its guard, never skip it"
+assert control.out contains "capability_unknown_skips_none=yes" else "standing-equipment: an unreadable probe must report no skip"
+assert control.out contains "unknown_capability_still_runs=yes" else "standing-equipment: a capability no probe knows must still run its guard rather than make it vanish"
+assert control.out contains "unknown_capability_refused=yes" else "standing-equipment: the scan must refuse a roster naming a capability no runner probes"
+assert control.out contains "unknown_capability_counted=yes" else "standing-equipment: an unknown capability must be counted as well as refused"
+assert control.out contains "capability_gated_counted=yes" else "standing-equipment: a capability-gated row must be counted on its own line"
+assert control.out contains "known_capability_free=yes" else "standing-equipment: a roster naming a capability the runner probes must pass free"
+
+# The host tier arrived at REDS %295 with no case in this control and no assertion here, so the
+# axis the capability field copies had neither a green side nor a red one. Both are proven now,
+# against the host the pass actually stands on.
+assert control.out contains "host_elsewhere_skips=yes" else "standing-equipment: a row gated to another host must be skipped here"
+assert control.out contains "host_elsewhere_counted=yes" else "standing-equipment: a host skip must be counted"
+assert control.out contains "host_elsewhere_named=yes" else "standing-equipment: a host skip must name the guard and the host it wants"
+assert control.out contains "host_here_runs=yes" else "standing-equipment: a row gated to THIS host must run"
+assert control.out contains "host_here_skips_none=yes" else "standing-equipment: a row gated to this host must report no skip"
+assert control.out contains "unknown_host_refused=yes" else "standing-equipment: the scan must refuse a roster naming a host no runner answers to"
+assert control.out contains "unknown_host_counted=yes" else "standing-equipment: an unknown host must be counted as well as refused"
+
+assert scan.out contains "guards_unknown_capability=0" else "standing-equipment: every capability must name one the runner probes"
+
+# THE EVIDENCE A RED LEAVES (REDS %266). A verdict with no words behind it cannot be rooted, which
+# this tree learned when caravan_suite read red under the roster and GREEN alone with the record
+# holding nothing to tell the two apart. Both halves are proven: a red keeps its guard's stdout AND
+# stderr and the printed line names the file, and a green leaves no room at all.
+assert control.out contains "red_keeps_both_streams=yes" else "standing-equipment: a red must keep its guard's own stdout and stderr"
+assert control.out contains "red_names_its_evidence=yes" else "standing-equipment: the printed red line must name the file its words landed in"
+assert control.out contains "green_leaves_no_evidence=yes" else "standing-equipment: a green leaves no room, so a stale file can never read as this run's verdict"
+
+
+# The dead-letter box (REDS %321, and its second firing). The load-bearing assertion is
+# full_box_still_passes: this reading reports and never gates, since fleet_round_open.sh parks a
+# dirty tree there by design -- and a reading proven only where the box is empty cannot be told
+# from a line that never looked.
+assert control.out contains "empty_box_reads_zero=yes" else "standing-equipment: an empty box must read zero"
+assert control.out contains "empty_box_stays_quiet=yes" else "standing-equipment: an empty box prints no detail line"
+assert control.out contains "empty_box_passes=yes" else "standing-equipment: an empty box must not disturb the pass"
+assert control.out contains "one_letter_counted=yes" else "standing-equipment: one stashed lap must be counted"
+assert control.out contains "one_letter_named=yes" else "standing-equipment: a stash must be named by its own message, so the count becomes a line to open"
+assert control.out contains "one_letter_sized=yes" else "standing-equipment: a stash must carry its file count, since a bare number is what REDS %321 already had"
+assert control.out contains "full_box_still_passes=yes" else "standing-equipment: mail in the box is REPORTED and never refused"
+assert control.out contains "full_box_still_runs_guards=yes" else "standing-equipment: a stash must not stop a single guard from running"
+assert control.out contains "bound_at_sixteen_counted=yes" else "standing-equipment: sixteen entries sit exactly at max_stash_entries"
+assert control.out contains "bound_at_sixteen_names_last=yes" else "standing-equipment: the sixteenth entry is still enumerated"
+assert control.out contains "bound_at_sixteen_no_overflow=yes" else "standing-equipment: at the bound there is nothing left over to announce"
+assert control.out contains "past_bound_counted=yes" else "standing-equipment: the count is whole even past the enumeration bound"
+assert control.out contains "past_bound_says_so=yes" else "standing-equipment: an entry past the bound is announced rather than quietly dropped"
+assert control.out contains "past_bound_stops_enumerating=yes" else "standing-equipment: enumeration stops at max_stash_entries"
+assert control.out contains "past_bound_still_passes=yes" else "standing-equipment: a full box past the bound still reports rather than refusing"
+assert control.out contains "nogit_box_reads_zero=yes" else "standing-equipment: a pen outside git answers zero rather than refusing"
+assert control.out contains "scoped_no_basis_refused=yes" else "standing-equipment: --scoped without a full receipt must refuse outright"
+assert control.out contains "full_receipt_carries_head=yes" else "standing-equipment: a full green close writes the v2 receipt with a head to diff from"
+assert control.out contains "scoped_watched_runs=yes" else "standing-equipment: a change inside a guard's watch-set must run that guard"
+assert control.out contains "scoped_unwatched_skips_by_name=yes" else "standing-equipment: a change outside every watch-set skips the guard BY NAME against a named basis"
+assert control.out contains "scoped_close_withholds_receipt=yes" else "standing-equipment: a scoped close never writes the receipt -- a skip must never become the basis of the next skip"
+assert control.out contains "scoped_receipt_unmoved=yes" else "standing-equipment: the receipt's bytes stand unmoved across a scoped close"
+assert control.out contains "scoped_unmapped_runs=yes" else "standing-equipment: a guard absent from the map always runs -- absence is the answer that runs"
+
+# A RED COSTS THE RECEIPT (REDS %374). The receipt is written past the red exit, so a full pass
+# carrying any red writes none and --scoped is left without a basis -- permanently, where a tree's
+# reds sit at a custody gate the living card names. This pier carries two such, pond_enclosure_door
+# at gate %5 and rule_twin at gate %7, and its --scoped answered "run the full roster once" to a
+# hand who had already run it twice that morning. Three of these four bite under a stripped runner;
+# the green-close reading is a companion to the first rather than a gate of its own.
+assert control.out contains "red_close_names_withholding=yes" else "standing-equipment: a full pass that closes red must name the receipt it withheld"
+assert control.out contains "red_close_writes_no_receipt=yes" else "standing-equipment: a close carrying a red writes no receipt"
+assert control.out contains "blocked_basis_names_the_guard=yes" else "standing-equipment: --scoped without a basis must name the red guards that blocked it"
+assert control.out contains "blocked_basis_still_refuses=yes" else "standing-equipment: naming the blockers changes the diagnosis, never the refusal"
+assert control.out contains "unblocked_basis_reads_none=yes" else "standing-equipment: a run card with no red reads none, and the elder advice stands"
+assert control.out contains "green_close_names_no_withholding=yes" else "standing-equipment: a green close names no withholding -- the line is caused by the red"
+assert control.out contains "green_close_writes_receipt=yes" else "standing-equipment: a fully green full close writes the receipt"
+
+# ONE PASS AT A TIME (REDS %359). Two cold passes ran in this pier's tree for fifty minutes and
+# neither said so, while a choir that clears its own bin directory before it sings deleted the
+# binaries the other pass's rungs were using. The lock primitive -- taken, refused, released,
+# reaped -- is proven in tools/fixtures/s/shell_portable_control.sh; these prove the runner's own
+# use of it. The load-bearing one is refusal_keeps_holders_lock: a release armed on the refusing
+# side would free the holder's lock and walk a third pass straight in.
+assert control.out contains "lock_taken=yes" else "standing-equipment: a pass must take the run lock and say so"
+assert control.out contains "locked_pass_still_ok=yes" else "standing-equipment: taking the lock must leave an otherwise green pass green"
+assert control.out contains "lock_released_at_exit=yes" else "standing-equipment: the lock must leave with the pass that took it"
+assert control.out contains "held_lock_refuses=yes" else "standing-equipment: a second pass in one tree must refuse under run_verdict=run_in_flight"
+assert control.out contains "held_lock_names_owner=yes" else "standing-equipment: the refusal must name the pid that holds the lock"
+assert control.out contains "held_lock_runs_no_guard=yes" else "standing-equipment: a refused pass must run no guard at all"
+assert control.out contains "held_lock_writes_no_card=yes" else "standing-equipment: a refused pass must write no run card"
+assert control.out contains "refusal_keeps_holders_lock=yes" else "standing-equipment: a pass that never took the lock must never remove one"
+# WHOSE LAP IS THE HOLDER RUNNING FOR (20260831). The refusal tells a hand to read the holder's
+# output instead, which assumes a reader. Twice in two laps there was none: a lap died with its
+# pass still running, the pass reparented to init, and the next round's opening stash (%321) moved
+# the tree that orphan had digested -- so its verdict was already fixed at `tree_moved` while it
+# held the lock for another forty minutes and locked the new lap out of its own opening pass. The
+# runner reads the holder's parent now and says so, and BOTH sides are proven: a holder whose
+# parent is alive must read `alive`, or the reading is stuck on and tells a hand nothing.
+assert control.out contains "live_parent_reads_alive=yes" else "standing-equipment: a holder whose parent is alive must read parent=alive -- a reading that always says gone is stuck on"
+assert control.out contains "orphan_plant=ok" else "standing-equipment: the pen could not orphan a process, so the gone side is unproven here -- this is a HOST fact rather than a runner defect (a subreaper adopts orphans instead of init), and it wants reading before it is treated as a red"
+assert control.out contains "orphan_parent_reads_gone=yes" else "standing-equipment: a holder whose parent has exited must read parent=gone"
+assert control.out contains "orphan_still_refuses=yes" else "standing-equipment: naming the holder as orphaned changes the diagnosis, never the refusal"
+assert control.out contains "orphan_names_the_repair=yes" else "standing-equipment: the orphan refusal must name kill -TERM, which runs the runner's trap and releases the lock where SIGKILL leaves it behind"
+assert control.out contains "orphan_left_running=yes" else "standing-equipment: a refused pass must never stop the holder -- an orphan is still a live writer, and reaping one would be a body ending another's work (REDS %291)"
+assert control.out contains "orphan_keeps_its_lock=yes" else "standing-equipment: a refused pass must leave an orphan's lock exactly where it found it"
+assert control.out contains "dead_owner_reaped=yes" else "standing-equipment: a lock whose owner has died must be reaped rather than waited out"
+assert control.out contains "no_lock_room_says_so=yes" else "standing-equipment: a pen with no room to lock in must say so rather than skip in silence"
+assert control.out contains "no_lock_room_still_runs=yes" else "standing-equipment: a skipped lock must not stop the pass"
+
+assert control.out contains "control_verdict=ok" else "standing-equipment: the control must agree with itself"
+# No total is spelled here. This line read `sixty-two behaviors` while the control ran more, the
+# same drift the header above just shed: a recited count is the one part of a green line that goes
+# false while every assertion over it still holds. Count them by reading the asserts above.
+say "RED and GREEN paths proven -- every refusal planted and then freed, and the runner driven over planted rosters in and out of a real repository"
+
+say "GREEN: standing-equipment -- the roster is a list a program reads, each row names its cadence, and running it writes down when."

@@ -1,0 +1,460 @@
+//! pond/apps/scooter_view.rye -- Scooter, Rung 3: the Dexter drawn frame.
+//!
+//! Chapter G (Open Media Primitives) -- the terminal family. Rung one (scooter_channel.rye) draws the
+//! permissioned channel with its append-only journal; rung two (scooter_keyed.rye) binds each post to a
+//! Kumara identity. Both named the same next step and left it: the Dexter drawn frame. This rung gives a
+//! channel a face a keeper can read -- it folds the journal into a bounded terminal character grid, purely
+//! and deterministically, so the conversation is visible without the wire.
+//! Design read: active-designing/date/20260817/20260817-041429_scooter-drawn-frame-crux.md
+//! Pattern elder: pond/apps/mantra_browser.rye -- the same fold from a model to a readable frame.
+//!
+//! The crux is one honest fold held bounded:
+//!   - A terminal frame is a fixed grid of character cells (24 rows of 80 columns, the classic terminal).
+//!     render folds a Channel into one Frame: a header row, one body row per post, an overflow tail.
+//!   - Truncation marks, never wraps -- a post wider than the frame ends in '~', never bleeding a row.
+//!   - Overflow counts, never drops -- more posts than the body holds end in "(+K more)" with the true K.
+//!   - render_window draws the scrolled slice -- given a scroll position (scooter_scroll.window), it draws the
+//!     posts a keeper has paged to and one status row "(^ A older  v B newer)" naming the hidden counts.
+//!   - The fold is referentially transparent -- the same channel renders the same bytes every time.
+//!
+//! Facts only, custody-first: it reads a channel's public journal and draws it; it opens no network, holds
+//! no key, and moves no funds (the wire between two Constel piers reaches the serve gate -- the maintainer's
+//! hand). A live TTY with a cursor and input is Dexter's own module and a later rung.
+//!
+//!   env RYE_ZIG=vendor/zig-toolchain/zig rye/bin/rye build pond/apps/scooter_view.rye -femit-bin=pond/bin/scooter-view
+//!   pond/bin/scooter-view selftest
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const channel = @import("scooter_channel.rye");
+const scroll = @import("scooter_scroll.rye");
+
+pub const scooter_view_version = "20260817.105524";
+
+/// A terminal frame is the classic 24 rows of 80 columns -- a fixed grid of character cells.
+pub const frame_rows: u32 = 24;
+pub const frame_cols: u32 = 80;
+
+/// The header takes the first row; the rest carry the journal.
+pub const body_rows: u32 = frame_rows - 1;
+
+/// A rendered terminal frame: a fixed grid of cells, space-filled where no character is drawn. rows_used
+/// names how many rows carry content, so a caller (or a later painter) knows where the drawing ends.
+pub const Frame = struct {
+    cells: [frame_rows * frame_cols]u8 = [_]u8{' '} ** (frame_rows * frame_cols),
+    rows_used: u32 = 0,
+
+    /// One row as a slice of exactly frame_cols cells.
+    pub fn row(self: *const Frame, i: u32) []const u8 {
+        // invariant: only a real row of the fixed grid is ever read.
+        assert(i < frame_rows);
+        const start = i * frame_cols;
+        // invariant: a row is exactly the frame width, never more.
+        assert(start + frame_cols <= self.cells.len);
+        return self.cells[start .. start + frame_cols];
+    }
+};
+
+/// A bounded writer over a single row. It never writes past the row's width; the first attempt to overflow
+/// is remembered so render can mark the row truncated with a '~'.
+const RowWriter = struct {
+    cells: []u8, // exactly frame_cols wide
+    col: u32 = 0,
+    overflowed: bool = false,
+
+    fn put(self: *RowWriter, c: u8) void {
+        // invariant: a write lands only within the row; past the edge it is dropped and remembered.
+        if (self.col < self.cells.len) {
+            self.cells[self.col] = c;
+            self.col += 1;
+        } else {
+            self.overflowed = true;
+        }
+        // invariant: the cursor sits inside the cell array it addresses, so a column past the
+        // end would draw outside the view
+        assert(self.col <= self.cells.len);
+    }
+
+    fn put_str(self: *RowWriter, s: []const u8) void {
+        // invariant: the run is bounded by the string's own length -- no unbounded loop.
+        var i: u32 = 0;
+        while (i < s.len) : (i += 1) self.put(s[i]);
+    }
+
+    /// Write a u32 as decimal. A u32 is at most ten digits, so the scratch is bounded at ten.
+    fn put_uint(self: *RowWriter, v: u32) void {
+        var digits: [10]u8 = undefined;
+        var n: u32 = 0;
+        var x: u32 = v;
+        // invariant: a u32 never needs more than ten decimal digits.
+        while (true) {
+            digits[n] = @intCast('0' + (x % 10));
+            n += 1;
+            x = x / 10;
+            if (x == 0) break;
+            // invariant: the count is rendered as a single digit, so ten or more would print
+            // one character where the layout reserved one
+            assert(n < 10);
+        }
+        // Emit most-significant first (the scratch filled least-significant first).
+        var i: u32 = n;
+        while (i > 0) {
+            i -= 1;
+            self.put(digits[i]);
+        }
+    }
+};
+
+/// Clear a row to spaces, returning a writer positioned at its start.
+fn open_row(frame: *Frame, i: u32) RowWriter {
+    // invariant: only a real row is opened for writing.
+    assert(i < frame_rows);
+    const start = i * frame_cols;
+    var col: u32 = 0;
+    while (col < frame_cols) : (col += 1) frame.cells[start + col] = ' ';
+    return RowWriter{ .cells = frame.cells[start .. start + frame_cols] };
+}
+
+/// If a writer tried to overflow its row, mark the last cell '~' so a reader sees the text was clipped.
+fn seal_row(w: *RowWriter) void {
+    // invariant: the truncation mark lands in the row's last cell, never past it.
+    if (w.overflowed and w.cells.len > 0) w.cells[w.cells.len - 1] = '~';
+}
+
+/// Draw one post into a body row: "[<seq>] p<author>: <text>", truncated to the width with a '~' mark.
+fn draw_post(frame: *Frame, i: u32, post: *const channel.Post) void {
+    // invariant: a post is drawn only into a real body row -- below the header, within the grid.
+    assert(i >= 1);
+    assert(i < frame_rows);
+    var w = open_row(frame, i);
+    w.put('[');
+    w.put_uint(post.seq);
+    w.put_str("] p");
+    w.put_uint(post.author);
+    w.put_str(": ");
+    w.put_str(post.body());
+    seal_row(&w);
+}
+
+/// Fold a channel's journal into a bounded terminal frame -- the Dexter drawn face of a Scooter channel.
+/// The body draws into the full body_rows beneath the header.
+pub fn render(ch: *const channel.Channel) Frame {
+    return render_within(ch, body_rows);
+}
+
+/// The same fold, given a bounded body budget -- how many rows beneath the header the journal may use. A
+/// composing surface (the full terminal, which reserves its last row for a prompt) passes a smaller budget
+/// so the journal leaves room; render itself passes the whole body_rows. The frame grid is still the fixed
+/// frame_rows x frame_cols; rows below the budget are left blank for the caller to fill.
+pub fn render_within(ch: *const channel.Channel, body_avail: u32) Frame {
+    // invariant: the body budget is at least one row and never exceeds the rows beneath the header.
+    assert(body_avail >= 1);
+    assert(body_avail <= body_rows);
+    var frame = Frame{};
+
+    // The header names the channel and its post count.
+    var head = open_row(&frame, 0);
+    head.put_str("scooter: ");
+    head.put_uint(ch.post_count);
+    head.put_str(" posts");
+    seal_row(&head);
+    frame.rows_used = 1;
+
+    if (ch.post_count == 0) {
+        var w = open_row(&frame, 1);
+        w.put_str("(no posts yet)");
+        seal_row(&w);
+        frame.rows_used = 2;
+        // invariant: the empty face uses exactly the header and one note row.
+        assert(frame.rows_used == 2);
+        return frame;
+    }
+
+    // How many posts fit in the body budget. When the journal overflows it, the last shown row is the
+    // overflow note, so the shown count leaves that row free.
+    const overflow = ch.post_count > body_avail;
+    const shown: u32 = if (overflow) body_avail - 1 else ch.post_count;
+    // invariant: never draw more body rows than the budget holds.
+    assert(shown <= body_avail);
+
+    var seq: u32 = 0;
+    while (seq < shown) : (seq += 1) {
+        const post = ch.get(seq) catch unreachable; // seq < shown <= post_count, so the post is present
+        draw_post(&frame, 1 + seq, post);
+    }
+    frame.rows_used = 1 + shown;
+
+    if (overflow) {
+        const more: u32 = ch.post_count - shown;
+        var w = open_row(&frame, 1 + shown);
+        w.put_str("(+");
+        w.put_uint(more);
+        w.put_str(" more)");
+        seal_row(&w);
+        frame.rows_used = 1 + shown + 1;
+        // invariant: the overflow tail never pushes past the budget beneath the header.
+        assert(frame.rows_used <= 1 + body_avail);
+    }
+
+    // invariant: the drawing always fits within the fixed grid.
+    assert(frame.rows_used <= frame_rows);
+    return frame;
+}
+
+/// Fold a channel's journal into a bounded frame at a SCROLL POSITION -- the read-cursor face. Where render
+/// always draws the first posts and marks the rest "(+K more)", this draws the slice a keeper has scrolled to:
+/// the posts seq [top..top+count), with one scroll-status row naming how many older posts hide above and how
+/// many newer hide below. It composes the pure position model (scooter_scroll.window) with this module's
+/// drawing -- values apart, never braided: the window names WHICH posts show, render_window draws them. A
+/// journal that fits the body has nothing to scroll, so it draws every post with no mark, exactly like render.
+pub fn render_window(ch: *const channel.Channel, top: u32) Frame {
+    var frame = Frame{};
+
+    // The header names the channel and its post count.
+    var head = open_row(&frame, 0);
+    head.put_str("scooter: ");
+    head.put_uint(ch.post_count);
+    head.put_str(" posts");
+    seal_row(&head);
+    frame.rows_used = 1;
+
+    if (ch.post_count == 0) {
+        var w = open_row(&frame, 1);
+        w.put_str("(no posts yet)");
+        seal_row(&w);
+        frame.rows_used = 2;
+        // invariant: the empty face uses exactly the header and one note row.
+        assert(frame.rows_used == 2);
+        return frame;
+    }
+
+    // When the journal fits the body, every post shows and there is nothing to scroll -- draw them all, no mark.
+    const overflow = ch.post_count > body_rows;
+    if (!overflow) {
+        var seq: u32 = 0;
+        while (seq < ch.post_count) : (seq += 1) {
+            const post = ch.get(seq) catch unreachable; // seq < post_count, so the post is present
+            draw_post(&frame, 1 + seq, post);
+        }
+        frame.rows_used = 1 + ch.post_count;
+        // invariant: a fitting journal never draws past the fixed grid.
+        assert(frame.rows_used <= frame_rows);
+        return frame;
+    }
+
+    // The journal overflows: reserve the last body row for the scroll status, and draw the visible slice the
+    // pure model names. shown_budget leaves one row beneath the shown posts for the "(^ older  v newer)" mark.
+    const shown_budget: u32 = body_rows - 1;
+    const win = scroll.window(ch.post_count, shown_budget, top);
+    // invariant: the window never names more posts than the reserved-row budget holds.
+    assert(win.count <= shown_budget);
+
+    var i: u32 = 0;
+    while (i < win.count) : (i += 1) {
+        const post = ch.get(win.top + i) catch unreachable; // win.top + i < post_count by the window's partition
+        draw_post(&frame, 1 + i, post);
+    }
+
+    // The scroll status names the hidden counts on each side -- the mark the pure model computed, not guessed.
+    var s = open_row(&frame, 1 + win.count);
+    s.put_str("(^ ");
+    s.put_uint(win.above);
+    s.put_str(" older  v ");
+    s.put_uint(win.below);
+    s.put_str(" newer)");
+    seal_row(&s);
+    frame.rows_used = 1 + win.count + 1;
+
+    // invariant: the drawing always fits the grid -- header, the shown slice, and one status row.
+    assert(frame.rows_used <= frame_rows);
+    return frame;
+}
+
+/// The trimmed text of a row -- its content without the trailing space padding. A reader's convenience.
+pub fn row_text(frame: *const Frame, i: u32) []const u8 {
+    // invariant: only a real row is trimmed.
+    assert(i < frame_rows);
+    const r = frame.row(i);
+    var end: u32 = @intCast(r.len);
+    while (end > 0 and r[end - 1] == ' ') : (end -= 1) {}
+    return r[0..end];
+}
+
+// --- selftest -------------------------------------------------------------------------------------------
+
+const host_key: u32 = 1001;
+const ada: u32 = 2002;
+
+fn frame_is_structurally_exact() !void {
+    var ch = channel.Channel.open(host_key);
+    const frame = render(&ch);
+    // Every row is exactly the frame width; the buffer is exactly rows x cols.
+    assert(frame.cells.len == frame_rows * frame_cols);
+    var i: u32 = 0;
+    while (i < frame_rows) : (i += 1) assert(frame.row(i).len == frame_cols);
+    print("scooter_view: the frame is exactly {d}x{d}; every row is exactly {d} cells wide.\n", .{ frame_rows, frame_cols, frame_cols });
+}
+
+fn empty_channel_says_so() !void {
+    var ch = channel.Channel.open(host_key);
+    const frame = render(&ch);
+    assert(std.mem.eql(u8, row_text(&frame, 0), "scooter: 0 posts"));
+    assert(std.mem.eql(u8, row_text(&frame, 1), "(no posts yet)"));
+    print("scooter_view: an empty channel draws its header and (no posts yet), never a blank face.\n", .{});
+}
+
+fn journal_reads_back_in_the_frame() !void {
+    var ch = channel.Channel.open(host_key);
+    try ch.admit(host_key, ada);
+    _ = try ch.post(ada, "hello");
+    _ = try ch.post(host_key, "hi ada");
+    _ = try ch.post(ada, "");
+    const frame = render(&ch);
+    assert(std.mem.eql(u8, row_text(&frame, 0), "scooter: 3 posts"));
+    // Each post shows its seq, author point, and text, byte-for-byte within its row.
+    assert(std.mem.eql(u8, row_text(&frame, 1), "[0] p2002: hello"));
+    assert(std.mem.eql(u8, row_text(&frame, 2), "[1] p1001: hi ada"));
+    assert(std.mem.eql(u8, row_text(&frame, 3), "[2] p2002:")); // an empty post draws its head, no body
+    // Determinism: the same channel renders identical bytes.
+    const again = render(&ch);
+    assert(std.mem.eql(u8, &frame.cells, &again.cells));
+    print("scooter_view: three posts read back in the frame byte-for-byte, and the fold is deterministic.\n", .{});
+}
+
+fn over_wide_post_truncates() !void {
+    var ch = channel.Channel.open(host_key);
+    try ch.admit(host_key, ada);
+    // A text far wider than 80 columns must clip to the row with a '~', never wrap or overflow.
+    _ = try ch.post(ada, "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789");
+    const frame = render(&ch);
+    const r = frame.row(1);
+    assert(r.len == frame_cols);
+    assert(r[frame_cols - 1] == '~'); // the truncation mark sits in the last cell
+    // The next row is untouched by the over-wide post (no bleed).
+    assert(std.mem.eql(u8, row_text(&frame, 2), ""));
+    print("scooter_view: an over-wide post clips to the row width with a '~' and never bleeds the next row.\n", .{});
+}
+
+fn overflow_counts_never_drops() !void {
+    var ch = channel.Channel.open(host_key);
+    try ch.admit(host_key, ada);
+    // Post more than the body can hold; the body is body_rows tall, so overflow shows body_rows-1 posts.
+    const total: u32 = body_rows + 5; // comfortably past the body
+    var k: u32 = 0;
+    while (k < total) : (k += 1) _ = try ch.post(ada, "m");
+    const frame = render(&ch);
+    // The last body row is the overflow note with the true remaining count.
+    const shown: u32 = body_rows - 1;
+    const more: u32 = total - shown;
+    const last = row_text(&frame, 1 + shown);
+    // Build the expected "(+K more)" and compare.
+    assert(last.len >= 6);
+    assert(last[0] == '(');
+    assert(last[1] == '+');
+    // The note names the true count -- confirm the digits of `more` appear.
+    var buf: [16]u8 = undefined;
+    const note = std.fmt.bufPrint(&buf, "(+{d} more)", .{more}) catch unreachable;
+    assert(std.mem.eql(u8, last, note));
+    print("scooter_view: a journal past the body ends in (+{d} more) with the true count, never a dropped tail.\n", .{more});
+}
+
+fn a_journal_of(post_count: u32) !channel.Channel {
+    // A helper: a channel with `post_count` posts, each naming its own seq so the drawn row is checkable.
+    var ch = channel.Channel.open(host_key);
+    try ch.admit(host_key, ada);
+    var k: u32 = 0;
+    while (k < post_count) : (k += 1) {
+        var buf: [16]u8 = undefined;
+        const text = std.fmt.bufPrint(&buf, "post {d}", .{k}) catch unreachable;
+        _ = try ch.post(ada, text);
+    }
+    return ch;
+}
+
+fn the_read_window_anchors_the_newest() !void {
+    // Thirty posts over a 23-row body: the overflow face reserves one row, so 22 posts show at home.
+    var ch = try a_journal_of(30);
+    const shown_budget: u32 = body_rows - 1; // 22
+    const home = scroll.latest_top(30, shown_budget); // 30 - 22 == 8
+    const frame = render_window(&ch, home);
+    // The newest post (seq 29) is anchored to the last body row, the older ones above it.
+    assert(std.mem.eql(u8, row_text(&frame, 1), "[8] p2002: post 8"));
+    assert(std.mem.eql(u8, row_text(&frame, shown_budget), "[29] p2002: post 29"));
+    // The scroll status names the eight older posts hidden above and none newer below.
+    assert(std.mem.eql(u8, row_text(&frame, 1 + shown_budget), "(^ 8 older  v 0 newer)"));
+    // The elder render, by contrast, always starts at seq 0 -- proving render_window scrolled the face.
+    const elder = render(&ch);
+    assert(std.mem.eql(u8, row_text(&elder, 1), "[0] p2002: post 0"));
+    print("scooter_view: the read window anchors the newest posts to the bottom with a scroll mark naming the older hidden above.\n", .{});
+}
+
+fn scrolling_up_reveals_older_and_marks_both_sides() !void {
+    // From home (top 8), page to the first post: the window shows seq 0..21 and marks eight newer below.
+    var ch = try a_journal_of(30);
+    const frame = render_window(&ch, 0);
+    assert(std.mem.eql(u8, row_text(&frame, 1), "[0] p2002: post 0"));
+    assert(std.mem.eql(u8, row_text(&frame, body_rows - 1), "[21] p2002: post 21"));
+    assert(std.mem.eql(u8, row_text(&frame, body_rows), "(^ 0 older  v 8 newer)"));
+    // The mark's two counts plus the shown posts partition the whole journal exactly.
+    const win = scroll.window(30, body_rows - 1, 0);
+    assert(win.above + win.count + win.below == 30);
+    print("scooter_view: scrolling up reveals older posts and the mark names both sides, the window partitioning the journal.\n", .{});
+}
+
+fn a_fitting_journal_draws_like_the_elder() !void {
+    // Four posts fit the body: render_window draws every post with no scroll mark, byte-for-byte the elder face.
+    var ch = try a_journal_of(4);
+    const frame = render_window(&ch, 0);
+    const elder = render(&ch);
+    assert(std.mem.eql(u8, &frame.cells, &elder.cells));
+    // No scroll status anywhere -- the row after the last post is blank.
+    assert(std.mem.eql(u8, row_text(&frame, 5), ""));
+    assert(frame.rows_used == 5); // header plus four posts
+    print("scooter_view: a journal that fits draws identically to the elder render, with no scroll mark.\n", .{});
+}
+
+fn the_drawn_mark_carries_the_models_counts() !void {
+    // At every scroll position over an overflowing journal, the drawn status row equals the pure model's
+    // counts, and the fold is deterministic -- values apart, never braided.
+    var ch = try a_journal_of(30);
+    const shown_budget: u32 = body_rows - 1;
+    var top: u32 = 0;
+    while (top <= 30) : (top += 1) {
+        const win = scroll.window(30, shown_budget, top);
+        const frame = render_window(&ch, top);
+        // The status row sits just below the shown slice and names the model's above/below exactly.
+        var buf: [40]u8 = undefined;
+        const want = std.fmt.bufPrint(&buf, "(^ {d} older  v {d} newer)", .{ win.above, win.below }) catch unreachable;
+        assert(std.mem.eql(u8, row_text(&frame, 1 + win.count), want));
+        assert(frame.rows_used == 1 + win.count + 1);
+        // Determinism: the same channel and position render identical bytes.
+        const again = render_window(&ch, top);
+        assert(std.mem.eql(u8, &frame.cells, &again.cells));
+    }
+    print("scooter_view: the drawn window's scroll mark carries the pure model's counts exactly, deterministically.\n", .{});
+}
+
+fn run_selftest() !u8 {
+    try frame_is_structurally_exact();
+    try empty_channel_says_so();
+    try journal_reads_back_in_the_frame();
+    try over_wide_post_truncates();
+    try overflow_counts_never_drops();
+    try the_read_window_anchors_the_newest();
+    try scrolling_up_reveals_older_and_marks_both_sides();
+    try a_fitting_journal_draws_like_the_elder();
+    try the_drawn_mark_carries_the_models_counts();
+    print("scooter_view: version {s}\n", .{scooter_view_version});
+    print("GREEN: scooter_view r3; a channel folds into a bounded {d}x{d} terminal frame -- header, journal, truncation mark, and an honest overflow tail, deterministic every time. render_window draws the scrolled slice a keeper has paged to, one scroll mark naming the older hidden above and the newer below, the pure position model (scooter_scroll) named apart from the drawing.\n", .{ frame_rows, frame_cols });
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    const garden = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(garden);
+    if (args.len >= 2 and (std.mem.eql(u8, args[1], "selftest") or std.mem.eql(u8, args[1], "scooter-view"))) {
+        return run_selftest();
+    }
+    return run_selftest();
+}

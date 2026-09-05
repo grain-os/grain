@@ -1,0 +1,43 @@
+# tools/gen/chapter/sunn13_root_survey_witness.rish -- SUNN13 root survey.
+#
+#   rishi/bin/rishi run tools/gen/chapter/sunn13_root_survey_witness.rish
+#
+# LICENSE copyright rewrite waits on the maintainer's word -- assert hold stays the maintainer.
+
+say "sunn13: Language EN — root survey names living identity."
+say "sunn13: Style Radiant — the maintainer · Kyri · licenses hold the living name."
+say "sunn13: Lens TAME — SUNN13 · PUBKEYS · MAP · ORGANIZING · LICENSE hold."
+
+let p = read-file "PUBKEYS.md"
+assert p contains "Voice:** Kyri" else "sunn13: PUBKEYS want Voice Riyo"
+assert p contains "the maintainer" else "sunn13: PUBKEYS want the maintainer"
+assert p contains "acme-owner/grain" else "sunn13: PUBKEYS want acme-owner/grain"
+assert p contains "REMOTE_ROSTER" else "sunn13: PUBKEYS want REMOTE_ROSTER"
+assert p contains "the maintainer" else "sunn13: PUBKEYS want dated the maintainer note kept"
+
+let m = read-file "MAP.md"
+assert m contains "Voice:** Kyri" else "sunn13: MAP want Voice Riyo"
+assert m contains "context/KYRI.md" else "sunn13: MAP want RIYO.md writing cite"
+assert m contains "Q-vane" else "sunn13: MAP want Q-vane kept"
+assert m contains "Licenses (hold)" else "sunn13: MAP want Licenses hold section"
+assert m contains "the maintainer" else "sunn13: MAP want the maintainer hold named"
+assert m contains "the maintainer" else "sunn13: MAP want the maintainer on PUBKEYS face"
+assert (m contains "QUIN.md`](context/QUIN.md) is who is writing") == false else "sunn13: MAP must not keep Quin as writer"
+
+let o = read-file "ORGANIZING.md"
+assert o contains "Voice:** Kyri" else "sunn13: ORGANIZING want Voice Kyri"
+assert o contains "KYRI.md" else "sunn13: ORGANIZING want KYRI.md"
+assert o contains "Q-vane" else "sunn13: ORGANIZING want Q-vane"
+
+# The copyright holder is named by the name the maintainer holds today. These
+# three asserts once demanded a retired prior name, so a hand "repairing" a
+# license to satisfy the guard would have written that name back into the tree
+# the identity sweep had cleared it from. A guard must hold what is true now.
+let mit = read-file "LICENSE-MIT"
+assert mit contains "Copyright (c) 2026 the maintainer and contributors" else "sunn13: LICENSE-MIT want the living copyright hold"
+let apa = read-file "LICENSE-APACHE"
+assert apa contains "Copyright 2026 the maintainer and contributors" else "sunn13: LICENSE-APACHE want the living copyright hold"
+let cc = read-file "LICENSE-CC-BY"
+assert cc contains "Copyright (c) 2026 the maintainer and contributors" else "sunn13: LICENSE-CC-BY want the living copyright hold"
+
+say "GREEN: sunn13 — PUBKEYS · MAP · ORGANIZING affirm · LICENSE copyright hold"

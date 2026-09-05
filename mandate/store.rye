@@ -1,0 +1,701 @@
+//! mandate/store.rye -- Mandate, Grain's turbopuffer: a bounded, zero-copy vector store.
+//!
+//! Mandate is the search organ. It holds **vectors** -- the embeddings a model turns
+//! meaning into -- and answers the one question a vector store exists for: *which of
+//! my records is nearest this query?* Nearness is **cosine similarity**, the angle
+//! between two directions, and Mandate keeps every stored vector as a **unit vector**
+//! (normalized on upsert), so a query is a plain dot product -- no norms recomputed at
+//! search time, the turbopuffer trick in our own hand.
+//!
+//! Properties this store keeps, each named by the maintainer:
+//!
+//!   * **Zero-copy.** A query never copies a stored vector; it reads each record in
+//!     place, by reference, and accumulates the dot product.
+//!   * **Bounded, exact.** The store, the dimension, and the result count each name a
+//!     maximum. Search is exact brute-force k-nearest.
+//!   * **Full CRUD.** upsert (create/update), query (read), remove (delete) -- all bounded.
+//!   * **Profile-loaded dimension.** The active dimension is **data**, carried on the
+//!     Store and set at `init` (the way topology loads a sky), bounded by a comptime
+//!     `max_dim`. One binary serves any dimension from 1 to max_dim.
+//!
+//! A record carries a **tag** beside its vector, so a query may filter -- "the nearest
+//! images, but only nature ones" -- the metadata filter every real vector store owes.
+//!
+//!   rye build mandate/store.rye -femit-bin=mandate/bin/store
+//!   mandate/bin/store selftest
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+
+pub const store_version = "20260810.031234";
+
+// The maximum vector dimension -- the comptime bound every record's storage is sized to.
+// The ACTIVE dimension is data, carried on the Store and set at init from a profile the
+// way topology loads a sky; only the leading `store.dim` components carry meaning.
+pub const max_dim: u32 = 8;
+
+// The store's capacity, and the most results one query returns. A bounded organ names
+// its limits and enforces them at the edge.
+pub const max_records: u32 = 64;
+pub const max_k: u32 = 16;
+
+// Approximate index -- SimHash / random-hyperplane LSH. A record's signature is the
+// sign of its dot with each fixed hyperplane; near directions share a signature, so an
+// approximate query scores only candidates within a bounded Hamming radius of the
+// query's signature -- fewer records touched at scale, at the honest cost of missing a
+// neighbour that fell in a distant bucket. The planes are FIXED (deterministic -- no
+// runtime randomness): the first four Hadamard rows over the active dims, padded to
+// max_dim. Signature width is bounded; the exact path (query) stays the default.
+pub const sig_bits: u32 = 4;
+const planes: [sig_bits][max_dim]f32 = .{
+    .{ 1, 1, 1, 1, 0, 0, 0, 0 },
+    .{ 1, -1, 1, -1, 0, 0, 0, 0 },
+    .{ 1, 1, -1, -1, 0, 0, 0, 0 },
+    .{ 1, -1, -1, 1, 0, 0, 0, 0 },
+};
+
+pub const StoreError = error{ Full };
+pub const DimError = error{ BadDim };
+pub const ProfileError = error{ NoDimField, BadDimValue };
+
+// A real Bron dimension profile, embedded at build time. The store reads its active
+// dimension from this file the way topology loads a sky -- data, not a constant.
+const profile_bron = @embedFile("dim.profile.bron");
+
+// Object-storage backing. The whole store serializes to ONE portable blob --
+// the "object" a bucket would hold -- so a fresh node hydrates the entire store from a
+// single get, the serverless shape turbopuffer takes. Layout is little-endian and
+// bounded: magic[8] "MANDATE\x01" - version u32 - dim u32 - filled u32 - then `filled`
+// records, each id u32 - tag u32 - sig u32 - vec[max_dim] f32. A fixed record width
+// keeps the blob bounded and every offset a named constant.
+const blob_magic = "MANDATE\x01"; // 8 bytes; the trailing byte carries the on-wire schema epoch
+pub const blob_version: u32 = 1;
+const off_version: u32 = 8;
+const off_dim: u32 = 12;
+const off_filled: u32 = 16;
+const off_records: u32 = 20;
+const record_bytes: u32 = 4 + 4 + 4 + max_dim * 4; // id, tag, sig, then the vector
+pub const max_blob_bytes: u32 = off_records + max_records * record_bytes;
+
+pub const BlobError = error{ BufferTooSmall, BadMagic, BadVersion, BadDimValue, TooManyRecords, Truncated };
+
+/// One nearest-neighbour match: the record's id and its similarity to the query,
+/// in [-1, 1] where 1 is the same direction.
+pub const Match = struct {
+    id: u32,
+    score: f32,
+};
+
+/// The k best matches a query found, most similar first.
+pub const QueryResult = struct {
+    matches: [max_k]Match,
+    count: u32,
+};
+
+/// A stored record -- an id, a filterable tag, and a **unit** vector. The vector is
+/// sized to `max_dim`; only the store's active `dim` leading components carry meaning,
+/// the rest are zero.
+pub const Record = struct {
+    id: u32,
+    tag: u32,
+    vec: [max_dim]f32,
+    /// LSH signature of the unit vector -- set on upsert, used by the approximate query.
+    sig: u32 = 0,
+};
+
+/// The store -- a bounded array of records, how many are filled, and the active
+/// dimension. The array never reallocates, so a query may hold references into it.
+pub const Store = struct {
+    records: [max_records]Record,
+    filled: u32,
+    dim: u32,
+
+    /// A fresh, empty store of active dimension `dim` -- the profile's value, bounded
+    /// by max_dim. A dimension outside 1..=max_dim is refused rather than clamped.
+    pub fn init(dim: u32) DimError!Store {
+        // invariant: a real embedding has at least one component and never exceeds the bound.
+        if (dim < 1 or dim > max_dim) return error.BadDim;
+        return .{ .records = undefined, .filled = 0, .dim = dim };
+    }
+};
+
+/// Read the active dimension from a Bron profile's `dim` field. Bron is plain
+/// key-value, one field per line; `#` comments and blank lines are skipped, and the
+/// first `dim <n>` line wins. The value is bounded to 1..=max_dim, refused otherwise.
+pub fn dim_from_profile(bron: []const u8) ProfileError!u32 {
+    var lines = std.mem.splitScalar(u8, bron, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0 or line[0] == '#') continue;
+        var toks = std.mem.tokenizeScalar(u8, line, ' ');
+        const key = toks.next() orelse continue;
+        if (!std.mem.eql(u8, key, "dim")) continue;
+        const val = toks.next() orelse return error.BadDimValue;
+        const d = std.fmt.parseInt(u32, val, 10) catch return error.BadDimValue;
+        // invariant: the profile's dimension stays within the storage bound.
+        if (d < 1 or d > max_dim) return error.BadDimValue;
+        return d;
+    }
+    return error.NoDimField;
+}
+
+/// A fresh, empty store whose active dimension is read from a Bron profile.
+pub fn init_from_profile(bron: []const u8) !Store {
+    return try Store.init(try dim_from_profile(bron));
+}
+
+/// The dot product over the first `dim` components, accumulated in f64 so many small
+/// terms keep their precision before the result narrows back to the caller's use.
+fn dot(a: *const [max_dim]f32, b: *const [max_dim]f32, dim: u32) f64 {
+    // invariant: the active dimension stays within the storage bound.
+    assert(dim >= 1);
+    assert(dim <= max_dim);
+    var acc: f64 = 0;
+    var i: u32 = 0;
+    while (i < dim) : (i += 1) {
+        acc += @as(f64, a[i]) * @as(f64, b[i]);
+    }
+    return acc;
+}
+
+/// A vector scaled to length one over its active `dim` components -- its direction
+/// alone, so cosine similarity becomes a dot product. The unused tail stays zero.
+fn normalized(vec: *const [max_dim]f32, dim: u32) [max_dim]f32 {
+    const n = @sqrt(dot(vec, vec, dim));
+    // invariant: only a non-zero vector has a direction to keep.
+    assert(n > 0);
+    var out = [_]f32{0} ** max_dim;
+    var i: u32 = 0;
+    while (i < dim) : (i += 1) {
+        out[i] = @floatCast(@as(f64, vec[i]) / n);
+    }
+    return out;
+}
+
+/// A vector's LSH signature: bit i is set when the vector lies on the positive side of
+/// plane i. Near directions land on the same side of every plane, so they share a
+/// signature -- the bucketing an approximate query leans on.
+fn signature(vec: *const [max_dim]f32, dim: u32) u32 {
+    // invariant: the signature fits inside a u32.
+    assert(sig_bits <= 32);
+    var sig: u32 = 0;
+    var i: u32 = 0;
+    while (i < sig_bits) : (i += 1) {
+        if (dot(vec, &planes[i], dim) >= 0) {
+            const shift: u5 = @intCast(i);
+            sig |= @as(u32, 1) << shift;
+        }
+    }
+    return sig;
+}
+
+/// Add or replace a record. The vector is normalized to a unit direction (over the
+/// store's active dimension) before it is stored; upserting an existing id updates it
+/// in place, so an id is unique.
+pub fn upsert(store: *Store, id: u32, tag: u32, vec: *const [max_dim]f32) StoreError!void {
+    // invariant: the fill count never runs past the bounded records.
+    assert(store.filled <= max_records);
+    const unit = normalized(vec, store.dim);
+    const sig = signature(&unit, store.dim);
+    var i: u32 = 0;
+    while (i < store.filled) : (i += 1) {
+        if (store.records[i].id == id) {
+            store.records[i] = .{ .id = id, .tag = tag, .vec = unit, .sig = sig };
+            return;
+        }
+    }
+    if (store.filled >= max_records) return error.Full;
+    store.records[store.filled] = .{ .id = id, .tag = tag, .vec = unit, .sig = sig };
+    store.filled += 1;
+}
+
+/// Remove the record with `id`, if present; returns whether one was removed. A
+/// swap-remove -- the last filled record fills the gap -- so the store never grows a
+/// hole and never reallocates. Order does not matter: a query re-sorts by score.
+pub fn remove(store: *Store, id: u32) bool {
+    // invariant: the fill count never runs past the bounded records.
+    assert(store.filled <= max_records);
+    var i: u32 = 0;
+    while (i < store.filled) : (i += 1) {
+        if (store.records[i].id == id) {
+            store.records[i] = store.records[store.filled - 1];
+            store.filled -= 1;
+            // invariant: a successful removal drops the fill, so the store now has room.
+            assert(store.filled < max_records);
+            return true;
+        }
+    }
+    // invariant: a missing id leaves the fill untouched.
+    assert(store.filled <= max_records);
+    return false;
+}
+
+/// Slot a candidate into the running top-k, kept sorted most-similar first. A score
+/// that cannot beat the current worst, once the result is full, is dropped.
+fn insert_topk(result: *QueryResult, k: u32, id: u32, score: f32) void {
+    // invariant: the running result never exceeds the requested k.
+    assert(result.count <= k);
+    if (result.count == k and score <= result.matches[k - 1].score) return;
+    // Overwrite the last slot when full; otherwise grow into the next.
+    var pos: u32 = if (result.count < k) result.count else k - 1;
+    while (pos > 0 and result.matches[pos - 1].score < score) : (pos -= 1) {
+        result.matches[pos] = result.matches[pos - 1];
+    }
+    result.matches[pos] = .{ .id = id, .score = score };
+    if (result.count < k) result.count += 1;
+}
+
+/// The k records nearest `query_vec` by cosine similarity, most similar first --
+/// optionally only those whose tag matches `filter_tag`. Zero-copy: each record's
+/// vector is read in place, never copied. Similarity is over the store's active dim.
+pub fn query(store: *const Store, query_vec: *const [max_dim]f32, k: u32, filter_tag: ?u32) QueryResult {
+    // invariant: a query asks for at least one and at most `max_k` results.
+    assert(k >= 1);
+    assert(k <= max_k);
+    const q = normalized(query_vec, store.dim);
+    var result = QueryResult{ .matches = undefined, .count = 0 };
+    var i: u32 = 0;
+    while (i < store.filled) : (i += 1) {
+        const rec = &store.records[i]; // zero-copy: borrowed in place
+        if (filter_tag) |t| {
+            if (rec.tag != t) continue;
+        }
+        // Both are unit vectors, so their dot product is the cosine similarity.
+        const score: f32 = @floatCast(dot(&q, &rec.vec, store.dim));
+        insert_topk(&result, k, rec.id, score);
+    }
+    // invariant: the result is sorted most-similar first.
+    var j: u32 = 1;
+    while (j < result.count) : (j += 1) {
+        // invariant: the matches come out ordered by score, so a pair out of order means the
+        // ranking and the report disagree about which answer leads
+        assert(result.matches[j - 1].score >= result.matches[j].score);
+    }
+    return result;
+}
+
+/// Approximate k-nearest: score only the records whose LSH signature is within
+/// `max_hamming` bits of the query's, then rank those exactly. A bounded candidate
+/// scan -- at scale it touches a fraction of the store, at the honest cost of missing a
+/// neighbour that fell in a distant bucket. `max_hamming == sig_bits` degrades to the
+/// exact path; `0` is same-bucket only. Zero-copy over the candidates.
+pub fn query_approx(store: *const Store, query_vec: *const [max_dim]f32, k: u32, filter_tag: ?u32, max_hamming: u32) QueryResult {
+    // invariant: a query asks for at least one and at most `max_k` results.
+    assert(k >= 1);
+    assert(k <= max_k);
+    // invariant: the Hamming radius never exceeds the signature width.
+    assert(max_hamming <= sig_bits);
+    const q = normalized(query_vec, store.dim);
+    const qsig = signature(&q, store.dim);
+    var result = QueryResult{ .matches = undefined, .count = 0 };
+    var i: u32 = 0;
+    while (i < store.filled) : (i += 1) {
+        const rec = &store.records[i]; // zero-copy: borrowed in place
+        if (filter_tag) |t| {
+            if (rec.tag != t) continue;
+        }
+        const ham: u32 = @popCount(rec.sig ^ qsig);
+        if (ham > max_hamming) continue; // outside the query's bucket radius
+        const score: f32 = @floatCast(dot(&q, &rec.vec, store.dim));
+        insert_topk(&result, k, rec.id, score);
+    }
+    // invariant: the result is sorted most-similar first.
+    var j: u32 = 1;
+    while (j < result.count) : (j += 1) {
+        // invariant: the matches come out ordered by score, so a pair out of order means the
+        // ranking and the report disagree about which answer leads
+        assert(result.matches[j - 1].score >= result.matches[j].score);
+    }
+    return result;
+}
+
+// --- object-storage backing ---------------------------------------------
+
+/// Write a little-endian u32 at `off`. The slice index narrows to usize only at the
+/// std seam; the bound is asserted in u32 first.
+fn put_u32(buf: []u8, off: u32, v: u32) void {
+    // invariant: the write stays inside the buffer.
+    assert(@as(usize, off) + 4 <= buf.len);
+    const o: usize = @intCast(off); // seam: slice index is usize at the std edge
+    std.mem.writeInt(u32, buf[o..][0..4], v, .little);
+}
+
+/// Read a little-endian u32 at `off`.
+fn get_u32(bytes: []const u8, off: u32) u32 {
+    // invariant: the read stays inside the bytes.
+    assert(@as(usize, off) + 4 <= bytes.len);
+    const o: usize = @intCast(off); // seam: slice index is usize at the std edge
+    return std.mem.readInt(u32, bytes[o..][0..4], .little);
+}
+
+/// A float rides the wire as its own bit pattern, so a restored vector is exact.
+fn put_f32(buf: []u8, off: u32, v: f32) void {
+    put_u32(buf, off, @bitCast(v));
+}
+
+fn get_f32(bytes: []const u8, off: u32) f32 {
+    return @bitCast(get_u32(bytes, off));
+}
+
+/// Serialize the whole store into `buf` as one portable blob -- the object a bucket
+/// holds -- and return its byte length. The store's entire state travels in this single
+/// object, so a fresh node restores it with one read (the serverless shape). A buffer
+/// too small is refused before any byte is written, never a partial object.
+pub fn snapshot(store: *const Store, buf: []u8) BlobError!u32 {
+    // invariant: the store is well-formed before it is written out.
+    assert(store.filled <= max_records);
+    assert(store.dim >= 1);
+    assert(store.dim <= max_dim);
+    const needed: u32 = off_records + store.filled * record_bytes;
+    if (buf.len < needed) return error.BufferTooSmall;
+    var m: u32 = 0;
+    while (m < 8) : (m += 1) {
+        const mo: usize = @intCast(m);
+        buf[mo] = blob_magic[mo];
+    }
+    put_u32(buf, off_version, blob_version);
+    put_u32(buf, off_dim, store.dim);
+    put_u32(buf, off_filled, store.filled);
+    var i: u32 = 0;
+    while (i < store.filled) : (i += 1) {
+        const base: u32 = off_records + i * record_bytes;
+        const rec = &store.records[i];
+        put_u32(buf, base + 0, rec.id);
+        put_u32(buf, base + 4, rec.tag);
+        put_u32(buf, base + 8, rec.sig);
+        var d: u32 = 0;
+        while (d < max_dim) : (d += 1) {
+            put_f32(buf, base + 12 + d * 4, rec.vec[d]);
+        }
+    }
+    // invariant: the written blob never runs past the bounded object size.
+    assert(needed <= max_blob_bytes);
+    return needed;
+}
+
+/// Rebuild a store from a blob produced by `snapshot` -- a fresh node hydrating the
+/// whole store from one object. Every field is validated against the store's bounds; a
+/// malformed or out-of-bound blob is refused rather than trusted.
+pub fn restore(bytes: []const u8) BlobError!Store {
+    if (bytes.len < off_records) return error.Truncated;
+    var m: u32 = 0;
+    while (m < 8) : (m += 1) {
+        const mo: usize = @intCast(m);
+        if (bytes[mo] != blob_magic[mo]) return error.BadMagic;
+    }
+    if (get_u32(bytes, off_version) != blob_version) return error.BadVersion;
+    const dim = get_u32(bytes, off_dim);
+    // invariant: the stored dimension stays within the storage bound.
+    if (dim < 1 or dim > max_dim) return error.BadDimValue;
+    const filled = get_u32(bytes, off_filled);
+    // invariant: the stored fill never exceeds capacity.
+    if (filled > max_records) return error.TooManyRecords;
+    const needed: u32 = off_records + filled * record_bytes;
+    if (bytes.len < needed) return error.Truncated;
+    var store = Store{ .records = undefined, .filled = 0, .dim = dim };
+    var i: u32 = 0;
+    while (i < filled) : (i += 1) {
+        const base: u32 = off_records + i * record_bytes;
+        var rec = Record{
+            .id = get_u32(bytes, base + 0),
+            .tag = get_u32(bytes, base + 4),
+            .vec = undefined,
+            .sig = get_u32(bytes, base + 8),
+        };
+        var d: u32 = 0;
+        while (d < max_dim) : (d += 1) {
+            rec.vec[d] = get_f32(bytes, base + 12 + d * 4);
+        }
+        store.records[i] = rec;
+    }
+    store.filled = filled;
+    // invariant: the rebuilt store is well-formed.
+    assert(store.filled <= max_records);
+    assert(store.dim >= 1);
+    return store;
+}
+
+// --- selftest -----------------------------------------------------------
+
+// A small store of "image" vectors, framed as embeddings: two nature (tag 1), two
+// city (tag 2), at active dimension 4. Directions legible by hand; vectors are sized
+// to max_dim, the unused tail zero.
+fn seat_store() !Store {
+    // The active dimension comes from the real embedded Bron profile (dim 4).
+    var store = try init_from_profile(profile_bron);
+    const red: [max_dim]f32 = .{ 1, 0, 0, 0, 0, 0, 0, 0 };
+    const green: [max_dim]f32 = .{ 0, 1, 0, 0, 0, 0, 0, 0 };
+    const blue: [max_dim]f32 = .{ 0, 0, 1, 0, 0, 0, 0, 0 };
+    const teal: [max_dim]f32 = .{ 1, 1, 0, 0, 0, 0, 0, 0 }; // between red and green
+    try upsert(&store, 1, 1, &red); // nature
+    try upsert(&store, 2, 1, &green); // nature
+    try upsert(&store, 3, 2, &blue); // city
+    try upsert(&store, 4, 2, &teal); // city
+    return store;
+}
+
+fn prove_nearest(store: *const Store) !void {
+    // A query close to "red" (id 1), leaning slightly toward "green".
+    const q: [max_dim]f32 = .{ 1, 0.1, 0, 0, 0, 0, 0, 0 };
+    const r = query(store, &q, 2, null);
+    // invariant: two results, most similar first.
+    if (r.count != 2) return error.WrongCount;
+    // Nearest is red (id 1); second is teal (id 4), which shares red's x direction.
+    if (r.matches[0].id != 1) return error.NearestWrong;
+    if (r.matches[1].id != 4) return error.SecondWrong;
+    // Scores descend and sit in the valid cosine range.
+    if (!(r.matches[0].score > r.matches[1].score)) return error.NotDescending;
+    if (!(r.matches[0].score <= 1.0 and r.matches[1].score >= -1.0)) return error.ScoreOutOfRange;
+    // Red is nearly the query's own direction, so its similarity is high.
+    if (!(r.matches[0].score > 0.99)) return error.NearestNotClose;
+}
+
+fn prove_filter(store: *const Store) !void {
+    // The same query, but only nature (tag 1) -- city records are never considered.
+    const q: [max_dim]f32 = .{ 1, 0.1, 0, 0, 0, 0, 0, 0 };
+    const r = query(store, &q, 3, 1);
+    // Only two nature records exist, so at most two return, both tag 1.
+    if (r.count != 2) return error.FilterCountWrong;
+    if (r.matches[0].id != 1 or r.matches[1].id != 2) return error.FilterOrderWrong;
+}
+
+fn prove_topk_and_update(store: *Store) !void {
+    // Ask for one result only -- the single nearest.
+    const q: [max_dim]f32 = .{ 0, 0, 1, 0, 0, 0, 0, 0 }; // straight at "blue" (id 3)
+    const one = query(store, &q, 1, null);
+    if (one.count != 1 or one.matches[0].id != 3) return error.TopOneWrong;
+
+    // Upsert id 1 with a new direction and tag -- an update in place, not a new record.
+    const before = store.filled;
+    const moved: [max_dim]f32 = .{ 0, 0, 1, 0, 0, 0, 0, 0 }; // id 1 now points at blue
+    try upsert(store, 1, 2, &moved);
+    if (store.filled != before) return error.UpdateGrewStore;
+    // Now a blue-ward query finds id 1 at the top (tied direction, but id 1 scanned first).
+    const after = query(store, &q, 2, null);
+    if (after.matches[0].score < 0.99) return error.UpdateNotApplied;
+}
+
+fn prove_remove(store: *Store) !void {
+    // Remove a record that exists (id 3), and confirm the store shrank by one.
+    const before = store.filled;
+    // invariant: the fixture seated four records, so id 3 is present to remove.
+    assert(before >= 1);
+    const hit = remove(store, 3);
+    if (!hit) return error.RemoveMissedExisting;
+    if (store.filled != before - 1) return error.RemoveDidNotShrink;
+    // A query no longer returns id 3 anywhere in its results.
+    const q: [max_dim]f32 = .{ 0, 0, 1, 0, 0, 0, 0, 0 };
+    const r = query(store, &q, max_k, null);
+    var j: u32 = 0;
+    while (j < r.count) : (j += 1) {
+        if (r.matches[j].id == 3) return error.RemovedStillFound;
+    }
+    // Removing an id that is not present returns false and changes nothing.
+    const before_miss = store.filled;
+    if (remove(store, 999)) return error.RemoveClaimedMissing;
+    if (store.filled != before_miss) return error.MissingRemoveChangedStore;
+}
+
+fn prove_profile_dim() !void {
+    // The dimension is DATA: a second store in the SAME binary runs a different
+    // active dimension (2) -- no recompile, the profile's value alone.
+    var store = try Store.init(2);
+    const x: [max_dim]f32 = .{ 1, 0, 0, 0, 0, 0, 0, 0 };
+    const y: [max_dim]f32 = .{ 0, 1, 0, 0, 0, 0, 0, 0 };
+    try upsert(&store, 10, 0, &x);
+    try upsert(&store, 11, 0, &y);
+    const q: [max_dim]f32 = .{ 1, 0.2, 0, 0, 0, 0, 0, 0 }; // leans toward x (id 10)
+    const r = query(&store, &q, 2, null);
+    if (r.count != 2) return error.ProfileDimCount;
+    if (r.matches[0].id != 10) return error.ProfileDimNearest;
+    // A dimension outside 1..=max_dim is refused, never clamped.
+    if (Store.init(0)) |_| return error.ZeroDimAccepted else |_| {}
+    if (Store.init(max_dim + 1)) |_| return error.OverDimAccepted else |_| {}
+}
+
+fn prove_profile_read() !void {
+    // The dimension comes from a REAL embedded Bron profile file (dim.profile.bron).
+    const d = try dim_from_profile(profile_bron);
+    if (d != 4) return error.ProfileDimWrong;
+    const store = try init_from_profile(profile_bron);
+    if (store.dim != 4) return error.ProfileInitWrong;
+    // Bron discipline: comments and blank lines skipped, first dim line wins.
+    if ((try dim_from_profile("# a comment\n\ndim 3\ndim 7\n")) != 3) return error.CommentOrFirstWinWrong;
+    // Malformed, out-of-bound, or missing dim are refused -- never clamped.
+    if (dim_from_profile("format x\ndim 0\n")) |_| return error.ZeroProfileAccepted else |_| {}
+    if (dim_from_profile("format x\ndim 999\n")) |_| return error.OverProfileAccepted else |_| {}
+    if (dim_from_profile("format x\ndim notanumber\n")) |_| return error.BadValueAccepted else |_| {}
+    if (dim_from_profile("format x\nname foo\n")) |_| return error.NoDimAccepted else |_| {}
+}
+
+fn prove_approx() !void {
+    // A fresh store so the proof does not depend on earlier mutations.
+    var store = try Store.init(4);
+    const red: [max_dim]f32 = .{ 1, 0, 0, 0, 0, 0, 0, 0 };
+    const green: [max_dim]f32 = .{ 0, 1, 0, 0, 0, 0, 0, 0 };
+    const blue: [max_dim]f32 = .{ 0, 0, 1, 0, 0, 0, 0, 0 };
+    const teal: [max_dim]f32 = .{ 1, 1, 0, 0, 0, 0, 0, 0 };
+    try upsert(&store, 1, 1, &red);
+    try upsert(&store, 2, 1, &green);
+    try upsert(&store, 3, 2, &blue);
+    try upsert(&store, 4, 2, &teal);
+
+    // Recall: a red-ward query finds red (id 1) even at radius 0 -- near vectors share
+    // a signature, so the approximate nearest matches the exact nearest.
+    const q: [max_dim]f32 = .{ 1, 0.1, 0, 0, 0, 0, 0, 0 };
+    const exact = query(&store, &q, 1, null);
+    const approx = query_approx(&store, &q, 1, null, 0);
+    if (approx.count < 1) return error.ApproxEmpty;
+    if (approx.matches[0].id != exact.matches[0].id) return error.ApproxMissedNearest;
+
+    // Deterministic: the same query twice yields the same nearest.
+    const again = query_approx(&store, &q, 1, null, 0);
+    if (again.matches[0].id != approx.matches[0].id) return error.ApproxNotDeterministic;
+
+    // Bounded candidate set: a green-ward query at radius 0 buckets to green alone, so
+    // its approximate top-2 returns fewer than the exact top-2 -- the approximation's
+    // honest cost (a distant-bucket neighbour skipped), with the true nearest still first.
+    const gq: [max_dim]f32 = .{ 0, 1, 0, 0, 0, 0, 0, 0 };
+    const gexact = query(&store, &gq, 2, null);
+    const gapprox = query_approx(&store, &gq, 2, null, 0);
+    if (!(gapprox.count < gexact.count)) return error.ApproxNotReduced;
+    if (gapprox.matches[0].id != 2) return error.ApproxGreenNearestWrong;
+
+    // Full radius degrades to exact: every record is a candidate, same nearest.
+    const full = query_approx(&store, &q, 1, null, sig_bits);
+    if (full.matches[0].id != exact.matches[0].id) return error.ApproxFullWrongNearest;
+}
+
+fn prove_snapshot() !void {
+    // A fresh store so the proof does not depend on earlier mutations.
+    var store = try Store.init(4);
+    const red: [max_dim]f32 = .{ 1, 0, 0, 0, 0, 0, 0, 0 };
+    const green: [max_dim]f32 = .{ 0, 1, 0, 0, 0, 0, 0, 0 };
+    const blue: [max_dim]f32 = .{ 0, 0, 1, 0, 0, 0, 0, 0 };
+    const teal: [max_dim]f32 = .{ 1, 1, 0, 0, 0, 0, 0, 0 };
+    try upsert(&store, 1, 1, &red);
+    try upsert(&store, 2, 1, &green);
+    try upsert(&store, 3, 2, &blue);
+    try upsert(&store, 4, 2, &teal);
+
+    var buf: [max_blob_bytes]u8 = undefined;
+    const n = try snapshot(&store, &buf);
+    if (n < off_records) return error.SnapshotTooSmall;
+
+    // The object round-trips: a store hydrated from the blob is byte-for-byte identical.
+    const back = try restore(buf[0..n]);
+    if (back.dim != store.dim) return error.RestoreDimWrong;
+    if (back.filled != store.filled) return error.RestoreFilledWrong;
+    var i: u32 = 0;
+    while (i < store.filled) : (i += 1) {
+        const a = &store.records[i];
+        const b = &back.records[i];
+        if (a.id != b.id) return error.RestoreIdWrong;
+        if (a.tag != b.tag) return error.RestoreTagWrong;
+        if (a.sig != b.sig) return error.RestoreSigWrong;
+        var d: u32 = 0;
+        while (d < max_dim) : (d += 1) {
+            if (a.vec[d] != b.vec[d]) return error.RestoreVecWrong;
+        }
+    }
+    // The restored store answers a query identically -- the object IS the store.
+    const q: [max_dim]f32 = .{ 1, 0.1, 0, 0, 0, 0, 0, 0 };
+    const e = query(&store, &q, 1, null);
+    const r = query(&back, &q, 1, null);
+    if (e.matches[0].id != r.matches[0].id) return error.RestoreQueryDrift;
+
+    // A too-small buffer is refused before any byte is written -- never a partial object.
+    var tiny: [8]u8 = undefined;
+    if (snapshot(&store, &tiny)) |_| return error.TinyBufferAccepted else |_| {}
+
+    // Corruption is refused: bad magic, short header, out-of-bound dim, over-count.
+    var bad = buf;
+    bad[0] = 'X';
+    if (restore(bad[0..n])) |_| return error.BadMagicAccepted else |_| {}
+    if (restore(buf[0 .. off_records - 1])) |_| return error.ShortHeaderAccepted else |_| {}
+    var badd = buf;
+    put_u32(&badd, off_dim, max_dim + 1);
+    if (restore(badd[0..n])) |_| return error.BadDimAccepted else |_| {}
+    var badc = buf;
+    put_u32(&badc, off_filled, max_records + 1);
+    if (restore(badc[0..n])) |_| return error.OverCountAccepted else |_| {}
+}
+
+fn prove_file_backing(init: std.process.Init) !void {
+    // The blob written to a real file, then read back into a fresh store -- a new node
+    // hydrating from object storage. mandate/bin is gitignored build output, so the
+    // object never enters the tree.
+    const io = init.io;
+    const a = init.arena.allocator();
+    var store = try seat_store();
+    var buf: [max_blob_bytes]u8 = undefined;
+    const n = try snapshot(&store, &buf);
+    const path = "mandate/bin/store.blob";
+    const cwd = std.Io.Dir.cwd();
+    try cwd.writeFile(io, .{ .sub_path = path, .data = buf[0..n] });
+    const read_back = try cwd.readFileAlloc(io, path, a, .limited(max_blob_bytes));
+    const back = try restore(read_back);
+    if (back.filled != store.filled) return error.FileFilledWrong;
+    if (back.dim != store.dim) return error.FileDimWrong;
+    const q: [max_dim]f32 = .{ 1, 0.1, 0, 0, 0, 0, 0, 0 };
+    if (query(&store, &q, 1, null).matches[0].id != query(&back, &q, 1, null).matches[0].id) return error.FileQueryDrift;
+    print("mandate store: object-storage backing — the whole store serialized to a {d}-byte blob written to {s} and a fresh store hydrated back from it, identical; the store's entire state is one portable object (a bucket-backed, serverless shape).\n", .{ read_back.len, path });
+}
+
+fn prove_full(store: *Store) !void {
+    // The one named bound no leg had ever met: max_records is 64, upsert returns
+    // error.Full at the sixty-fifth distinct id, and the refusal is watched here as
+    // the value it is rather than believed from the declaration beside it.
+    const unit: [max_dim]f32 = .{ 1, 0, 0, 0, 0, 0, 0, 0 };
+    var id: u32 = 100;
+    while (store.filled < max_records) : (id += 1) {
+        try upsert(store, id, 1, &unit);
+    }
+    // invariant: the store stands exactly at its ceiling before the refusal is asked for
+    assert(store.filled == max_records);
+    const over = upsert(store, id, 1, &unit);
+    if (over) |_| return error.FullDidNotRefuse else |err| {
+        // invariant: the refusal carries its declared name, never a neighbour's
+        assert(err == error.Full);
+    }
+    // invariant: a refused upsert wrote nothing -- the count holds at the ceiling
+    assert(store.filled == max_records);
+    // The bound is the live count rather than a latch: remove one and the door opens.
+    const hit = remove(store, 100);
+    if (!hit) return error.FullRemoveMissed;
+    try upsert(store, id, 1, &unit);
+    if (store.filled != max_records) return error.FullReopenMiscounted;
+}
+
+fn run_selftest(init: std.process.Init) !u8 {
+    var store = try seat_store();
+    try prove_nearest(&store);
+    try prove_filter(&store);
+    try prove_topk_and_update(&store);
+    try prove_remove(&store);
+    try prove_profile_dim();
+    try prove_profile_read();
+    try prove_approx();
+    try prove_snapshot();
+    try prove_file_backing(init);
+    var full_store = try init_from_profile(profile_bron);
+    try prove_full(&full_store);
+
+    print("mandate store: a vector store — upsert normalizes to a unit direction, so a query is a dot product; the nearest by cosine similarity returns most-similar-first, bounded and exact.\n", .{});
+    print("mandate store: zero-copy — each record's vector is read in place at query time, never copied; the store owns the bytes once and search borrows them.\n", .{});
+    print("mandate store: a tag filters the search (the nearest, but only nature); an upsert on an existing id updates in place, never growing the store.\n", .{});
+    print("mandate store: remove drops a record by id (swap-remove, no realloc, no hole); a missing id changes nothing — create, read, update, delete all bounded.\n", .{});
+    print("mandate store: the dimension is data — set at init from a profile, bounded by max_dim; one binary serves any dim 1..=max_dim, and an out-of-bound dim is refused.\n", .{});
+    print("mandate store: the dimension is read from a real Bron profile (mandate/dim.profile.bron) — comments and blanks skipped, first dim line wins, malformed or out-of-bound refused.\n", .{});
+    print("mandate store: an approximate index (SimHash LSH over fixed hyperplanes) scores only candidates within a bounded Hamming radius of the query's signature — same-bucket recall, fewer records touched; full radius degrades to exact.\n", .{});
+    print("mandate store: object-storage backing — the whole store serializes to one portable blob (magic·version·dim·records), so a fresh node hydrates the entire store from a single object; snapshot/restore round-trips and corruption is refused.\n", .{});
+    print("mandate store: the sixty-fifth record refuses by Full — the count holds at the ceiling, and remove opens the door again, since the bound is the live count rather than a latch.\n", .{});
+    print("mandate store: version {s}\n", .{store_version});
+    print("GREEN: mandate store — Grain's turbopuffer, a bounded zero-copy vector store: nearest-neighbour by cosine over unit vectors, with a metadata filter, exact and witnessed.\n", .{});
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    return run_selftest(init);
+}

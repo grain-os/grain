@@ -1,0 +1,214 @@
+# tools/s/shell_dialect_witness.rish -- this tree's guards speak one shell, on two piers.
+#   rishi/bin/rishi run tools/s/shell_dialect_witness.rish
+#
+# WHAT IT STANDS OVER. tools/fixtures/s/shell_dialect_scan.sh, which counts GNU-only shell idioms in
+# tracked guards and holds SIX families -- the GNU-only xargs flags, the GNU-only date parse, PCRE,
+# the GNU-only stat field flag, the in-place edit flag, and the resolve flag on readlink -- each
+# under a ceiling that only falls. A family earns its gate by costing a real reading on a real host,
+# and on 20260830 the last two earned theirs: both Pond guards that carried them red on the macOS
+# bench, and one family had grown from five sites to fourteen while it was counted and gated by
+# nothing. Nothing is advisory here now, which is the point -- an advisory that names its own
+# promotion condition in prose is a condition nobody checks.
+#
+# WHAT IT STANDS ON. The scan reads every tracked shell source once, past comment lines, past its
+# own two files that spell the idioms on purpose, and past tracked symlinks, which name one source
+# twice. Every gated family is proven from both sides on a planted tree, and three of the four are
+# proven again by BEHAVIOUR -- a real guard of this tree reading the same number under both
+# dialects while a planted elder copy still breaks.
+#
+# WHERE IT STANDS. The twelve gated sites moved to tools/fixtures/s/shell_portable.sh on
+# 20260826.062128, so the ceiling is ZERO and the family is a ratchet: the next GNU-only xargs reds
+# on the lap it arrives. The repair is proven by BEHAVIOUR as well as by spelling -- exec_bit_scan.sh
+# read directly_invoked=18 on GNU and 0 under a BSD-shaped xargs before it, printing verdict=ok both
+# times, and reads 18 on both dialects after (REDS %249).
+#
+# WHY THIS EXISTS. On 20260825 the macOS bench regenerated docs-geode/libraries/README.md through
+# a counting function built on GNU-only xargs flags, and shipped a page reading 0 witnesses for
+# all 38 rooms to the anointed remote. The page's own guard was green there, because it renders
+# through the same function it checks. That is REDS %240, and it is the third time this class has
+# cost the tree a number: REDS %169 was a broken glob answering zero, REDS %226 was two guards
+# speaking one host's awk dialect. A lantern that fires twice becomes a loom.
+say "shell-dialect: Language EN -- a guard that runs on one host measures one host."
+say "shell-dialect: Style Gauge Meter -- the ceiling is counted, the mechanism is reproduced."
+say "shell-dialect: Lens TAME -- safety first; a refusal proven only one way is not proven."
+
+let green = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh"]
+say green.out
+assert green.ok else "shell-dialect: the living measure must exit 0"
+assert green.out contains "verdict=ok" else "shell-dialect: want verdict ok"
+assert green.out contains "gated_family=xargs_arg_file_or_delimiter" else "shell-dialect: want the gated family named"
+
+# THE MECHANISM, not just the counter. A ceiling that falls proves a spelling changed; it does not
+# prove the spelling was ever broken. This leg builds an xargs that refuses -a and -d exactly as
+# BSD xargs does, and reproduces the confident wrong zero on metal -- then shows the portable form
+# surviving the same shim. Without this leg the repair would rest on a claim about another host.
+let mech = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-dialect"]
+say mech.out
+assert mech.ok else "shell-dialect: the mechanism proof must exit 0"
+assert mech.out contains "gnu_form_under_bsd=0" else "shell-dialect: want the GNU form zeroed under a BSD xargs"
+assert mech.out contains "portable_form_under_bsd=1" else "shell-dialect: want the portable form surviving"
+
+# THE REPAIR, PROVEN BY BEHAVIOUR. A ceiling that falls to zero proves a spelling changed. This leg
+# proves the changed spelling actually measures the same tree on both dialects -- and, in the same
+# run, that a planted copy carrying the elder spelling still breaks, so the leg cannot pass a
+# subject that is quietly broken. Its own vacuum is closed too: the plant must first read correctly
+# on GNU before its silence under the shim is allowed to mean anything.
+let port = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-portable"]
+say port.out
+assert port.ok else "shell-dialect: the behaviour proof must exit 0"
+assert port.out contains "planted_elder_bsd_shaped=0" else "shell-dialect: want the planted elder spelling still zeroed"
+assert port.out contains "verdict=ok" else "shell-dialect: want the behaviour proof green"
+
+# The ceiling read from both sides, on ONE planted tree so the two readings differ only in the
+# ceiling. At zero there is no tree one site under the reading, so the plant supplies it: the same
+# single planted site passes at a ceiling of 1 and refuses at 0. A ceiling proven only in the
+# passing direction cannot be told from a bypass.
+let planted = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-red"]
+assert (planted.ok == false) else "shell-dialect: a planted site past the ceiling must refuse"
+assert planted.out contains "verdict=over_ceiling" else "shell-dialect: want the refusal named"
+
+let admits = run ["sh" "-c" "SHELL_DIALECT_CEILING=1 sh tools/fixtures/s/shell_dialect_scan.sh prove-red"]
+assert admits.ok else "shell-dialect: the same planted site must pass at a ceiling of one"
+
+assert green.out contains "gated_ceiling=0" else "shell-dialect: the ceiling stands at zero -- a ceiling only falls"
+
+# THE FIFTH AND SIXTH GATED FAMILIES, promoted from advisory 20260830. Each is still named WITHOUT
+# its flag on purpose: the scan reads prose inside a string as a site, so a guard spelling the idiom
+# it hunts would count itself forever -- and now that both families are gated rather than reported,
+# a guard that counted itself would refuse the tree instead of merely overstating a footnote.
+#
+# THE FIFTH stands at zero and is enforced. All fourteen of its sites were in the two Pond fixtures
+# whose guards red on the macOS bench, and they took the portable helper in the same round.
+assert green.out contains "gated_sed_i_family=sed_in_place_flag" else "shell-dialect: want the gated in-place-edit family named"
+assert green.out contains "gated_sed_i_sites=0" else "shell-dialect: the in-place-edit family stands at zero"
+assert green.out contains "gated_sed_i_ceiling=0" else "shell-dialect: the in-place-edit ceiling stands at zero -- a ceiling only falls"
+
+# THE SIXTH is a ratchet above zero, and the witness pins the number rather than the shape, because
+# the reason it cannot reach zero is worth catching if it changes: five of its seven sites are the
+# portable helper's OWN control calling the elder spelling to compare against, each guarded by a
+# probe, and a sixth is the launcher the Pond quest's accrete-only boundary holds untouched. A
+# ratchet still refuses the eighth, which is the growth the family above went unmeasured through.
+assert green.out contains "gated_readlink_f_family=readlink_resolve_flag" else "shell-dialect: want the gated resolve-flag family named"
+assert green.out contains "gated_readlink_f_sites=7" else "shell-dialect: the resolve-flag family stands at seven"
+assert green.out contains "gated_readlink_f_ceiling=7" else "shell-dialect: the resolve-flag ceiling stands at seven -- a ceiling only falls"
+
+# BOTH PROVEN FROM BOTH SIDES, on a plant, exactly as the four before them. A refusal shown only in
+# the passing direction cannot be told from a bypass, so each plant must refuse at the standing
+# ceiling and pass one ceiling higher.
+let sedp = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-sed-red"]
+assert (sedp.ok == false) else "shell-dialect: a planted in-place-edit site past the ceiling must refuse"
+assert sedp.out contains "verdict=over_sed_i_ceiling" else "shell-dialect: want the in-place-edit refusal named"
+
+let sed_admits = run ["sh" "-c" "SHELL_DIALECT_SED_I_CEILING=1 sh tools/fixtures/s/shell_dialect_scan.sh prove-sed-red"]
+assert sed_admits.ok else "shell-dialect: the same planted in-place-edit site must pass at a ceiling of one"
+
+let rlp = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-readlink-red"]
+assert (rlp.ok == false) else "shell-dialect: a planted resolve-flag site past the ratchet must refuse"
+assert rlp.out contains "verdict=over_readlink_f_ceiling" else "shell-dialect: want the resolve-flag refusal named"
+
+let rl_admits = run ["sh" "-c" "SHELL_DIALECT_READLINK_F_CEILING=8 sh tools/fixtures/s/shell_dialect_scan.sh prove-readlink-red"]
+assert rl_admits.ok else "shell-dialect: the same planted resolve-flag site must pass one ceiling higher"
+
+# THE THIRD AND FOURTH GATED FAMILIES, promoted from advisory on 20260826.090745. PCRE stood in the
+# two guards this tree leans on hardest -- the dated-path census, whose lost count gates every room
+# fold with no slack, and the living-card scan that holds the operator card at zero non-ASCII bytes
+# -- and BSD grep refuses that flag outright, so both read nothing at all on the macOS bench. The
+# stat family carried the elder trap in full: written BSD-first, its GNU leg answered for a file
+# named %Fm and for the binary both, printing five lines of filesystem counts before exiting 1, so
+# the fallback fired and appended the mtime underneath (REDS %260).
+assert green.out contains "gated_grep_p_family=grep_pcre" else "shell-dialect: want the gated PCRE family named"
+assert green.out contains "gated_grep_p_sites=0" else "shell-dialect: the PCRE family stands at zero"
+assert green.out contains "gated_grep_p_ceiling=0" else "shell-dialect: the PCRE ceiling stands at zero -- a ceiling only falls"
+assert green.out contains "gated_stat_c_family=stat_field_format" else "shell-dialect: want the gated stat family named"
+assert green.out contains "gated_stat_c_sites=0" else "shell-dialect: the stat family stands at zero"
+assert green.out contains "gated_stat_c_ceiling=0" else "shell-dialect: the stat ceiling stands at zero -- a ceiling only falls"
+
+# THE PCRE REPAIR, PROVEN BY BEHAVIOUR on the guard the fault would have cost most. The pen holds
+# two references, a retired countdown-prefix name that must NOT read as one, and a path asserted
+# absent that must be subtracted -- so the right answer is exactly two, and the leg refuses if the
+# corpus answer moves. Borrowed from dated_path_control.sh's throwaway tree, which runs the same
+# scan in about a second where the field takes forty-five.
+let pcre = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-pcre"]
+say pcre.out
+assert pcre.ok else "shell-dialect: the PCRE behaviour proof must exit 0 -- both dialects must read one number"
+assert pcre.out contains "corpus_answer_wanted=2" else "shell-dialect: want the pen's own answer named"
+assert pcre.out contains "planted_elder_bsd_shaped=0" else "shell-dialect: want the planted elder PCRE spelling still zeroed"
+assert pcre.out contains "verdict=ok" else "shell-dialect: want the PCRE behaviour proof green"
+
+let pcre_planted = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-pcre-red"]
+assert (pcre_planted.ok == false) else "shell-dialect: a planted PCRE site past the ceiling must refuse"
+assert pcre_planted.out contains "verdict=over_grep_p_ceiling" else "shell-dialect: want the PCRE refusal named"
+
+let pcre_admits = run ["sh" "-c" "SHELL_DIALECT_GREP_P_CEILING=1 sh tools/fixtures/s/shell_dialect_scan.sh prove-pcre-red"]
+assert pcre_admits.ok else "shell-dialect: the same planted PCRE site must pass at a ceiling of one"
+
+# THE STAT REPAIR, and this one needs no shim to show the fault -- the fault is what a GNU host
+# does today, so the leg reproduces it directly and then proves the repaired order survives a stat
+# with no field flag at all. An order proven only on the host it was written for is an order
+# nobody checked.
+let statp = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-stat"]
+say statp.out
+assert statp.ok else "shell-dialect: the stat behaviour proof must exit 0"
+assert statp.out contains "repaired_lines_on_gnu=1" else "shell-dialect: want the repair answering exactly one line on GNU"
+assert statp.out contains "repaired_lines_under_bsd_shaped=1" else "shell-dialect: want the repair answering under a stat that refuses the GNU flag"
+assert statp.out contains "verdict=ok" else "shell-dialect: want the stat behaviour proof green"
+
+let stat_planted = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-stat-red"]
+assert (stat_planted.ok == false) else "shell-dialect: a planted stat site past the ceiling must refuse"
+assert stat_planted.out contains "verdict=over_stat_c_ceiling" else "shell-dialect: want the stat refusal named"
+
+let stat_admits = run ["sh" "-c" "SHELL_DIALECT_STAT_C_CEILING=1 sh tools/fixtures/s/shell_dialect_scan.sh prove-stat-red"]
+assert stat_admits.ok else "shell-dialect: the same planted stat site must pass at a ceiling of one"
+
+# THE SECOND GATED FAMILY, held at zero the same way. `date -d` cost this tree a real reading before
+# it was gated: tools/fixtures/o/one_clock_provenance_scan.sh called every stamp in the tree
+# unparsable under a BSD date, and tools/o/one_clock_witness.rish refused on its own PASS fixture
+# (REDS %250). Seven lines moved to stamp_epoch, epoch_stamp and stamp_ahead in shell_portable.sh.
+assert green.out contains "gated_date_family=date_parse_or_relative" else "shell-dialect: want the gated date family named"
+assert green.out contains "gated_date_sites=0" else "shell-dialect: the date family stands at zero"
+assert green.out contains "gated_date_ceiling=0" else "shell-dialect: the date ceiling stands at zero -- a ceiling only falls"
+
+# A TRACKED SYMLINK IS THE SAME SOURCE TWICE. pond/apps/corpora/one_clock.rish points at
+# tools/o/one_clock_witness.rish, so the date family read NINE across the tree where seven lines
+# carry it. The roster asks git for mode 120000 rather than guessing, and reports what it skipped --
+# a number skipped in silence is a number nobody can check.
+assert green.out contains "roster_symlinks_skipped=" else "shell-dialect: want the skipped symlink count printed"
+
+# THE DATE MECHANISM, PROVEN BY BEHAVIOUR on the guard the fault was found in. The living scan must
+# read the same number on both dialects, AND a planted copy carrying the elder GNU-only body must
+# still break -- after first proving it reads correctly on GNU, so its silence under the shim means
+# something. Measured before the repair: two PROV_OK on GNU and zero under a BSD-shaped date.
+#
+# THE COMPARISON IS THE ASSERTION, and a constant here would be a second fault of the class this
+# guard exists to catch. The leg's own reading counts PROV_OK lines, and the provenance scan weighs
+# every dated artifact the working tree and index hold -- so the number rises the moment a round
+# stages its own session log. Pinning `=2` passed on a clean tree and reddened on the staged one,
+# in the same round that wrote it (REDS %259). The scan refuses under `host_changed_the_reading`
+# when the two dialects disagree, so exit status carries the equality and the witness reads the
+# properties instead: the plant broke, and the leg is green.
+let dated = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-date"]
+say dated.out
+assert dated.ok else "shell-dialect: the date behaviour proof must exit 0 -- the two dialects must read one number"
+assert dated.out contains "planted_elder_bsd_shaped=0" else "shell-dialect: want the planted elder date spelling still broken"
+assert dated.out contains "verdict=ok" else "shell-dialect: want the date behaviour proof green"
+
+# The date ceiling from both sides, on one planted tree, exactly as the xargs ceiling is proven.
+let date_planted = run ["sh" "tools/fixtures/s/shell_dialect_scan.sh" "prove-date-red"]
+assert (date_planted.ok == false) else "shell-dialect: a planted date site past the ceiling must refuse"
+assert date_planted.out contains "verdict=over_date_ceiling" else "shell-dialect: want the date refusal named"
+
+let date_admits = run ["sh" "-c" "SHELL_DIALECT_DATE_CEILING=1 sh tools/fixtures/s/shell_dialect_scan.sh prove-date-red"]
+assert date_admits.ok else "shell-dialect: the same planted date site must pass at a ceiling of one"
+
+# The two newest helpers, proven by DOING rather than by counting. A call-site count says a spelling
+# changed; only behaviour says the spelling still works. `resolve_path` is compared against this
+# host's own `readlink -f` on six real paths including a symlink and a name carrying a space, and
+# `sed_inplace` is read back for its bytes AND its mode -- the mode being the half `mv` would lose
+# and the exec-bit law would then book (REDS %159).
+let portable = run ["sh" "tools/fixtures/s/shell_portable_control.sh"]
+say portable.out
+assert portable.ok else "shell-dialect: the portable-helper control must exit 0"
+assert portable.out contains "fail=0" else "shell-dialect: no helper behaviour may miss"
+assert portable.out contains "pass=32" else "shell-dialect: want thirty-two helper behaviours proven"
+
+say "GREEN: shell-dialect -- five gated families stand at zero and a sixth at a ratchet of seven, three real guards read the same on both dialects while planted elder copies still break, the elder stat order is reproduced on this host and its repair proven under a stat that refuses the GNU flag, and every one of the six ceilings is proven from both sides on a planted tree"

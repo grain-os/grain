@@ -1,0 +1,27 @@
+# tools/gen/chapter/sunn10_keys_grain_os_witness.rish -- SUNN10 keys - grain-os overview.
+#
+#   rishi/bin/rishi run tools/gen/chapter/sunn10_keys_grain_os_witness.rish
+
+say "sunn10: Language EN — custody and overview name the living hand."
+say "sunn10: Style Radiant — the maintainer · Riyo · acme-owner · dated the maintainer stays."
+say "sunn10: Lens TAME — SUNN10 · keys/README · grain-os/overview."
+
+let k = read-file "keys/README.md"
+assert k contains "Voice:** Kyri" else "sunn10: keys want Voice Riyo"
+assert k contains "the maintainer" else "sunn10: keys want the maintainer"
+assert k contains "acme-owner" else "sunn10: keys want acme-owner"
+assert k contains "SUNN10" else "sunn10: keys want SUNN10 stamp"
+assert k contains "the maintainer" else "sunn10: keys want dated the maintainer testimony kept"
+assert (k contains "current identity** (`acme-owner` / the maintainer") == false else "sunn10: keys must not keep the maintainer as current identity"
+
+let o = read-file "manual/grain-os/overview.md"
+assert o contains "Voice:** Kyri" else "sunn10: overview want Voice Riyo"
+assert o contains "the maintainer" else "sunn10: overview want the maintainer"
+assert o contains "SUNN10" else "sunn10: overview want SUNN10 stamp"
+assert o contains "acme-owner" else "sunn10: overview want acme-owner"
+assert o contains "intentionally unpaired" else "sunn10: overview want Quin unpaired"
+assert o contains "context/KYRI.md" else "sunn10: overview want RIYO.md"
+assert o contains "context/QUIN.md" else "sunn10: overview want QUIN.md"
+assert o contains "the maintainer" else "sunn10: overview want dated the maintainer note"
+
+say "GREEN: sunn10 — keys/README · grain-os/overview · the maintainer living · the maintainer dated"

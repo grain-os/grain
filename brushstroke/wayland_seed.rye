@@ -1,0 +1,1355 @@
+//! brushstroke/wayland_seed.rye -- Skate grid on a Wayland surface.
+//!
+//! The hosted seed (`seed.rye`) proved Frame -> redraw on stdout. This seed
+//! proves monospace **Skate** cells land on a compositor surface: connect,
+//! create an xdg toplevel, attach one SHM buffer filled from a cell grid,
+//! commit once, wait for the frame callback, exit cleanly.
+//!
+//! Build (from repo root):
+//!   mkdir -p brushstroke/bin
+//!   export RYE_ZIG="$PWD/vendor/zig-toolchain/zig"
+//!   rye/bin/rye build brushstroke/wayland_seed.rye brushstroke/xdg-shell-protocol.c \
+//!     -Ibrushstroke -lc -lwayland-client -lxkbcommon -lrt \
+//!     -femit-bin=brushstroke/bin/brushstroke-wayland-seed
+//!   brushstroke/bin/brushstroke-wayland-seed          # Wayland window
+//!   brushstroke/bin/brushstroke-wayland-seed selftest # headless grid proof
+//!   brushstroke/bin/brushstroke-wayland-seed arbitrary # SLC-2a arbitrary-value witness
+//!   brushstroke/bin/brushstroke-wayland-seed redraw     # SLC-2a redraw metal: A then B
+//!   brushstroke/bin/brushstroke-wayland-seed redrawtest # SLC-2a redraw headless witness
+//!   brushstroke/bin/brushstroke-wayland-seed brushtest [path.brush]  # p49/p52 - glass Frame feed
+//!   brushstroke/bin/brushstroke-wayland-seed brush <path.brush>     # present .brush on Wayland
+//!   brushstroke/bin/brushstroke-wayland-seed livetest               # p54 - type - :quit headless
+//!   brushstroke/bin/brushstroke-wayland-seed live                  # p54 - hosted type - ceiling - :quit
+//!   brushstroke/bin/brushstroke-wayland-seed idletest [ms]         # p56 - pong idle (needs display)
+//!   brushstroke/bin/brushstroke-wayland-seed ceilingtest           # p57 - transcript ceiling headless
+//!
+//! Requires a running Wayland compositor (`WAYLAND_DISPLAY`) for the default mode,
+//! `brush <path>`, `live`, and `idletest`. `brushtest`, `livetest`, and `ceilingtest`
+//! are headless.
+//!
+//! Frame tidy (p52): glass `brush.Frame` (= BrushFrame) feeds this host `Frame`
+//! through one named hop -- `Frame.from_brush`.
+//! Live-five: type - :quit (p54) - idle pong (p56) - ceiling fill (p57).
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const posix = std.posix;
+const skate = @import("skate_grid.rye");
+const brush = @import("brush_parse.rye");
+const tally_copy = @import("tally_copy.rye");
+const parse_int = @import("parse_int.rye");
+const claims_mod = @import("surface_claims.rye");
+const reference = @import("surface_reference.rye");
+
+const c = @cImport({
+    @cInclude("wayland-client.h");
+    @cInclude("xdg-shell-client-protocol.h");
+    @cInclude("xkbcommon/xkbcommon.h");
+    @cInclude("xkbcommon/xkbcommon-keysyms.h");
+});
+
+const max_key_actions: u32 = 64;
+const max_prompt_bytes: u32 = 64;
+/// Default automated idle slice -- covers a typical compositor ping window (~10-15s).
+/// Pond's ~1 minute hand ritual stays affirmable via `idletest 60000`.
+const default_idle_ms: u32 = 20_000;
+const idle_step_ms: u32 = 50;
+const max_idle_ms: u32 = 120_000;
+/// Live transcript ceiling -- matches Pond drawn-terminal invent (`max_transcript_bytes`).
+const max_live_transcript_bytes: u32 = 65_536;
+const status_full_text = "transcript full — earlier lines still ran; :quit to close";
+const status_max_len: u32 = 80;
+const ceiling_fill_line_count: u32 = 200;
+const ceiling_fill_say_width: u32 = 400;
+
+pub const KeyAction = union(enum) {
+    none,
+    char_: u8,
+    backspace,
+    submit,
+};
+
+/// Thin live prompt -- KeyAction -> one submitted line (no Rishi REPL invent).
+const Prompt = struct {
+    buf: [max_prompt_bytes]u8 = undefined,
+    len: u32 = 0,
+    pending_submit: bool = false,
+
+    fn reset(self: *Prompt) void {
+        self.len = 0;
+        self.pending_submit = false;
+    }
+
+    fn push_char(self: *Prompt, ch: u8) void {
+        if (self.len >= max_prompt_bytes) return;
+        self.buf[self.len] = ch;
+        self.len += 1;
+    }
+
+    fn backspace(self: *Prompt) void {
+        if (self.len == 0) return;
+        self.len -= 1;
+    }
+
+    fn apply(self: *Prompt, action: KeyAction) void {
+        switch (action) {
+            .none => {},
+            .char_ => |ch| self.push_char(ch),
+            .backspace => self.backspace(),
+            .submit => self.pending_submit = true,
+        }
+    }
+
+    fn slice(self: *const Prompt) []const u8 {
+        return self.buf[0..self.len];
+    }
+
+    fn take_submitted(self: *Prompt, garden: std.mem.Allocator) !?[]const u8 {
+        if (!self.pending_submit) return null;
+        self.pending_submit = false;
+        const trimmed = std.mem.trim(u8, self.buf[0..self.len], " \t\r\n");
+        self.len = 0;
+        if (trimmed.len == 0) return null;
+        return try garden.dupe(u8, trimmed);
+    }
+};
+
+/// Thin live transcript -- Pond ceiling invent without pulling Rishi into the seed.
+/// `full` latches at the first refused append and stays for the session.
+const LiveTranscript = struct {
+    bytes: [max_live_transcript_bytes]u8 = undefined,
+    len: u32 = 0,
+    full: bool = false,
+
+    fn append(self: *LiveTranscript, text: []const u8) bool {
+        // invariant: length never past the named transcript ceiling
+        assert(self.len <= max_live_transcript_bytes);
+        const add: u32 = @intCast(text.len);
+        if (add > max_live_transcript_bytes - self.len) return false;
+        tally_copy.copy_disjoint(u8, self.bytes[self.len .. self.len + add], text);
+        self.len += add;
+        // invariant: append stays inside the ceiling
+        assert(self.len <= max_live_transcript_bytes);
+        return true;
+    }
+
+    fn append_prompt_line(self: *LiveTranscript, line: []const u8) void {
+        // invariant: once full, refuse without partial writes
+        if (self.full) return;
+        const prefix = "brush> ";
+        const need: u32 = @intCast(prefix.len + line.len + 1);
+        if (need > max_live_transcript_bytes - self.len) {
+            self.full = true;
+            return;
+        }
+        // invariant: whole prompt line fits -- appends cannot refuse
+        assert(self.append(prefix));
+        assert(self.append(line));
+        assert(self.append("\n"));
+    }
+};
+
+fn is_quit_line(line: []const u8) bool {
+    return std.mem.eql(u8, line, ":quit");
+}
+
+fn bound_status(garden: std.mem.Allocator, text: []const u8) ![]const u8 {
+    if (text.len <= status_max_len) return try garden.dupe(u8, text);
+    return try garden.dupe(u8, text[0..status_max_len]);
+}
+
+fn format_prompt_status(garden: std.mem.Allocator, prompt: []const u8, transcript_full: bool) ![]const u8 {
+    if (transcript_full) return bound_status(garden, status_full_text);
+    var buf: [status_max_len + 16]u8 = undefined;
+    const msg = if (prompt.len == 0)
+        try std.fmt.bufPrint(&buf, "brush> ", .{})
+    else
+        try std.fmt.bufPrint(&buf, "brush> {s}", .{prompt});
+    return bound_status(garden, msg);
+}
+
+fn live_session_lines(garden: std.mem.Allocator, transcript: *const LiveTranscript, rows: u32) ![][]const u8 {
+    // invariant: body rows leave room for the status line
+    assert(rows > 0);
+    assert(rows < max_lines);
+    const data_len = transcript.len;
+    if (data_len == 0) return try garden.alloc([]const u8, 0);
+
+    var temp: [max_lines][]const u8 = undefined;
+    var collected: u32 = 0;
+    var end: u32 = data_len;
+    while (end > 0 and collected < rows) {
+        var start: u32 = end;
+        while (start > 0 and transcript.bytes[start - 1] != '\n') start -= 1;
+        temp[rows - 1 - collected] = transcript.bytes[start..end];
+        collected += 1;
+        if (start == 0) break;
+        end = start - 1;
+    }
+
+    const out = try garden.alloc([]const u8, collected);
+    var i: u32 = 0;
+    while (i < collected) : (i += 1) {
+        out[i] = temp[rows - collected + i];
+    }
+    return out;
+}
+
+fn compose_live_frame_lines(
+    garden: std.mem.Allocator,
+    transcript: *const LiveTranscript,
+    status: []const u8,
+) ![]Line {
+    const body_rows = max_lines - 1;
+    // invariant: status row always reserved under the Frame ceiling
+    assert(body_rows > 0);
+    const session = try live_session_lines(garden, transcript, body_rows);
+    const status_line = try bound_status(garden, status);
+    const total: u32 = @intCast(session.len + 1);
+    // invariant: composed Frame never past the host ceiling
+    assert(total <= max_lines);
+    const lines = try garden.alloc(Line, total);
+    var i: u32 = 0;
+    while (i < session.len) : (i += 1) {
+        lines[i] = .{ .text = session[i] };
+    }
+    lines[session.len] = .{ .text = status_line };
+    return lines;
+}
+
+const wayland_seed_version = "20260703.135212";
+
+const pixel_scale: u32 = 2;
+const window_width: i32 = 1280;
+const window_height: i32 = 768;
+const max_lines: u32 = 8;
+const grid_cols: u32 = @intCast(@divExact(window_width, @as(i32, @intCast(skate.cell_w * pixel_scale))));
+const grid_rows: u32 = @intCast(@divExact(window_height, @as(i32, @intCast(skate.cell_h * pixel_scale))));
+const skate_bg = skate.Color{ .r = 0x1a, .g = 0x1a, .b = 0x2e };
+const skate_fg = skate.Color{ .r = 0xe0, .g = 0xe0, .b = 0xe0 };
+
+/// Display seam -- connect holds the session socket lifecycle (`985`).
+const Display = struct {
+    handle: *c.wl_display,
+
+    fn connect() !Display {
+        const handle = c.wl_display_connect(null);
+        if (handle == null) return error.WaylandConnectFailed;
+        return .{ .handle = handle.? };
+    }
+
+    pub fn disconnect(self: Display) void {
+        _ = c.wl_display_disconnect(self.handle);
+    }
+
+    fn flush(self: Display) !void {
+        if (c.wl_display_flush(self.handle) < 0) return error.WaylandFlushFailed;
+    }
+
+    fn roundtrip(self: Display) !void {
+        if (c.wl_display_roundtrip(self.handle) < 0) return error.WaylandRoundtripFailed;
+    }
+
+    fn dispatch(self: Display) !void {
+        if (c.wl_display_dispatch(self.handle) < 0) return error.WaylandDispatchFailed;
+    }
+};
+
+const Line = struct {
+    text: []const u8,
+};
+
+pub const SkateLine = Line;
+pub const viewer_grid_rows = grid_rows;
+pub const viewer_max_lines = max_lines;
+
+const Frame = struct {
+    lines: []const Line,
+
+    fn init(lines: []const Line) Frame {
+        assert(lines.len <= max_lines);
+        return .{ .lines = lines };
+    }
+
+    /// Surface p52 -- one hop from glass Frame (brush.Frame) into the host Frame.
+    fn from_brush(garden: std.mem.Allocator, glass: brush.Frame) !Frame {
+        // invariant: lowered Frame carries at least one line
+        assert(glass.lines.len > 0);
+        // invariant: glass ceiling fits the Wayland seed Frame ceiling
+        assert(glass.max_lines <= max_lines);
+        assert(glass.lines.len <= max_lines);
+        const lines = try garden.alloc(Line, glass.lines.len);
+        var i: u32 = 0;
+        const n: u32 = @intCast(glass.lines.len);
+        while (i < n) : (i += 1) {
+            // invariant: empty lines never feed the Wayland Frame
+            assert(glass.lines[i].len > 0);
+            lines[i] = .{ .text = glass.lines[i] };
+        }
+        return Frame.init(lines);
+    }
+
+    fn to_grid(self: Frame, allocator: std.mem.Allocator) !skate.Grid {
+        var grid = try skate.Grid.init(allocator, grid_cols, grid_rows);
+        var i: u32 = 0;
+        const line_count: u32 = @intCast(self.lines.len);
+        while (i < line_count) : (i += 1) {
+            grid.put_line(i, self.lines[i].text);
+        }
+        return grid;
+    }
+};
+
+fn default_lines(garden: std.mem.Allocator) ![]Line {
+    const lines = try garden.alloc(Line, 3);
+    lines[0] = .{ .text = "Skate grid seed" };
+    lines[1] = .{ .text = "monospace cells from values" };
+    lines[2] = .{ .text = wayland_seed_version };
+    return lines;
+}
+
+fn arbitrary_witness_lines(garden: std.mem.Allocator) ![]Line {
+    const lines = try garden.alloc(Line, 2);
+    lines[0] = .{ .text = "rye" };
+    lines[1] = .{ .text = "lotus" };
+    return lines;
+}
+
+fn raster_lit_for_lines(garden: std.mem.Allocator, lines: []const Line) !u32 {
+    const frame = Frame.init(lines);
+    var grid = try frame.to_grid(garden);
+    const stride: u32 = @as(u32, @intCast(window_width)) * 4;
+    const size: u32 = stride * @as(u32, @intCast(window_height));
+    const pixels = try garden.alloc(u8, @intCast(size));
+    grid.rasterize(pixels, stride, window_width, window_height, skate_bg, skate_fg, pixel_scale);
+    return grid.lit_pixel_count(pixels, stride, window_width, window_height, skate_bg);
+}
+
+fn buffer_signature(pixels: []const u8) u64 {
+    var hash: u64 = 0xcbf29ce484222325;
+    for (pixels) |byte| {
+        hash ^= byte;
+        hash *%= 0x100000001b3;
+    }
+    return hash;
+}
+
+fn signature_from_grid(garden: std.mem.Allocator, grid: *const skate.Grid) !u64 {
+    const stride: u32 = @as(u32, @intCast(window_width)) * 4;
+    const size: u32 = stride * @as(u32, @intCast(window_height));
+    const pixels = try garden.alloc(u8, @intCast(size));
+    grid.rasterize(pixels, stride, window_width, window_height, skate_bg, skate_fg, pixel_scale);
+    return buffer_signature(pixels);
+}
+
+fn signature_from_lines(garden: std.mem.Allocator, lines: []const Line) !u64 {
+    var grid = try Frame.init(lines).to_grid(garden);
+    return signature_from_grid(garden, &grid);
+}
+
+pub fn content_signature(garden: std.mem.Allocator, lines: []const Line) !u64 {
+    return signature_from_lines(garden, lines);
+}
+
+fn redraw_lines_a(garden: std.mem.Allocator) ![]Line {
+    const lines = try garden.alloc(Line, 2);
+    lines[0] = .{ .text = "frame A" };
+    lines[1] = .{ .text = "redraw seed" };
+    return lines;
+}
+
+fn redraw_lines_b(garden: std.mem.Allocator) ![]Line {
+    const lines = try garden.alloc(Line, 2);
+    lines[0] = .{ .text = "frame B" };
+    lines[1] = .{ .text = "updated" };
+    return lines;
+}
+
+const App = struct {
+    display: Display,
+    compositor: ?*c.wl_compositor = null,
+    shm: ?*c.wl_shm = null,
+    wm_base: ?*c.xdg_wm_base = null,
+    seat: ?*c.wl_seat = null,
+    keyboard: ?*c.wl_keyboard = null,
+    xkb_ctx: ?*c.struct_xkb_context = null,
+    xkb_keymap: ?*c.struct_xkb_keymap = null,
+    xkb_state: ?*c.struct_xkb_state = null,
+    surface: ?*c.wl_surface = null,
+    xdg_surface: ?*c.xdg_surface = null,
+    xdg_toplevel: ?*c.xdg_toplevel = null,
+    configured: bool = false,
+    frame_done: bool = false,
+    should_close: bool = false,
+    ping_count: u32 = 0,
+    keyboard_enabled: bool = false,
+    keyboard_focused: bool = false,
+    key_actions: [max_key_actions]KeyAction = undefined,
+    key_actions_head: u32 = 0,
+    key_actions_tail: u32 = 0,
+    /// Wayland listeners must outlive create_surface -- kept on App, never stack-temps.
+    wm_base_listener: c.xdg_wm_base_listener = .{ .ping = xdg_wm_base_ping },
+    xdg_surface_listener_v: c.xdg_surface_listener = .{ .configure = xdg_surface_configure },
+    xdg_toplevel_listener_v: c.xdg_toplevel_listener = .{
+        .configure = xdg_toplevel_configure,
+        .close = xdg_toplevel_close,
+    },
+    keyboard_listener_v: c.wl_keyboard_listener = .{
+        .keymap = keyboard_keymap,
+        .enter = keyboard_enter,
+        .leave = keyboard_leave,
+        .key = keyboard_key,
+        .modifiers = keyboard_modifiers,
+        .repeat_info = keyboard_repeat_info,
+    },
+    frame: Frame,
+    grid: skate.Grid,
+    garden: std.mem.Allocator,
+
+    fn enqueue_key_action(self: *App, action: KeyAction) void {
+        const next_tail = (self.key_actions_tail + 1) % max_key_actions;
+        if (next_tail == self.key_actions_head) return;
+        self.key_actions[self.key_actions_tail] = action;
+        self.key_actions_tail = next_tail;
+    }
+
+    fn dequeue_key_action(self: *App) KeyAction {
+        if (self.key_actions_head == self.key_actions_tail) return .none;
+        const action = self.key_actions[self.key_actions_head];
+        self.key_actions_head = (self.key_actions_head + 1) % max_key_actions;
+        return action;
+    }
+
+    fn clear_keymap(self: *App) void {
+        if (self.xkb_state) |state| c.xkb_state_unref(state);
+        if (self.xkb_keymap) |keymap| c.xkb_keymap_unref(keymap);
+        self.xkb_state = null;
+        self.xkb_keymap = null;
+    }
+
+    fn handle_key_press(self: *App, keycode: u32) void {
+        const xkb_state = self.xkb_state orelse return;
+        const kc: c.xkb_keycode_t = @intCast(keycode + 8);
+        const sym = c.xkb_state_key_get_one_sym(xkb_state, kc);
+        if (sym == c.XKB_KEY_Return or sym == c.XKB_KEY_KP_Enter) {
+            self.enqueue_key_action(.submit);
+            return;
+        }
+        if (sym == c.XKB_KEY_BackSpace) {
+            self.enqueue_key_action(.backspace);
+            return;
+        }
+        var utf8: [8]u8 = undefined;
+        const n = c.xkb_state_key_get_utf8(xkb_state, kc, &utf8, utf8.len);
+        if (n == 1) {
+            self.enqueue_key_action(.{ .char_ = utf8[0] });
+        }
+    }
+
+    fn registry_global(
+        data: ?*anyopaque,
+        registry: ?*c.wl_registry,
+        id: u32,
+        interface: [*c]const u8,
+        version: u32,
+    ) callconv(.c) void {
+        const app: *App = @ptrCast(@alignCast(data));
+        const iface = std.mem.span(interface orelse return);
+        if (std.mem.eql(u8, iface, "wl_compositor")) {
+            app.compositor = @ptrCast(c.wl_registry_bind(registry, id, &c.wl_compositor_interface, @min(version, 4)));
+        } else if (std.mem.eql(u8, iface, "wl_shm")) {
+            app.shm = @ptrCast(c.wl_registry_bind(registry, id, &c.wl_shm_interface, @min(version, 1)));
+        } else if (std.mem.eql(u8, iface, std.mem.span(c.xdg_wm_base_interface.name))) {
+            app.wm_base = @ptrCast(c.wl_registry_bind(registry, id, &c.xdg_wm_base_interface, @min(version, 2)));
+        } else if (std.mem.eql(u8, iface, "wl_seat")) {
+            app.seat = @ptrCast(c.wl_registry_bind(registry, id, &c.wl_seat_interface, @min(version, 7)));
+        }
+    }
+
+    fn registry_global_remove(
+        data: ?*anyopaque,
+        registry: ?*c.wl_registry,
+        id: u32,
+    ) callconv(.c) void {
+        _ = data;
+        _ = registry;
+        _ = id;
+    }
+
+    fn xdg_wm_base_ping(
+        data: ?*anyopaque,
+        wm_base: ?*c.xdg_wm_base,
+        serial: u32,
+    ) callconv(.c) void {
+        const app: *App = @ptrCast(@alignCast(data));
+        app.ping_count += 1;
+        c.xdg_wm_base_pong(wm_base, serial);
+    }
+
+    fn xdg_surface_configure(
+        data: ?*anyopaque,
+        xdg_surface: ?*c.xdg_surface,
+        serial: u32,
+    ) callconv(.c) void {
+        const app: *App = @ptrCast(@alignCast(data));
+        c.xdg_surface_ack_configure(xdg_surface, serial);
+        app.configured = true;
+    }
+
+    fn xdg_toplevel_configure(
+        data: ?*anyopaque,
+        xdg_toplevel: ?*c.xdg_toplevel,
+        width: i32,
+        height: i32,
+        states: ?*c.wl_array,
+    ) callconv(.c) void {
+        _ = data;
+        _ = xdg_toplevel;
+        _ = width;
+        _ = height;
+        _ = states;
+    }
+
+    fn xdg_toplevel_close(data: ?*anyopaque, xdg_toplevel: ?*c.xdg_toplevel) callconv(.c) void {
+        _ = xdg_toplevel;
+        const app: *App = @ptrCast(@alignCast(data));
+        app.should_close = true;
+    }
+
+    fn on_frame_done(
+        data: ?*anyopaque,
+        callback: ?*c.wl_callback,
+        callback_data: u32,
+    ) callconv(.c) void {
+        _ = callback_data;
+        const app: *App = @ptrCast(@alignCast(data));
+        app.frame_done = true;
+        c.wl_callback_destroy(callback);
+    }
+
+    fn seat_capabilities(
+        data: ?*anyopaque,
+        wl_seat: ?*c.wl_seat,
+        capabilities: u32,
+    ) callconv(.c) void {
+        const app: *App = @ptrCast(@alignCast(data));
+        if (!app.keyboard_enabled) return;
+        const has_keyboard = (capabilities & c.WL_SEAT_CAPABILITY_KEYBOARD) != 0;
+        if (has_keyboard and app.keyboard == null) {
+            app.keyboard = c.wl_seat_get_keyboard(wl_seat);
+            if (app.keyboard != null) {
+                _ = c.wl_keyboard_add_listener(app.keyboard, &app.keyboard_listener_v, app);
+            }
+        } else if (!has_keyboard and app.keyboard != null) {
+            c.wl_keyboard_destroy(app.keyboard);
+            app.keyboard = null;
+            app.clear_keymap();
+        }
+    }
+
+    fn seat_name(
+        data: ?*anyopaque,
+        wl_seat: ?*c.wl_seat,
+        name: [*c]const u8,
+    ) callconv(.c) void {
+        _ = data;
+        _ = wl_seat;
+        _ = name;
+    }
+
+    fn keyboard_keymap(
+        data: ?*anyopaque,
+        wl_keyboard: ?*c.wl_keyboard,
+        format: u32,
+        fd: i32,
+        size: u32,
+    ) callconv(.c) void {
+        _ = wl_keyboard;
+        const app: *App = @ptrCast(@alignCast(data));
+        if (format != c.WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
+            _ = std.c.close(fd);
+            return;
+        }
+        defer _ = std.c.close(fd);
+        const mapped = posix.mmap(
+            null,
+            size,
+            .{ .READ = true },
+            .{ .TYPE = .PRIVATE },
+            fd,
+            0,
+        ) catch return;
+        defer posix.munmap(mapped);
+
+        app.clear_keymap();
+        if (app.xkb_ctx == null) {
+            app.xkb_ctx = c.xkb_context_new(c.XKB_CONTEXT_NO_FLAGS);
+        }
+        const ctx = app.xkb_ctx orelse return;
+        app.xkb_keymap = c.xkb_keymap_new_from_string(
+            ctx,
+            @ptrCast(mapped.ptr),
+            c.XKB_KEYMAP_FORMAT_TEXT_V1,
+            c.XKB_KEYMAP_COMPILE_NO_FLAGS,
+        );
+        if (app.xkb_keymap == null) return;
+        app.xkb_state = c.xkb_state_new(app.xkb_keymap);
+    }
+
+    fn keyboard_enter(
+        data: ?*anyopaque,
+        wl_keyboard: ?*c.wl_keyboard,
+        serial: u32,
+        surface: ?*c.wl_surface,
+        keys: ?*c.wl_array,
+    ) callconv(.c) void {
+        _ = wl_keyboard;
+        _ = serial;
+        _ = keys;
+        const app: *App = @ptrCast(@alignCast(data));
+        app.keyboard_focused = surface == app.surface;
+    }
+
+    fn keyboard_leave(
+        data: ?*anyopaque,
+        wl_keyboard: ?*c.wl_keyboard,
+        serial: u32,
+        surface: ?*c.wl_surface,
+    ) callconv(.c) void {
+        _ = wl_keyboard;
+        _ = serial;
+        _ = surface;
+        const app: *App = @ptrCast(@alignCast(data));
+        app.keyboard_focused = false;
+    }
+
+    fn keyboard_key(
+        data: ?*anyopaque,
+        wl_keyboard: ?*c.wl_keyboard,
+        serial: u32,
+        time: u32,
+        key: u32,
+        state: u32,
+    ) callconv(.c) void {
+        _ = wl_keyboard;
+        _ = serial;
+        _ = time;
+        const app: *App = @ptrCast(@alignCast(data));
+        if (!app.keyboard_focused) return;
+        if (state != c.WL_KEYBOARD_KEY_STATE_PRESSED) return;
+        app.handle_key_press(key);
+    }
+
+    fn keyboard_modifiers(
+        data: ?*anyopaque,
+        wl_keyboard: ?*c.wl_keyboard,
+        serial: u32,
+        mods_depressed: u32,
+        mods_latched: u32,
+        mods_locked: u32,
+        group: u32,
+    ) callconv(.c) void {
+        _ = wl_keyboard;
+        _ = serial;
+        const app: *App = @ptrCast(@alignCast(data));
+        const xkb_state = app.xkb_state orelse return;
+        _ = c.xkb_state_update_mask(
+            xkb_state,
+            mods_depressed,
+            mods_latched,
+            mods_locked,
+            0,
+            0,
+            group,
+        );
+    }
+
+    fn keyboard_repeat_info(
+        data: ?*anyopaque,
+        wl_keyboard: ?*c.wl_keyboard,
+        rate: i32,
+        delay: i32,
+    ) callconv(.c) void {
+        _ = data;
+        _ = wl_keyboard;
+        _ = rate;
+        _ = delay;
+    }
+
+    fn bind_globals(self: *App) !void {
+        const registry = c.wl_display_get_registry(self.display.handle);
+        if (registry == null) return error.NoRegistry;
+
+        const listener = c.wl_registry_listener{
+            .global = registry_global,
+            .global_remove = registry_global_remove,
+        };
+        _ = c.wl_registry_add_listener(registry, &listener, self);
+        try self.display.roundtrip();
+        assert(self.compositor != null);
+        assert(self.shm != null);
+        assert(self.wm_base != null);
+
+        if (self.keyboard_enabled and self.seat != null) {
+            const seat_listener = c.wl_seat_listener{
+                .capabilities = seat_capabilities,
+                .name = seat_name,
+            };
+            _ = c.wl_seat_add_listener(self.seat, &seat_listener, self);
+            try self.display.roundtrip();
+        }
+    }
+
+    fn create_surface(self: *App) !void {
+        self.surface = c.wl_compositor_create_surface(self.compositor);
+        if (self.surface == null) return error.NoSurface;
+
+        self.xdg_surface = c.xdg_wm_base_get_xdg_surface(self.wm_base, self.surface);
+        if (self.xdg_surface == null) return error.NoXdgSurface;
+
+        _ = c.xdg_surface_add_listener(self.xdg_surface, &self.xdg_surface_listener_v, self);
+
+        self.xdg_toplevel = c.xdg_surface_get_toplevel(self.xdg_surface);
+        if (self.xdg_toplevel == null) return error.NoToplevel;
+
+        const title = "brushstroke wayland seed";
+        _ = c.xdg_toplevel_set_title(self.xdg_toplevel, title);
+        _ = c.xdg_toplevel_set_min_size(self.xdg_toplevel, window_width, window_height);
+
+        _ = c.xdg_toplevel_add_listener(self.xdg_toplevel, &self.xdg_toplevel_listener_v, self);
+
+        _ = c.xdg_wm_base_add_listener(self.wm_base, &self.wm_base_listener, self);
+
+        c.wl_surface_commit(self.surface);
+        try self.display.flush();
+    }
+
+    fn fill_buffer(self: *App, pixels: []u8, stride: u32) void {
+        self.grid.rasterize(pixels, stride, window_width, window_height, skate_bg, skate_fg, pixel_scale);
+    }
+
+    fn commit_frame(self: *App) !void {
+        const stride: i32 = window_width * 4;
+        const size: u32 = @intCast(stride * window_height);
+
+        const fd = try posix.memfd_create("brushstroke-frame", 0);
+        defer _ = std.c.close(fd);
+        if (std.c.ftruncate(fd, @intCast(size)) < 0) return error.FtruncateFailed;
+
+        const mapped = try posix.mmap(
+            null,
+            @intCast(size),
+            .{ .READ = true, .WRITE = true },
+            .{ .TYPE = .SHARED },
+            fd,
+            0,
+        );
+        defer posix.munmap(mapped);
+
+        self.fill_buffer(mapped, @intCast(stride));
+
+        // Movement four's contract at the true hand-off: these mapped bytes are exactly what
+        // the compositor receives, so the claim is taken here and never past the compositor
+        // (which antialiases and re-samples on every platform this contract has met).
+        const handoff = claims_mod.claims_for(mapped[0..@intCast(size)], @intCast(stride), @intCast(window_width), @intCast(window_height), skate_bg);
+        // invariant: a committed frame lights real pixels rather than an empty field.
+        assert(handoff.lit > 0);
+        print("wayland-seed: surface_claim lit={d} at the hand-off (movement four)\n", .{handoff.lit});
+
+        const pool = c.wl_shm_create_pool(self.shm, fd, @intCast(size));
+        if (pool == null) return error.NoShmPool;
+        defer c.wl_shm_pool_destroy(pool);
+
+        const buffer = c.wl_shm_pool_create_buffer(
+            pool,
+            0,
+            window_width,
+            window_height,
+            stride,
+            c.WL_SHM_FORMAT_ARGB8888,
+        );
+        if (buffer == null) return error.NoBuffer;
+
+        c.wl_surface_attach(self.surface, buffer, 0, 0);
+        c.wl_surface_damage_buffer(self.surface, 0, 0, window_width, window_height);
+
+        const callback = c.wl_surface_frame(self.surface);
+        if (callback == null) return error.NoFrameCallback;
+        const frame_listener = c.wl_callback_listener{
+            .done = on_frame_done,
+        };
+        _ = c.wl_callback_add_listener(callback, &frame_listener, self);
+
+        c.wl_surface_commit(self.surface);
+        try self.display.flush();
+    }
+
+    pub fn dispatch_once(self: *App, timeout_ms: i32) !void {
+        _ = c.wl_display_flush(self.display.handle);
+        if (c.wl_display_prepare_read(self.display.handle) != 0) {
+            if (c.wl_display_dispatch_pending(self.display.handle) < 0) return error.WaylandDispatchFailed;
+            return;
+        }
+        const wl_display_fd = c.wl_display_get_fd(self.display.handle);
+        var poll_fds = [_]std.posix.pollfd{.{
+            .fd = wl_display_fd,
+            .events = std.posix.POLL.IN,
+            .revents = 0,
+        }};
+        const ready = std.posix.poll(&poll_fds, timeout_ms) catch 0;
+        if (ready > 0 and (poll_fds[0].revents & std.posix.POLL.IN) != 0) {
+            if (c.wl_display_read_events(self.display.handle) < 0) return error.WaylandDispatchFailed;
+            if (c.wl_display_dispatch_pending(self.display.handle) < 0) return error.WaylandDispatchFailed;
+        } else {
+            c.wl_display_cancel_read(self.display.handle);
+        }
+    }
+
+    fn wait_for_frame(self: *App) !void {
+        var waits: u32 = 0;
+        while (!self.frame_done and waits < 100) : (waits += 1) {
+            if (c.wl_display_dispatch(self.display.handle) < 0) return error.WaylandDispatchFailed;
+        }
+        assert(self.frame_done);
+    }
+
+    fn present_current_frame(self: *App, wait: bool) !void {
+        self.frame_done = false;
+        try self.commit_frame();
+        if (wait) try self.wait_for_frame();
+    }
+
+    pub fn set_frame(self: *App, new_lines: []const Line) !void {
+        self.frame = Frame.init(new_lines);
+        self.grid = try self.frame.to_grid(self.garden);
+        try self.present_current_frame(true);
+    }
+
+    pub fn update_frame(self: *App, new_lines: []const Line) !void {
+        self.frame = Frame.init(new_lines);
+        self.grid = try self.frame.to_grid(self.garden);
+        try self.present_current_frame(false);
+    }
+
+    pub fn prepare_surface(self: *App) !void {
+        try self.bind_globals();
+        try self.create_surface();
+        try self.display.roundtrip();
+
+        var configure_waits: u32 = 0;
+        while (!self.configured and configure_waits < 100) : (configure_waits += 1) {
+            try self.dispatch_once(50);
+        }
+        assert(self.configured);
+    }
+
+    pub fn disconnect(self: *App) void {
+        self.release_keyboard();
+        self.display.disconnect();
+    }
+
+    pub fn display_fd(self: *const App) posix.fd_t {
+        return c.wl_display_get_fd(self.display.handle);
+    }
+
+    pub fn enable_keyboard(self: *App) void {
+        self.keyboard_enabled = true;
+    }
+
+    pub fn keyboard_ready(self: *const App) bool {
+        return self.xkb_state != null;
+    }
+
+    pub fn has_key_action(self: *const App) bool {
+        return self.key_actions_head != self.key_actions_tail;
+    }
+
+    pub fn pop_key_action(self: *App) KeyAction {
+        return self.dequeue_key_action();
+    }
+
+    pub fn set_window_title(self: *App, title: [*:0]const u8) void {
+        if (self.xdg_toplevel) |toplevel| {
+            _ = c.xdg_toplevel_set_title(toplevel, title);
+        }
+    }
+
+    pub fn set_app_id(self: *App, app_id: [*:0]const u8) void {
+        if (self.xdg_toplevel) |toplevel| {
+            _ = c.xdg_toplevel_set_app_id(toplevel, app_id);
+        }
+    }
+
+    pub fn wants_close(self: *const App) bool {
+        return self.should_close;
+    }
+
+    pub fn release_keyboard(self: *App) void {
+        self.clear_keymap();
+        if (self.xkb_ctx) |ctx| {
+            c.xkb_context_unref(ctx);
+            self.xkb_ctx = null;
+        }
+        if (self.keyboard) |keyboard| {
+            c.wl_keyboard_destroy(keyboard);
+            self.keyboard = null;
+        }
+    }
+
+    fn run(self: *App) !void {
+        try self.prepare_surface();
+        try self.present_current_frame(true);
+    }
+
+    /// Present and wait until the toplevel asks to close (eyes look).
+    pub fn run_until_close(self: *App) !void {
+        try self.prepare_surface();
+        try self.present_current_frame(true);
+        while (!self.should_close) {
+            try self.dispatch_once(50);
+        }
+    }
+
+    fn run_redraw(self: *App, lines_b: []const Line) !void {
+        try self.prepare_surface();
+        try self.present_current_frame(true);
+        var beat: u32 = 0;
+        while (beat < 8) : (beat += 1) {
+            try self.dispatch_once(50);
+        }
+        try self.set_frame(lines_b);
+    }
+};
+
+fn run_redraw_witness(garden: std.mem.Allocator, io: std.Io) !u8 {
+    const lines_a = try default_lines(garden);
+    const lines_b = try arbitrary_witness_lines(garden);
+
+    var grid = try Frame.init(lines_a).to_grid(garden);
+    const sig_a = try signature_from_grid(garden, &grid);
+
+    grid = try Frame.init(lines_b).to_grid(garden);
+    const sig_b = try signature_from_grid(garden, &grid);
+    const sig_fresh_b = try signature_from_lines(garden, lines_b);
+    assert(sig_b == sig_fresh_b);
+    assert(sig_a != sig_b);
+
+    grid = try Frame.init(lines_a).to_grid(garden);
+    const sig_a2 = try signature_from_grid(garden, &grid);
+    assert(sig_a2 == sig_a);
+
+    var buf: [128]u8 = undefined;
+    const msg = try std.fmt.bufPrint(
+        &buf,
+        "viewer redraw witness: sig_a={x} sig_b={x} sig_a2={x} — GREEN\n",
+        .{ sig_a, sig_b, sig_a2 },
+    );
+    try std.Io.File.stdout().writeStreamingAll(io, msg);
+    return 0;
+}
+
+fn run_bounds_witness(garden: std.mem.Allocator, io: std.Io) !u8 {
+    const over = max_lines + 1;
+    const lines = try garden.alloc(Line, over);
+    var i: u32 = 0;
+    while (i < over) : (i += 1) {
+        lines[i] = .{ .text = "overflow" };
+    }
+    if (lines.len > max_lines) {
+        var buf: [96]u8 = undefined;
+        const msg = try std.fmt.bufPrint(
+            &buf,
+            "surface bounds witness: refused {d} lines (max {d}) — GREEN\n",
+            .{ lines.len, max_lines },
+        );
+        try std.Io.File.stdout().writeStreamingAll(io, msg);
+        return 0;
+    }
+    return 1;
+}
+
+fn run_redraw_metal(garden: std.mem.Allocator, io: std.Io) !u8 {
+    const lines_a = try redraw_lines_a(garden);
+    const lines_b = try redraw_lines_b(garden);
+    var app = try present_value(garden, lines_a);
+    defer app.display.disconnect();
+    try app.run_redraw(lines_b);
+    try std.Io.File.stdout().writeStreamingAll(io, "brushstroke wayland seed: redraw A to B\n");
+    return 0;
+}
+
+fn present_value(garden: std.mem.Allocator, lines: []const Line) !App {
+    const frame = Frame.init(lines);
+    const grid = try frame.to_grid(garden);
+    return App{
+        .display = try Display.connect(),
+        .frame = frame,
+        .grid = grid,
+        .garden = garden,
+    };
+}
+
+pub const SurfaceApp = App;
+
+pub fn open_surface(garden: std.mem.Allocator, lines: []const Line) !App {
+    return present_value(garden, lines);
+}
+
+/// Surface p49/p52 -- lower a .brush into Wayland Line text (borrows from `src`).
+fn lines_from_brush_src(garden: std.mem.Allocator, src: []const u8) ![]Line {
+    // invariant: source fits the brush_parse read budget
+    assert(src.len <= brush.max_brush_bytes);
+    var line_buf: [brush.max_frame_lines][]const u8 = undefined;
+    const glass = try brush.lower_brush(src, &line_buf);
+    const host = try Frame.from_brush(garden, glass);
+    return host.lines;
+}
+
+fn load_brush_src(garden: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    // invariant: path argument is non-empty
+    assert(path.len > 0);
+    const cwd = std.Io.Dir.cwd();
+    const src = try cwd.readFileAlloc(io, path, garden, .limited(brush.max_brush_bytes));
+    // invariant: path read stays inside the named budget
+    assert(src.len <= brush.max_brush_bytes);
+    return src;
+}
+
+/// Headless: .brush -> glass Frame -> host Frame -> lit pixels (no compositor).
+fn run_brush_feed_witness(garden: std.mem.Allocator, io: std.Io, path: []const u8) !u8 {
+    const src = try load_brush_src(garden, io, path);
+    var line_buf: [brush.max_frame_lines][]const u8 = undefined;
+    const glass = try brush.lower_brush(src, &line_buf);
+    const host = try Frame.from_brush(garden, glass);
+    // invariant: feed line count matches lowered glass Frame
+    assert(host.lines.len == glass.lines.len);
+    const lit = try raster_lit_for_lines(garden, host.lines);
+    // invariant: seed Frame glyphs light the Wayland-sized raster
+    assert(lit > 100);
+    var buf: [224]u8 = undefined;
+    const msg = try std.fmt.bufPrint(
+        &buf,
+        "brush feed witness: at-nib={s} lines={d} lit={d} from_brush — GREEN\n",
+        .{ glass.at_nib, host.lines.len, lit },
+    );
+    try std.Io.File.stdout().writeStreamingAll(io, msg);
+    return 0;
+}
+
+/// Hosted: .brush -> glass Frame -> Wayland surface (needs WAYLAND_DISPLAY).
+fn run_brush_present(garden: std.mem.Allocator, io: std.Io, path: []const u8) !u8 {
+    const src = try load_brush_src(garden, io, path);
+    var line_buf: [brush.max_frame_lines][]const u8 = undefined;
+    const glass = try brush.lower_brush(src, &line_buf);
+    const host = try Frame.from_brush(garden, glass);
+    var app = try present_value(garden, host.lines);
+    defer app.display.disconnect();
+    try app.run();
+    try std.Io.File.stdout().writeStreamingAll(io, "GREEN: brushstroke wayland seed — .brush on Wayland\n");
+    return 0;
+}
+
+/// Headless live-five slice: type changes Frame signature; `:quit` exits clean.
+fn run_live_five_witness(garden: std.mem.Allocator, io: std.Io) !u8 {
+    var transcript = LiveTranscript{};
+    var prompt = Prompt{};
+    prompt.apply(.{ .char_ = 'h' });
+    prompt.apply(.{ .char_ = 'i' });
+    const status_mid = try format_prompt_status(garden, prompt.slice(), transcript.full);
+    const mid = try compose_live_frame_lines(garden, &transcript, status_mid);
+    const sig_mid = try signature_from_lines(garden, mid);
+    // invariant: typed text lands on the status/prompt row
+    assert(std.mem.indexOf(u8, mid[mid.len - 1].text, "hi") != null);
+
+    prompt.apply(.{ .char_ = '!' });
+    const status_typing = try format_prompt_status(garden, prompt.slice(), transcript.full);
+    const typing = try compose_live_frame_lines(garden, &transcript, status_typing);
+    const sig_typing = try signature_from_lines(garden, typing);
+    // invariant: type redraws the glass
+    assert(sig_typing != sig_mid);
+
+    prompt.apply(.backspace);
+    // invariant: backspace trims one glyph
+    assert(std.mem.eql(u8, prompt.slice(), "hi"));
+
+    prompt.reset();
+    const quit_chars = ":quit";
+    for (quit_chars) |ch| {
+        prompt.apply(.{ .char_ = ch });
+    }
+    prompt.apply(.submit);
+    const line = (try prompt.take_submitted(garden)) orelse return 1;
+    // invariant: :quit is the named exit word
+    assert(is_quit_line(line));
+
+    var buf: [160]u8 = undefined;
+    const msg = try std.fmt.bufPrint(
+        &buf,
+        "live-five witness: type sig={x}->{x} :quit — GREEN\n",
+        .{ sig_mid, sig_typing },
+    );
+    try std.Io.File.stdout().writeStreamingAll(io, msg);
+    return 0;
+}
+
+/// Hosted idle slice: hold a surface and count xdg_wm_base ping/pong.
+/// Needs WAYLAND_DISPLAY.
+fn run_idle_witness(garden: std.mem.Allocator, io: std.Io, idle_ms: u32) !u8 {
+    // invariant: idle slice is positive and under the named time ceiling
+    assert(idle_ms > 0);
+    assert(idle_ms <= max_idle_ms);
+    var transcript = LiveTranscript{};
+    const status = try format_prompt_status(garden, "idle · compositor pong", false);
+    const boot = try compose_live_frame_lines(garden, &transcript, status);
+    var app = try present_value(garden, boot);
+    defer app.display.disconnect();
+    try app.prepare_surface();
+    app.set_window_title("brushstroke idle");
+    app.set_app_id("brushstroke-idle");
+    try app.set_frame(boot);
+
+    var waited: u32 = 0;
+    while (waited < idle_ms and !app.wants_close()) {
+        try app.dispatch_once(@intCast(idle_step_ms));
+        waited += idle_step_ms;
+    }
+    // invariant: compositor pinged at least once while we idled
+    assert(app.ping_count > 0);
+
+    var buf: [128]u8 = undefined;
+    const msg = try std.fmt.bufPrint(
+        &buf,
+        "live-five idle witness: pongs={d} ms={d} — GREEN\n",
+        .{ app.ping_count, waited },
+    );
+    try std.Io.File.stdout().writeStreamingAll(io, msg);
+    return 0;
+}
+
+/// Headless ceiling fill: append past `max_live_transcript_bytes`; status invitation stays.
+fn run_ceiling_witness(garden: std.mem.Allocator, io: std.Io) !u8 {
+    var transcript = LiveTranscript{};
+    const pre_status = try format_prompt_status(garden, "", transcript.full);
+    const pre_lines = try compose_live_frame_lines(garden, &transcript, pre_status);
+    const sig_pre = try signature_from_lines(garden, pre_lines);
+
+    var pad_buf: [ceiling_fill_say_width]u8 = undefined;
+    @memset(&pad_buf, 'p');
+    const pad_payload = pad_buf[0..];
+
+    var fill: u32 = 0;
+    while (!transcript.full and fill < ceiling_fill_line_count) : (fill += 1) {
+        transcript.append_prompt_line(pad_payload);
+    }
+    // invariant: fill reaches the named transcript ceiling
+    assert(transcript.full);
+
+    const full_status = try format_prompt_status(garden, "still typing", transcript.full);
+    const full_lines = try compose_live_frame_lines(garden, &transcript, full_status);
+    const sig_full = try signature_from_lines(garden, full_lines);
+    // invariant: full status replaces the prompt invitation
+    assert(std.mem.eql(u8, full_lines[full_lines.len - 1].text, status_full_text));
+    // invariant: ceiling redraw differs from the empty pre-fill frame
+    assert(sig_full != sig_pre);
+
+    const len_at_full = transcript.len;
+    transcript.append_prompt_line("one more");
+    // invariant: once full, further appends refuse and leave length unchanged
+    assert(transcript.full);
+    assert(transcript.len == len_at_full);
+
+    // invariant: :quit remains available after the ceiling latches
+    assert(is_quit_line(":quit"));
+
+    var buf: [176]u8 = undefined;
+    const msg = try std.fmt.bufPrint(
+        &buf,
+        "live-five ceiling witness: bytes={d}/{d} fill={d} sig={x} — GREEN\n",
+        .{ transcript.len, max_live_transcript_bytes, fill, sig_full },
+    );
+    try std.Io.File.stdout().writeStreamingAll(io, msg);
+    return 0;
+}
+
+/// Hosted live-five: keyboard into Prompt - transcript - ceiling status - `:quit`.
+/// Needs WAYLAND_DISPLAY.
+fn run_live(garden: std.mem.Allocator, io: std.Io) !u8 {
+    var transcript = LiveTranscript{};
+    const boot_status = try format_prompt_status(garden, "", transcript.full);
+    const boot = try compose_live_frame_lines(garden, &transcript, boot_status);
+    var app = try present_value(garden, boot);
+    defer app.display.disconnect();
+    app.enable_keyboard();
+    try app.prepare_surface();
+    app.set_window_title("brushstroke live");
+    app.set_app_id("brushstroke-live");
+    try app.set_frame(boot);
+
+    var prompt = Prompt{};
+    try std.Io.File.stdout().writeStreamingAll(
+        io,
+        "brushstroke live — type in the window; ceiling refuses past bound; :quit exits.\n",
+    );
+
+    while (!app.wants_close()) {
+        try app.dispatch_once(50);
+        var dirty = false;
+        while (app.has_key_action()) {
+            const action = app.pop_key_action();
+            switch (action) {
+                .none => {},
+                .submit => {
+                    prompt.apply(.submit);
+                    if (try prompt.take_submitted(garden)) |line| {
+                        if (is_quit_line(line)) {
+                            try std.Io.File.stdout().writeStreamingAll(
+                                io,
+                                "GREEN: brushstroke live — type · ceiling · :quit\n",
+                            );
+                            return 0;
+                        }
+                        if (!transcript.full) {
+                            transcript.append_prompt_line(line);
+                        }
+                        dirty = true;
+                    } else {
+                        dirty = true;
+                    }
+                },
+                .char_, .backspace => {
+                    prompt.apply(action);
+                    dirty = true;
+                },
+            }
+        }
+        if (dirty) {
+            const status = try format_prompt_status(garden, prompt.slice(), transcript.full);
+            const lines = try compose_live_frame_lines(garden, &transcript, status);
+            try app.update_frame(lines);
+        }
+    }
+    try std.Io.File.stdout().writeStreamingAll(
+        io,
+        "GREEN: brushstroke live — window close\n",
+    );
+    return 0;
+}
+
+/// Movement four's contract, answered on this metal: the reference picture rasterizes to the
+/// pinned claims here exactly as it does on macOS and iOS, or this backend refuses parity
+/// outright. Pure rasterize-and-digest -- no compositor is consulted, which is the contract's
+/// own law: claims live at the hand-off, never past it. Run: wayland-seed parity
+fn run_parity(garden: std.mem.Allocator, io: std.Io) !u8 {
+    var grid = try skate.Grid.init(garden, reference.grid_cols, reference.grid_rows);
+    reference.compose(&grid);
+    // invariant: the reference geometry arrived whole.
+    assert(grid.cols == reference.grid_cols);
+    const stride: u32 = reference.surface_width * reference.bytes_per_pixel;
+    const pixels = try garden.alloc(u8, reference.surface_bytes);
+    // invariant: the buffer is exactly the declared reference surface.
+    assert(pixels.len == reference.surface_bytes);
+    grid.rasterize(pixels, stride, @intCast(reference.surface_width), @intCast(reference.surface_height), reference.background, reference.foreground, reference.pixel_scale);
+    const claim = claims_mod.claims_for(pixels, stride, reference.surface_width, reference.surface_height, reference.background);
+    var buf: [160]u8 = undefined;
+    if (!reference.matches_pins(claim)) {
+        const bad = try std.fmt.bufPrint(&buf, "wayland-seed parity: REFUSED -- lit {d} against pinned {d}; this metal disagrees with the pins\n", .{ claim.lit, reference.pinned_lit });
+        try std.Io.File.stdout().writeStreamingAll(io, bad);
+        return 1;
+    }
+    const good = try std.fmt.bufPrint(&buf, "wayland-seed parity: GREEN -- lit {d} and digest match the pins; movement four joined on this metal\n", .{claim.lit});
+    try std.Io.File.stdout().writeStreamingAll(io, good);
+    return 0;
+}
+
+fn run_selftest(garden: std.mem.Allocator, io: std.Io) !u8 {
+    const lines = try default_lines(garden);
+    const grid = try Frame.init(lines).to_grid(garden);
+    assert(grid.cols == grid_cols);
+    assert(grid.rows == grid_rows);
+
+    const lit = try raster_lit_for_lines(garden, lines);
+    assert(lit > 200);
+
+    var buf: [64]u8 = undefined;
+    const lit_msg = try std.fmt.bufPrint(&buf, "skate grid selftest: {d} lit pixels — GREEN\n", .{lit});
+    try std.Io.File.stdout().writeStreamingAll(io, lit_msg);
+    return 0;
+}
+
+fn run_arbitrary_witness(garden: std.mem.Allocator, io: std.Io) !u8 {
+    const seed_lines = try default_lines(garden);
+    const distinct_lines = try arbitrary_witness_lines(garden);
+    const seed_lit = try raster_lit_for_lines(garden, seed_lines);
+    const distinct_lit = try raster_lit_for_lines(garden, distinct_lines);
+    assert(distinct_lit > 100);
+    assert(distinct_lit != seed_lit);
+
+    var buf: [96]u8 = undefined;
+    const msg = try std.fmt.bufPrint(
+        &buf,
+        "viewer arbitrary value: {d} lit pixels (default {d}) — GREEN\n",
+        .{ distinct_lit, seed_lit },
+    );
+    try std.Io.File.stdout().writeStreamingAll(io, msg);
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    const garden = init.arena.allocator();
+    const io = init.io;
+    const args = try init.minimal.args.toSlice(garden);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "selftest")) {
+        return run_selftest(garden, io);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "parity")) {
+        return run_parity(garden, io);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "arbitrary")) {
+        return run_arbitrary_witness(garden, io);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "redrawtest")) {
+        return run_redraw_witness(garden, io);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "boundstest")) {
+        return run_bounds_witness(garden, io);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "redraw")) {
+        return run_redraw_metal(garden, io);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "brushtest")) {
+        const path = if (args.len >= 3) args[2] else "brushstroke/seed-frame.brush";
+        return run_brush_feed_witness(garden, io, path);
+    }
+    if (args.len >= 3 and std.mem.eql(u8, args[1], "brush")) {
+        return run_brush_present(garden, io, args[2]);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "livetest")) {
+        return run_live_five_witness(garden, io);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "idletest")) {
+        var idle_ms: u32 = default_idle_ms;
+        if (args.len >= 3) {
+            idle_ms = parse_int.parse_int(u32, args[2], .{}) catch default_idle_ms;
+            if (idle_ms == 0 or idle_ms > max_idle_ms) idle_ms = default_idle_ms;
+        }
+        return run_idle_witness(garden, io, idle_ms);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "ceilingtest")) {
+        return run_ceiling_witness(garden, io);
+    }
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "live")) {
+        return run_live(garden, io);
+    }
+
+    const lines = try default_lines(garden);
+    var app = try present_value(garden, lines);
+    defer app.display.disconnect();
+
+    assert(app.frame.lines.len == 3);
+
+    try app.run();
+
+    try std.Io.File.stdout().writeStreamingAll(io, "brushstroke wayland seed: skate grid drawn\n");
+    return 0;
+}

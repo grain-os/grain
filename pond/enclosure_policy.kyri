@@ -1,0 +1,133 @@
+# pond/enclosure_policy.kyri -- what the agent-jail lap declares today, written as a value.
+#
+# ACCRETE-ONLY. This record READS tools/ag/agent-jail.sh and tools/e/enclosure.conf.example and
+# says what they build. It rewrites neither, and it flips nothing: the ENCLOSURE selector stays
+# ai-jail until the switchover round lands behind its audit.
+#
+# Paths follow tools/e/enclosure.conf.example's own placeholder convention -- /home/youruser and
+# its project bind -- because the real tools/e/enclosure.conf is gitignored per host. The shapes
+# are exact; only the handle stands in. The four state binds read `loops/<body>/`, the one room
+# read-scope.md seated on 20260827; agent-jail.sh adopts an elder `.claude-state` on next launch.
+#
+# THE NETWORK LINE, MEASURED RATHER THAN ASSUMED (20260828, REDS %329). This record read
+# `network off` from its first day. It is refuted three ways on this pier: the jail's own network
+# namespace is byte-identical to the host's (`net:[4026531833]` read from /proc/<pid>/ns/net for a
+# live jailed agent and for the host shell beside it, while their PID namespaces differ, so the
+# reading can tell a shared namespace from an unshared one); `ai-jail --help` offers no network
+# option at all, only --tailscale, --ssh, and --pictures; and neither agent-jail.sh nor
+# enclosure.conf.example spells a network flag. So the enclosure this record describes carries
+# full host network, and no flag the launcher could pass would close it.
+#
+# `network on` is therefore the honest declaration, and it makes this policy read HOLD rather than
+# PLACE -- which is the module's own design working. An open network is check-in territory by the
+# quest's custody line, so `on` waits for a word instead of passing quietly. The lap wants the
+# network (an agent that cannot reach its API does nothing), and now the record says so out loud
+# where an operator reads it.
+#
+# THE JAIL'S OWN DEFAULTS, MEASURED 20260828 (orbit two's first lap). Until this lap the record
+# declared six mounts, and the enclosure builds twenty-seven. The missing twenty-one come from
+# ai-jail's own defaults rather than from any flag the launcher passes, so
+# tools/fixtures/p/pond_policy_launcher_scan.sh -- which compares this record against what the
+# launcher SPELLS -- could not see them, and said so in its own header. They are declared below,
+# read off `ai-jail --dry-run`, which prints the bwrap plan without starting anything. The
+# instrument is tools/fixtures/p/pond_enclosure_built_scan.sh and the measurement it read is
+# pinned at tools/fixtures/p/pond_enclosure_default_plan.kyri.
+#
+# THREE OF THOSE LINES DO NOT PLACE, AND THAT IS THE FINDING. `map /sys` refuses, because this
+# module's own roster refuses a whole-/sys map by name -- it hands back exactly what the
+# namespaces were raised to hold -- and the enclosure read-only-binds all of it. The four `mask`
+# lines under it close the classic corners (firmware, the security and debug interfaces, the fuse
+# control), and a reading that could weigh a mask against the map above it would be a real
+# improvement and a LOOSENING, so it waits for a word rather than being written by the lap that
+# found the problem. `rw-map /tmp/.X11-unix:/tmp/.X11-unix` refuses for the roster's other line:
+# a shared host /tmp, here the X11 socket directory every X client on the host can be reached
+# through, which arrives because the launcher passes no --no-display. `device /dev/shm` holds, as
+# every device outside the seated GPU lane does.
+#
+# So this record now reads REFUSE, exit 2, naming the first line to open. That is the module
+# working rather than a regression -- the same shape as `network on` holding a week earlier. Pond
+# will not admit this enclosure as it stands, and orbit two derives its grants from a record that
+# says so out loud.
+#
+# `map /nix/store` LEFT WITH THIS LAP. It was the record's honest guess at a jail default and the
+# plan says the default is `/nix`, whole. One right line replaces one near-miss.
+#
+# THE DOOR'S FIRST DUTY, SEATED 20260829. Every mark in this record until now described the ROOM
+# -- what an agent inside can see, write, or reach. Three duties describe the DOOR instead: which
+# program starts (`entry`), what environment it carries (`env`), and which user it runs as
+# (`user`). The grammar could state none of them, which is orbit four's own measure of distance,
+# counted by tools/fixtures/p/pond_enclosure_door_scan.sh. `user` is seated first because it is the
+# cheapest to check and the one an unattended lap already leans on.
+#
+# `invoking` RATHER THAN A NUMBER, MEASURED RATHER THAN PROPOSED. The reading that opened this door
+# (active-designing/20260829-064107_the-door-the-record-cannot-name.md) proposed one key and one
+# integer. Three measurements on this pier refute the integer, and they are the same three that
+# refuted `network off` above: tools/ag/agent-jail.sh spells no uid flag on its exec line,
+# `ai-jail --help` offers no uid or user option at all, and the door guard's probe leg read the
+# agent running at the invoking user's own uid. A number here would be a claim nothing keeps --
+# which is the REDS %329 fault exactly, one mark over. So the record declares what the launcher
+# does: the enclosure runs the agent as whoever opened the door.
+#
+# `root` REFUSES BY NAME, because tools/ag/agent-jail.sh already tells an operator the opposite in
+# its own words -- claude refuses --dangerously-skip-permissions at uid 0, so run the jail as a
+# non-root user. That note is a comment somebody hopes is read; this line is a thing a program
+# checks.
+#
+# THE DOOR'S SECOND DUTY, SEATED 20260830. `env` names what the launcher hands across the
+# threshold, one variable per line, written the way the exec line writes it -- `KEY=value` -- so an
+# operator comparing it with tools/ag/agent-jail.sh reads the same bytes on both sides. The two
+# lines below are that exec line's own assignments in this record's placeholder namespace, and
+# tools/fixtures/p/pond_enclosure_door_scan.sh settles them against it at zero. `entry` stays last
+# on purpose: naming the program inside the record is the switchover, which is the maintainer's word. The
+# mark's own reasoning lives beside verdict_for_env in pond/enclosure_policy.rye.
+#
+# `GH_CONFIG_DIR` POINTS AT A CREDENTIAL ROOM AND PLACES, which is this seat's finding. An env value
+# is a pointer the agent follows once inside; `persist /home/youruser/grain` above is the mount that
+# carries `.gh` across, as an ancestor. Adding `.gh` to the key-room roster would refuse the pointer
+# and leave that door open -- a wall on the sign rather than on the room. Its own lap.
+#
+# AND THE BOUND READS THIS COMMENT. max_policy_len is 8,192 bytes over the whole document, and the
+# header is most of it; `entry`'s paragraph will meet that wall. A record past the bound now refuses
+# by name rather than being read in part (REDS `20260830.032600`), so the wall is loud when it arrives.
+#
+#   pond/bin/enclosure-policy check pond/enclosure_policy.kyri
+format pond-enclosure-policy-v1
+name agent-jail-lap
+private-home yes
+network on
+gpu no
+user invoking
+env GH_CONFIG_DIR=/home/youruser/grain/.gh
+env PATH=/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/home/youruser/.nix-profile/bin:/bin
+map /run/current-system
+map /run/nscd
+map /run/resolvconf
+persist /home/youruser/grain
+ephemeral /tmp
+
+# The jail's own defaults, in the order the plan builds them.
+map /usr
+map /bin
+map /lib64
+map /nix
+map /etc
+map /opt
+map /sys
+fresh /dev
+fresh /proc
+ephemeral /run
+graft /nix/store/<hash>-hosts
+graft /etc/resolv.conf
+graft /tmp/.ai-jail-landlock
+mask /sys/firmware
+mask /sys/kernel/security
+mask /sys/kernel/debug
+mask /sys/fs/fuse
+device /dev/shm
+rw-map /tmp/.X11-unix:/tmp/.X11-unix
+rw-map /run/user/<uid>:/run/user/<uid>
+rw-map /home/youruser/grain/loops/claude:/home/youruser/.claude
+rw-map /home/youruser/grain/loops/cursor:/home/youruser/.cursor
+rw-map /home/youruser/grain/loops/cursor/xdg-config:/home/youruser/.config/cursor
+rw-map /home/youruser/grain/loops/codex:/home/youruser/.codex
+rw-map /home/youruser/grain/loops/claude/dot-claude.json:/home/youruser/.claude.json

@@ -1,0 +1,195 @@
+//! glow/expr_witness.rye -- proves the shared nest-expression parser.
+//!
+//!   rye build glow/expr_witness.rye -femit-bin=glow/bin/expr_witness
+//!   glow/bin/expr_witness
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const expr = @import("expr.rye");
+
+const witness_version = "20260718.203000";
+
+fn run_selftest(_: std.process.Init) !u8 {
+    {
+        const p = try expr.parse_prefix("42  rest");
+        assert(p.expr.kind == .literal);
+        assert(p.expr.lit == 42);
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        print("expr: decimal prefix leaves rest -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("^-  @u32  7");
+        assert(p.expr.kind == .cast_literal);
+        assert(p.expr.lit == 7);
+        assert(std.mem.eql(u8, expr.mold_slice(&p.expr), "@u32"));
+        assert(p.rest.len == 0);
+        print("expr: nested ^- @u32 decimal -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("^-  @u64  42");
+        assert(p.expr.kind == .cast_literal);
+        assert(std.mem.eql(u8, expr.mold_slice(&p.expr), "@u64"));
+        print("expr: nested ^- @u64 decimal -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("delivered");
+        assert(p.expr.kind == .face);
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "delivered"));
+        print("expr: bare face ident -- GREEN\n", .{});
+    }
+    {
+        const e = try expr.parse_whole("^-  @u8  1");
+        assert(e.kind == .cast_literal);
+        assert(e.lit == 1);
+        print("expr: parse_whole cast literal -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(lent records)  rest");
+        assert(p.expr.kind == .lent_of);
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "records"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        print("expr: (lent records) paren form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(mix root x)  rest");
+        assert(p.expr.kind == .mix_of);
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "root"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "x"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.mix_demo_result() == 6);
+        print("expr: (mix root x) paren form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(jam from amount)  rest");
+        assert(p.expr.kind == .jam_of);
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "from"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.jam_demo_result() == 327683);
+        print("expr: (jam from amount) paren form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(jam (mix from amount) amount)  rest");
+        assert(p.expr.kind == .jam_of);
+        assert(p.expr.left_arg == .mix_of);
+        assert(p.expr.right_arg == .face);
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "from"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, expr.face3_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.jam_nest_demo_result() == 393219);
+        print("expr: (jam (mix from amount) amount) nest form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(jam cell (mix from amount))  rest");
+        assert(p.expr.kind == .jam_of);
+        assert(p.expr.left_arg == .face);
+        assert(p.expr.right_arg == .mix_of);
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "cell"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "from"));
+        assert(std.mem.eql(u8, expr.face3_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.jam_nest_right_demo_result() == 327686);
+        print("expr: (jam cell (mix from amount)) nest-right form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(jam (mix from amount) (mix cell gate))  rest");
+        assert(p.expr.kind == .jam_of);
+        assert(p.expr.left_arg == .mix_of);
+        assert(p.expr.right_arg == .mix_of);
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "from"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, expr.face3_slice(&p.expr), "cell"));
+        assert(std.mem.eql(u8, expr.face4_slice(&p.expr), "gate"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.jam_nest_both_demo_result() == 393222);
+        assert(expr.jam_expect(&p.expr) == 393222);
+        print("expr: (jam (mix from amount) (mix cell gate)) nest-both form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(cue cell)  rest");
+        assert(p.expr.kind == .cue_of);
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "cell"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.cue_demo_result() == 3);
+        print("expr: (cue cell) paren form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(cue (jam from amount))  rest");
+        assert(p.expr.kind == .cue_of);
+        assert(expr.cue_is_jam(&p.expr));
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "from"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.cue_expect(&p.expr) == 3);
+        print("expr: (cue (jam from amount)) nest form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(cue (jam (mix from amount) amount))  rest");
+        assert(p.expr.kind == .cue_of);
+        assert(expr.cue_jam_is_nest_left(&p.expr));
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "from"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, expr.face3_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.cue_expect(&p.expr) == 3);
+        print("expr: (cue (jam (mix from amount) amount)) nest-left form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(cue (jam cell (mix from amount)))  rest");
+        assert(p.expr.kind == .cue_of);
+        assert(expr.cue_jam_is_nest_right(&p.expr));
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "cell"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "from"));
+        assert(std.mem.eql(u8, expr.face3_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.cue_expect(&p.expr) == 6);
+        print("expr: (cue (jam cell (mix from amount))) nest-right form -- GREEN\n", .{});
+    }
+    {
+        const p = try expr.parse_prefix("(cue (jam (mix from amount) (mix cell gate)))  rest");
+        assert(p.expr.kind == .cue_of);
+        assert(expr.cue_jam_is_nest_both(&p.expr));
+        assert(std.mem.eql(u8, expr.face_slice(&p.expr), "from"));
+        assert(std.mem.eql(u8, expr.face2_slice(&p.expr), "amount"));
+        assert(std.mem.eql(u8, expr.face3_slice(&p.expr), "cell"));
+        assert(std.mem.eql(u8, expr.face4_slice(&p.expr), "gate"));
+        assert(std.mem.eql(u8, p.rest, "rest"));
+        assert(expr.cue_expect(&p.expr) == 6);
+        print("expr: (cue (jam (mix from amount) (mix cell gate))) nest-both form -- GREEN\n", .{});
+    }
+    if (expr.parse_whole("42  leftover")) |_| {
+        assert(false);
+    } else |err| {
+        assert(err == expr.ParseError.MalformedExpr);
+        print("expr: parse_whole refuses leftover -- GREEN\n", .{});
+    }
+    if (expr.parse_prefix("(foo root)")) |_| {
+        assert(false);
+    } else |err| {
+        assert(err == expr.ParseError.ExprNotYetLowered);
+        print("expr: other parenthesized form refused ExprNotYetLowered -- GREEN\n", .{});
+    }
+    if (expr.zig_type_for_mold("@ux")) |_| {
+        assert(false);
+    } else |err| {
+        assert(err == expr.ParseError.AuraNotYetLowered);
+        print("expr: @ux refused AuraNotYetLowered -- GREEN\n", .{});
+    }
+    if (expr.zig_type_for_mold("record")) |_| {
+        assert(false);
+    } else |err| {
+        assert(err == expr.ParseError.NamedShapeNotYetLowered);
+        print("expr: named mold refused NamedShapeNotYetLowered -- GREEN\n", .{});
+    }
+
+    print("GREEN: shared nest-expression parser — decimal · ^- @uN · face · (lent …) · (mix …) · (jam …) · nest jam left/right/both · (cue …) · cue-of-jam; other parens later.\n", .{});
+
+    _ = witness_version;
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    return run_selftest(init);
+}

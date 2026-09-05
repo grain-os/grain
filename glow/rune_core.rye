@@ -1,0 +1,243 @@
+//! glow-book: runes.md#g-core
+//! glow/rune_core.rye -- parses Glow's thin `|%` ... `++` ... `--` core.
+//!
+//! STOA14/15: one or two arms. STOA17: optional bare payload face before arms.
+//! STOA20: up to three arms (`double` - `inc` - `dec`).
+//! STOA21: optional typed payload `=/  face=@u32  <decimal>`.
+//! STOA25: optional open arm body after the name -- nest expr (`sample` /
+//! payload face - literal). STOA27: nest bodies `(mix ...)` - `(jam ...)` -
+//! `(lent ...)` - `^-` cast. Closed arms keep an empty body.
+//!
+//! Other auras and variance stay later.
+
+const std = @import("std");
+const lower_multi = @import("lower_multi.rye");
+const rf = @import("rune_face.rye");
+const expr = @import("expr.rye");
+
+pub const max_name_len: u32 = 64;
+pub const max_arms: u32 = 3;
+
+pub const ParseError = error{
+    NotACore,
+    MissingArm,
+    ExtraTail,
+    NameTooLong,
+    MalformedName,
+    TooManyLines,
+    TooManyArms,
+    TooManyPayloads,
+    PayloadAfterArm,
+    NotBarePayload,
+    AuraNotYetLowered,
+    NamedShapeNotYetLowered,
+    MalformedPayload,
+    EmptySource,
+    MalformedBody,
+    BodyNotYetLowered,
+    BadBodyFace,
+};
+
+pub const CoreSpec = struct {
+    arms: [max_arms][max_name_len]u8 = .{.{0} ** max_name_len} ** max_arms,
+    lens: [max_arms]usize = .{0} ** max_arms,
+    bodies: [max_arms]expr.Expr = [_]expr.Expr{.{ .kind = .literal }} ** max_arms,
+    has_body: [max_arms]bool = .{false} ** max_arms,
+    count: usize = 0,
+    payload_face: [max_name_len]u8 = .{0} ** max_name_len,
+    payload_len: usize = 0,
+    payload_value: u32 = 0,
+    payload_typed: bool = false,
+};
+
+pub fn arm_at(spec: *const CoreSpec, i: usize) []const u8 {
+    return spec.arms[i][0..spec.lens[i]];
+}
+
+pub fn arm_has_body(spec: *const CoreSpec, i: usize) bool {
+    return spec.has_body[i];
+}
+
+pub fn arm_body_at(spec: *const CoreSpec, i: usize) *const expr.Expr {
+    return &spec.bodies[i];
+}
+
+pub fn payload_face_at(spec: *const CoreSpec) []const u8 {
+    return spec.payload_face[0..spec.payload_len];
+}
+
+pub fn has_payload(spec: *const CoreSpec) bool {
+    return spec.payload_len != 0;
+}
+
+fn is_ident_char(ch: u8) bool {
+    if (ch >= 'a' and ch <= 'z') return true;
+    if (ch >= 'A' and ch <= 'Z') return true;
+    if (ch >= '0' and ch <= '9') return true;
+    return ch == '-' or ch == '_';
+}
+
+fn is_digit(ch: u8) bool {
+    return ch >= '0' and ch <= '9';
+}
+
+fn parse_ident(rest: []const u8) ParseError!struct { ident: []const u8, rest: []const u8 } {
+    var end: usize = 0;
+    while (end < rest.len and is_ident_char(rest[end])) end += 1;
+    if (end == 0) return error.MalformedName;
+    const ident = rest[0..end];
+    if (ident[0] >= '0' and ident[0] <= '9') return error.MalformedName;
+    if (ident.len > max_name_len) return error.NameTooLong;
+    return .{ .ident = ident, .rest = rest[end..] };
+}
+
+fn map_expr_err(err: expr.ParseError) ParseError {
+    return switch (err) {
+        error.ExprNotYetLowered => error.BodyNotYetLowered,
+        error.MalformedExpr => error.MalformedBody,
+        error.Overflow => error.MalformedBody,
+        error.BadIdent => error.MalformedBody,
+        error.AuraNotYetLowered => error.AuraNotYetLowered,
+        error.NamedShapeNotYetLowered => error.NamedShapeNotYetLowered,
+    };
+}
+
+fn parse_arm_line(line: []const u8) ParseError!struct { name: []const u8, body: ?expr.Expr } {
+    if (line.len < 2 or !std.mem.eql(u8, line[0..2], "++")) return error.MissingArm;
+    const after_plus = std.mem.trimStart(u8, line[2..], " \t");
+    if (after_plus.len == 0) return error.MissingArm;
+    if (after_plus.len == line[2..].len) return error.MalformedName;
+    const parsed = try parse_ident(after_plus);
+    const tail = std.mem.trimStart(u8, parsed.rest, " \t");
+    if (tail.len == 0) return .{ .name = parsed.ident, .body = null };
+    const body = expr.parse_whole(tail) catch |err| return map_expr_err(err);
+    return .{ .name = parsed.ident, .body = body };
+}
+
+fn scope_face(spec: *const CoreSpec) []const u8 {
+    if (has_payload(spec)) return payload_face_at(spec);
+    return "sample";
+}
+
+fn check_body_face(spec: *const CoreSpec, face: []const u8) ParseError!void {
+    if (!std.mem.eql(u8, face, scope_face(spec))) return error.BadBodyFace;
+}
+
+fn check_open_body(spec: *const CoreSpec, body: *const expr.Expr) ParseError!void {
+    switch (body.kind) {
+        .literal, .cast_literal => {},
+        .face, .lent_of => try check_body_face(spec, expr.face_slice(body)),
+        .cue_of => {
+            try check_body_face(spec, expr.face_slice(body));
+            if (expr.cue_is_jam(body)) {
+                try check_body_face(spec, expr.face2_slice(body));
+            }
+            if (expr.cue_jam_is_nest_left(body) or expr.cue_jam_is_nest_right(body) or expr.cue_jam_is_nest_both(body)) {
+                try check_body_face(spec, expr.face3_slice(body));
+            }
+            if (expr.cue_jam_is_nest_both(body)) {
+                try check_body_face(spec, expr.face4_slice(body));
+            }
+        },
+        .mix_of => {
+            try check_body_face(spec, expr.face_slice(body));
+            try check_body_face(spec, expr.face2_slice(body));
+        },
+        .jam_of => {
+            try check_body_face(spec, expr.face_slice(body));
+            try check_body_face(spec, expr.face2_slice(body));
+            if (expr.jam_has_nest_arg(body)) {
+                try check_body_face(spec, expr.face3_slice(body));
+            }
+            if (expr.jam_is_both_mix(body)) {
+                try check_body_face(spec, expr.face4_slice(body));
+            }
+        },
+    }
+}
+
+fn parse_trailing_u32(rest: []const u8) ParseError!u32 {
+    const t = std.mem.trim(u8, rest, " \t\r\n");
+    if (t.len == 0) return error.MalformedPayload;
+    var i: usize = 0;
+    var v: u32 = 0;
+    while (i < t.len) : (i += 1) {
+        if (!is_digit(t[i])) return error.MalformedPayload;
+        const d: u32 = t[i] - '0';
+        if (v > (std.math.maxInt(u32) - d) / 10) return error.MalformedPayload;
+        v = v * 10 + d;
+    }
+    return v;
+}
+
+fn parse_payload_line(line: []const u8) ParseError!struct { face: []const u8, value: u32, typed: bool } {
+    const face_spec = rf.parse(line) catch return error.MalformedPayload;
+    const face = rf.face_slice(&face_spec);
+    if (face.len == 0) return error.MalformedPayload;
+    const mold = rf.mold_slice(&face_spec);
+    const typed = mold.len != 0;
+    if (typed) {
+        if (mold[0] != '@') return error.NamedShapeNotYetLowered;
+        if (!std.mem.eql(u8, mold, "@u32")) return error.AuraNotYetLowered;
+    }
+
+    const after_head = std.mem.trimStart(u8, line[2..], " \t");
+    var clause_end: usize = 0;
+    while (clause_end < after_head.len and after_head[clause_end] != ' ' and after_head[clause_end] != '\t')
+        clause_end += 1;
+    const after_clause = std.mem.trimStart(u8, after_head[clause_end..], " \t");
+    const value = try parse_trailing_u32(after_clause);
+    return .{ .face = face, .value = value, .typed = typed };
+}
+
+/// Parses a thin core desk: `|%`, optional one `=/` payload, up to three `++` arms, `--`.
+pub fn parse_source(src: []const u8) ParseError!CoreSpec {
+    var lines: [lower_multi.max_lines][]const u8 = undefined;
+    const n = lower_multi.collect_lines(src, &lines) catch |err| switch (err) {
+        error.TooManyLines => return error.TooManyLines,
+        error.EmptySource => return error.EmptySource,
+        else => return error.NotACore,
+    };
+    if (n < 3) return error.NotACore;
+    if (!std.mem.eql(u8, lines[0], "|%")) return error.NotACore;
+    if (!std.mem.eql(u8, lines[n - 1], "--")) return error.NotACore;
+
+    var spec: CoreSpec = .{};
+    var saw_arm = false;
+    var i: usize = 1;
+    while (i + 1 < n) : (i += 1) {
+        const line = lines[i];
+        if (line.len >= 2 and line[0] == '=' and line[1] == '/') {
+            if (saw_arm) return error.PayloadAfterArm;
+            if (has_payload(&spec)) return error.TooManyPayloads;
+            const payload = try parse_payload_line(line);
+            @memcpy(spec.payload_face[0..payload.face.len], payload.face);
+            spec.payload_len = payload.face.len;
+            spec.payload_value = payload.value;
+            spec.payload_typed = payload.typed;
+            continue;
+        }
+        if (line.len >= 2 and line[0] == '+' and line[1] == '+') {
+            if (spec.count >= max_arms) return error.TooManyArms;
+            const arm = try parse_arm_line(line);
+            @memcpy(spec.arms[spec.count][0..arm.name.len], arm.name);
+            spec.lens[spec.count] = arm.name.len;
+            if (arm.body) |body| {
+                spec.bodies[spec.count] = body;
+                spec.has_body[spec.count] = true;
+            }
+            spec.count += 1;
+            saw_arm = true;
+            continue;
+        }
+        return error.NotACore;
+    }
+    if (spec.count == 0) return error.MissingArm;
+
+    var a: usize = 0;
+    while (a < spec.count) : (a += 1) {
+        if (!spec.has_body[a]) continue;
+        try check_open_body(&spec, &spec.bodies[a]);
+    }
+    return spec;
+}

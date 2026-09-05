@@ -1,0 +1,888 @@
+//! Session-log fold -- tidy prior days beneath `session-logs/date/YYYYMMDD/`.
+//!
+//! Convention ([`ORGANIZING.md`](../../ORGANIZING.md)): today's logs stay flat; earlier days
+//! fold under `date/<day>/`. README links rewrite in place when `fold` runs.
+//!
+//! The destination molted `archive/` -> `date/` on `20260821.161758` with the mark law
+//! ([`.claude/rules/stamp-and-name.md`](../../.claude/rules/stamp-and-name.md)): ORGANIZING
+//! defines archive as backward-pointing and finished, while a log from nine days ago is the
+//! live record, so `date/` claims only *when* -- the one thing true of every file in it. The
+//! FILE keeps its elder name, because 137 references across the tree name it and a promise
+//! kept is worth more than a tidy filename.
+//!
+//! ANY ROOM, not only session-logs (`20260821.171200`). `--room <name>` folds any top-level room
+//! that has outgrown a reader, using that room's own `README.md` as the index to repoint. The
+//! bound is 256 flat files (`tools/r/room_bound_witness.rish`), and four rooms crossed it the day
+//! session-logs did: `counsel`, `active-designing`, `expanding-prompts`, and `waymarks`. The file
+//! keeps its elder name for the same reason its destination molted rather than its filename --
+//! 137 references already name it.
+//!
+//! Extensions folded: `.kyri` (living), `.bron` (the elder notation), `.md` (historical).
+//! `.kyri` was taught on `20260821` -- 600 such logs stood flat when the room folded, and a
+//! tool that knew only `.bron` and `.md` would have left every one of them behind.
+//!
+//! Entry points (read and mutate stay separate):
+//!   `rye run tools/rye/session_logs_archive.rye preview [--today YYYYMMDD] [--room NAME]` -- count
+//!   `rye run tools/rye/session_logs_archive.rye fold [--today YYYYMMDD] [--room NAME]`    -- move
+//!   `rye run tools/rye/session_logs_archive.rye index-preview [--room NAME]` -- count index rows
+//!   `rye run tools/rye/session_logs_archive.rye index-fold [--room NAME]`    -- shelve them
+//!   `rye run tools/rye/session_logs_archive.rye selftest`                    -- fixture proof
+//!
+//! Witness: `rishi/bin/rishi run tools/s/session_logs_archive_witness.rish`
+
+const std = @import("std");
+const root_mod = @import("enrich/root.rye");
+
+const fixture_root = "tools/fixtures/session_logs_archive";
+
+/// The day a dated file folds into, or null when the name is not a one-clock stamp.
+///
+/// The shape required is the WHOLE stamp -- `YYYYMMDD-HHMMSS`, fifteen characters -- and that
+/// strictness is load-bearing rather than fussy. Three tools must agree on what a dated file is:
+/// this one moves them, `tools/d/dated_path_resolve.rish` recovers references to them from the
+/// stamp alone, and `tools/fixtures/r/room_bound_scan.sh` counts them against the bound. An older,
+/// looser test here accepted a day-only name like `20260814-fill-ales28-x.md` and would have
+/// folded 33 such files in `active-designing` that the resolver cannot recover, since it needs
+/// the time to compute a home. A file a fold can move but a resolver cannot find is the one thing
+/// this whole arc exists to prevent, so the loose test is gone.
+///
+/// **The sprig is optional**, so character 15 may be the `_` that opens a sprig or the `.` that
+/// opens the extension. Requiring the underscore left 237 sprigless logs unfoldable and their
+/// index links unrepointed -- REDS %180, the same class as REDS %178 one language further in,
+/// where the rule is written as index arithmetic rather than as a regex a scan could read.
+pub fn day_from_log_fname(fname: []const u8) ?[]const u8 {
+    // YYYYMMDD-HHMMSS is 15 characters. Character 15 opens either a sprig (`_`) or the
+    // extension (`.`); the law makes the sprig optional, so both spellings are one shape.
+    if (fname.len < 17) return null;
+    if (fname[8] != '-') return null;
+    if (fname[15] != '_' and fname[15] != '.') return null;
+    for (fname[0..8]) |c| if (c < '0' or c > '9') return null;
+    for (fname[9..15]) |c| if (c < '0' or c > '9') return null;
+    return fname[0..8];
+}
+
+pub fn should_fold_flat(fname: []const u8, today: []const u8) bool {
+    const day = day_from_log_fname(fname) orelse return false;
+    return !std.mem.eql(u8, day, today);
+}
+
+/// Repoint every flat dated link in the index, in ONE pass over the README.
+///
+/// The elder shape called a whole-string replace once per moved file, which is
+/// O(files * README) in time and, on an arena that reclaims nothing, in memory too. That cost
+/// stayed invisible while the room was small and became a wall the day it was needed: folding
+/// 1,443 logs out of a 2.7 MB index took over four minutes and 856 MB and had not finished
+/// (REDS %113). This walks the README once and inserts `date/<day>/` before any link target
+/// that is a bare dated filename -- O(README), independent of how many files moved.
+///
+/// `today` is the day that stays flat, and its links are left alone -- repointing a file that
+/// has not moved is how an index starts lying. The elder shape got this right by iterating only
+/// the moved names; the single pass has to be told, so it is.
+///
+/// Idempotent by construction: a target already carrying a slash is left exactly as it stands,
+/// so a second run over a folded index changes nothing.
+pub fn rewrite_readme_links(readme: []const u8, today: []const u8, a: std.mem.Allocator) ![]const u8 {
+    var out = std.ArrayListUnmanaged(u8).empty;
+    errdefer out.deinit(a);
+    // invariant: the rewrite only ever grows the index, so reserving its length up front is a
+    // floor rather than a guess, and the common case appends without reallocating.
+    try out.ensureTotalCapacity(a, readme.len);
+
+    var i: usize = 0;
+    while (i < readme.len) {
+        const rest = readme.len - i;
+        if (rest >= 2 and readme[i] == ']' and readme[i + 1] == '(') {
+            const start = i + 2;
+            if (std.mem.indexOfScalarPos(u8, readme, start, ')')) |end| {
+                const target = readme[start..end];
+                // A bare dated filename is the only thing repointed. A target already holding a
+                // slash is a path someone wrote on purpose, and it is left whole.
+                if (std.mem.indexOfScalar(u8, target, '/') == null) {
+                    if (day_from_log_fname(target)) |day| if (!std.mem.eql(u8, day, today)) {
+                        try out.appendSlice(a, "](date/");
+                        try out.appendSlice(a, day);
+                        try out.append(a, '/');
+                        try out.appendSlice(a, target);
+                        try out.append(a, ')');
+                        i = end + 1;
+                        continue;
+                    };
+                }
+            }
+        }
+        try out.append(a, readme[i]);
+        i += 1;
+    }
+
+    // invariant: nothing is ever dropped, so the rewritten index is at least as long as the one
+    // that went in -- a shorter result would mean a link was eaten rather than repointed.
+    std.debug.assert(out.items.len >= readme.len);
+    return try out.toOwnedSlice(a);
+}
+
+fn list_flat_logs(a: std.mem.Allocator, io: std.Io, logs_dir: []const u8) ![][]const u8 {
+    const cwd = std.Io.Dir.cwd();
+    const dir = try cwd.openDir(io, logs_dir, .{ .iterate = true });
+    var it = dir.iterate();
+    var names = std.ArrayListUnmanaged([]const u8).empty;
+    errdefer {
+        for (names.items) |n| a.free(n);
+        names.deinit(a);
+    }
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (std.mem.eql(u8, entry.name, "README.md")) continue;
+        // Every notation the room has ever held. A new extension added here without a
+        // fixture in the selftest is an extension nobody has tested, so both move together.
+        const is_md = std.mem.endsWith(u8, entry.name, ".md");
+        const is_bron = std.mem.endsWith(u8, entry.name, ".bron");
+        const is_kyri = std.mem.endsWith(u8, entry.name, ".kyri");
+        if (!is_md and !is_bron and !is_kyri) continue;
+        if (day_from_log_fname(entry.name) == null) continue;
+        try names.append(a, try a.dupe(u8, entry.name));
+    }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn less(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.order(u8, x, y) == .lt;
+        }
+    }.less);
+    return try names.toOwnedSlice(a);
+}
+
+fn move_log_file(a: std.mem.Allocator, io: std.Io, logs_dir: []const u8, fname: []const u8, day: []const u8) !void {
+    const cwd = std.Io.Dir.cwd();
+    const src = try std.fs.path.join(a, &.{ logs_dir, fname });
+    defer a.free(src);
+    const dest_dir_rel = try std.fs.path.join(a, &.{ logs_dir, "date", day });
+    defer a.free(dest_dir_rel);
+    try cwd.createDirPath(io, dest_dir_rel);
+    const dest = try std.fs.path.join(a, &.{ dest_dir_rel, fname });
+    defer a.free(dest);
+    const git_mv = try std.process.run(a, io, .{ .argv = &.{ "git", "mv", src, dest } });
+    defer {
+        a.free(git_mv.stdout);
+        a.free(git_mv.stderr);
+    }
+    const code: u8 = switch (git_mv.term) {
+        .exited => |c| c,
+        else => 255,
+    };
+    if (code == 0) return;
+    const mv = try std.process.run(a, io, .{ .argv = &.{ "mv", src, dest } });
+    defer {
+        a.free(mv.stdout);
+        a.free(mv.stderr);
+    }
+    const mv_code: u8 = switch (mv.term) {
+        .exited => |c| c,
+        else => return error.MoveFailed,
+    };
+    if (mv_code != 0) return error.MoveFailed;
+}
+
+pub fn fold_session_logs(a: std.mem.Allocator, io: std.Io, root: []const u8, room: []const u8, today: []const u8, dry_run: bool) !u32 {
+    // invariant: a stamp is eight digits, so a caller that hands over anything else is confused
+    // about which day stays flat and must not be allowed to move files on that belief.
+    std.debug.assert(today.len == 8);
+    // invariant: a room must be named, since an empty name would fold the repository root.
+    std.debug.assert(room.len != 0);
+    const logs_dir = try std.fs.path.join(a, &.{ root, room });
+    defer a.free(logs_dir);
+    const names = try list_flat_logs(a, io, logs_dir);
+    defer {
+        for (names) |n| a.free(n);
+        a.free(names);
+    }
+
+    var moved: u32 = 0;
+    for (names) |fname| {
+        const day = day_from_log_fname(fname) orelse continue;
+        if (!should_fold_flat(fname, today)) continue;
+        if (!dry_run) {
+            try move_log_file(a, io, logs_dir, fname, day);
+        }
+        moved += 1;
+    }
+
+    // The index is reconciled on every real run, not only when something moved. The rewrite is
+    // a single idempotent pass now, so it costs one read and one write, and it means the index
+    // can never sit drifted from the tree just because the moves happened in an earlier run --
+    // which is exactly the state the 20260821 fold left behind when its elder rewrite ran out of
+    // patience partway (REDS %113).
+    if (!dry_run) {
+        const readme_path = try std.fs.path.join(a, &.{ logs_dir, "README.md" });
+        defer a.free(readme_path);
+        const cwd = std.Io.Dir.cwd();
+        const readme = try cwd.readFileAlloc(io, readme_path, a, .unlimited);
+        defer a.free(readme);
+        // One pass repoints every moved link at once. Today's logs are still flat and their
+        // links carry no slash either, so the pass is told which day stays put rather than left
+        // to guess -- repointing a file that has not moved is how an index starts lying.
+        const rewritten = try rewrite_readme_links(readme, today, a);
+        defer a.free(rewritten);
+        try cwd.writeFile(io, .{ .sub_path = readme_path, .data = rewritten });
+    }
+
+    return moved;
+}
+
+/// A room folds its files by day, and its index has to fold the same way or grow forever.
+///
+/// `session-logs/README.md` reached 2,895,849 bytes -- 117 times the 24,576 its own header
+/// declares -- while the room beside it sat at 181 flat files against a bound of 256. The fold
+/// moved files down and left every row in place, so the one file a reader opens first was the
+/// one growing without a ceiling (REDS %182).
+const max_index_days: u32 = 1024;
+
+/// The day an index row belongs to, or null when the line is not an index row.
+///
+/// Two row shapes have been written in this tree and both are read: a Markdown table row
+/// (`| `20260824.040212` | ... |`) and the elder list item (`- `20260801.032014` - ...`). A
+/// table delimiter row opens `|-`, so it is refused by the space test and never mistaken for
+/// a row that names a day.
+pub fn day_from_index_row(line: []const u8) ?[]const u8 {
+    // The shortest possible row is a marker, a space, and a fifteen-character stamp.
+    if (line.len < 17) return null;
+    if (line[0] != '|' and line[0] != '-') return null;
+    if (line[1] != ' ') return null;
+    var i: usize = 2;
+    while (i < line.len and (line[i] == ' ' or line[i] == '`')) i += 1;
+    if (line.len - i < 15) return null;
+    const stamp = line[i..][0..15];
+    // The stamp is written `YYYYMMDD.HHMMSS` in prose and `YYYYMMDD-HHMMSS` in a filename, and
+    // an index row has carried both spellings over the years.
+    if (stamp[8] != '.' and stamp[8] != '-') return null;
+    for (stamp[0..8]) |c| if (c < '0' or c > '9') return null;
+    for (stamp[9..15]) |c| if (c < '0' or c > '9') return null;
+    return stamp[0..8];
+}
+
+/// Whether a day's logs have all folded out of the room's flat level.
+///
+/// The index folds a day only once its logs have, and that ordering is what keeps a shelf's
+/// links true forever. A row for a folded day already reads `](date/YYYYMMDD/name)`, which
+/// becomes `](YYYYMMDD/name)` from a shelf one directory down -- a rewrite with one answer. A
+/// row for a day still flat carries a bare filename whose correct target would change again the
+/// moment the room fold ran, and a shelf is immutable once written, so that row waits.
+fn day_is_folded(a: std.mem.Allocator, io: std.Io, logs_dir: []const u8, day: []const u8) !bool {
+    const cwd = std.Io.Dir.cwd();
+    const dir = cwd.openDir(io, logs_dir, .{ .iterate = true }) catch return false;
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        const found = day_from_log_fname(entry.name) orelse continue;
+        if (std.mem.eql(u8, found, day)) return false;
+    }
+    _ = a;
+    return true;
+}
+
+/// Rewrite a folded row's links so they read from a shelf one directory deeper.
+///
+/// A shelf sits at `<room>/date/README-index-<day>.md` and the pin at `<room>/README.md`, so a
+/// relative target `T` that meant `<room>/T` has to become `../T`. That is the whole rule, and
+/// it is applied to every relative target rather than to the ones anybody remembered: a
+/// repointer moves text while a fold moves DEPTH, and 62 targets in this room reach out past it
+/// with `../`, to `../docs/CRYPTO.md` and its kin.
+///
+/// One target gets the prettier equivalent instead. `](date/<day>/name)` would become
+/// `](../date/<day>/name)`, which resolves correctly and reads poorly; `](<day>/name)` is the
+/// same file, and it is the shape the three elder shelves of `20260725.040520` already wrote.
+///
+/// A URL, an anchor, and a root-absolute path are left exactly as written, since depth means
+/// nothing to any of them.
+fn shelf_row(a: std.mem.Allocator, line: []const u8) ![]const u8 {
+    var out = std.ArrayListUnmanaged(u8).empty;
+    errdefer out.deinit(a);
+    try out.ensureTotalCapacity(a, line.len);
+    var i: usize = 0;
+    while (i < line.len) {
+        if (std.mem.startsWith(u8, line[i..], "](")) {
+            const start = i + 2;
+            if (std.mem.indexOfScalarPos(u8, line, start, ')')) |end| {
+                const target = line[start..end];
+                try out.appendSlice(a, "](");
+                if (std.mem.startsWith(u8, target, "date/")) {
+                    try out.appendSlice(a, target["date/".len..]);
+                } else if (target.len == 0 or
+                    target[0] == '#' or
+                    target[0] == '/' or
+                    std.mem.startsWith(u8, target, "http://") or
+                    std.mem.startsWith(u8, target, "https://") or
+                    std.mem.startsWith(u8, target, "mailto:"))
+                {
+                    try out.appendSlice(a, target);
+                } else {
+                    try out.appendSlice(a, "../");
+                    try out.appendSlice(a, target);
+                }
+                try out.append(a, ')');
+                i = end + 1;
+                continue;
+            }
+        }
+        try out.append(a, line[i]);
+        i += 1;
+    }
+    return out.toOwnedSlice(a);
+}
+
+pub const IndexFoldReport = struct {
+    days_seen: u32 = 0,
+    days_folded: u32 = 0,
+    rows_folded: u32 = 0,
+    rows_kept: u32 = 0,
+    pin_bytes: u32 = 0,
+};
+
+/// Fold every closed day's index rows out of the living pin and onto its own dated shelf.
+///
+/// The pin keeps the rows whose logs are still flat in the room, so the index and the room
+/// describe the same set. Each folded day's rows are appended to
+/// `<room>/date/README-index-<day>.md`, which is created with a header the first time and
+/// accreted to afterwards -- a shelf is never rewritten, only added to.
+pub fn fold_index(
+    a: std.mem.Allocator,
+    io: std.Io,
+    root: []const u8,
+    room: []const u8,
+    stamp: []const u8,
+    dry_run: bool,
+) !IndexFoldReport {
+    // invariant: a room must be named, since an empty name would read the repository root.
+    std.debug.assert(room.len != 0);
+    // invariant: the fold stamp is written into every shelf header, so it has to be present.
+    std.debug.assert(stamp.len != 0);
+
+    const cwd = std.Io.Dir.cwd();
+    const logs_dir = try std.fs.path.join(a, &.{ root, room });
+    defer a.free(logs_dir);
+    const readme_path = try std.fs.path.join(a, &.{ logs_dir, "README.md" });
+    defer a.free(readme_path);
+    const readme = try cwd.readFileAlloc(io, readme_path, a, .unlimited);
+    defer a.free(readme);
+
+    var report = IndexFoldReport{};
+
+    // Pass one names the distinct days the index carries, newest kept first only by accident of
+    // file order -- the fold decision is per day, so order never enters it.
+    var days: [max_index_days][8]u8 = undefined;
+    var folds: [max_index_days]bool = undefined;
+    var day_n: u32 = 0;
+
+    var lines = std.mem.splitScalar(u8, readme, '\n');
+    while (lines.next()) |line| {
+        const day = day_from_index_row(line) orelse continue;
+        var known = false;
+        var k: u32 = 0;
+        while (k < day_n) : (k += 1) {
+            if (std.mem.eql(u8, &days[k], day)) {
+                known = true;
+                break;
+            }
+        }
+        if (known) continue;
+        // invariant: a room carrying more distinct days than this has outgrown one array, and
+        // silently dropping the overflow would leave rows in the pin with no shelf to reach.
+        if (day_n >= max_index_days) return error.TooManyIndexDays;
+        @memcpy(&days[day_n], day[0..8]);
+        folds[day_n] = try day_is_folded(a, io, logs_dir, day);
+        day_n += 1;
+    }
+    report.days_seen = day_n;
+
+    // Pass two rebuilds the pin and each shelf in one walk. EVERY LINE KEEPS ITS PLACE: prose
+    // stays where it stands and a kept row stays where it stands, so the pin comes out as the
+    // pin went in minus the rows that left.
+    //
+    // This collected the kept rows and appended them after all prose until `20260824.145200`,
+    // which lifted a buried header to the top -- the repair session-logs needed once, when its
+    // title stood at line 1,881 beneath 1,880 rows (REDS %182). That room's table is the last
+    // thing in its file, so appending at the end and keeping in place are the same write there,
+    // and the selftest fixture was shaped the same way. Every other room's README continues
+    // past its table: active-designing/README.md carries a redirect-stubs section, a width-law
+    // paragraph, and a closing line, so the appended rows landed BELOW all of it, outside any
+    // table, which GitHub-Flavored Markdown renders as literal pipes -- REDS %182's own fault
+    // reintroduced by the tool built to fix it (REDS %200).
+    var pin = std.ArrayListUnmanaged(u8).empty;
+    defer pin.deinit(a);
+
+    var shelves: [max_index_days]std.ArrayListUnmanaged(u8) = undefined;
+    var si: u32 = 0;
+    while (si < day_n) : (si += 1) shelves[si] = std.ArrayListUnmanaged(u8).empty;
+    defer {
+        var d: u32 = 0;
+        while (d < day_n) : (d += 1) shelves[d].deinit(a);
+    }
+
+    // A fold removes the rows between the table and whatever follows it, which can leave a
+    // heading abutting the last surviving row. GitHub-Flavored Markdown reads that correctly and
+    // a reader does not, so the blank line the fold consumed is put back.
+    //
+    // THE TEST IS A LEADING PIPE, rather than whether the fold could date the row. Those are
+    // different questions: a table holds header rows, delimiter rows, `living` rows carrying no
+    // stamp, and day-only rows -- all of them table rows this fold reads as prose, correctly,
+    // since it has no day to file them under. Keying the blank line off the date instead put one
+    // BETWEEN two table rows in the fixture, which ends a table in GFM -- a worse fault than the
+    // cosmetic one it was fixing, caught by the selftest before it reached a room (REDS %200).
+    //
+    // Firing only on pipe -> non-blank-non-pipe makes a second fold over the same pin a no-op.
+    var last_was_row = false;
+    lines = std.mem.splitScalar(u8, readme, '\n');
+    while (lines.next()) |line| {
+        if (day_from_index_row(line)) |day| {
+            var k: u32 = 0;
+            while (k < day_n) : (k += 1) {
+                if (std.mem.eql(u8, &days[k], day)) break;
+            }
+            if (k < day_n and folds[k]) {
+                const row = try shelf_row(a, line);
+                defer a.free(row);
+                try shelves[k].appendSlice(a, row);
+                try shelves[k].append(a, '\n');
+                report.rows_folded += 1;
+            } else {
+                // A kept row is written where it was read, so the table it belongs to keeps it.
+                last_was_row = line.len != 0 and line[0] == '|';
+                try pin.appendSlice(a, line);
+                try pin.append(a, '\n');
+                report.rows_kept += 1;
+            }
+            continue;
+        }
+        const is_row = line.len != 0 and line[0] == '|';
+        if (last_was_row and line.len != 0 and !is_row) try pin.append(a, '\n');
+        last_was_row = is_row;
+        try pin.appendSlice(a, line);
+        try pin.append(a, '\n');
+    }
+
+    report.pin_bytes = @intCast(pin.items.len);
+
+    if (dry_run) {
+        var d: u32 = 0;
+        while (d < day_n) : (d += 1) if (folds[d]) {
+            report.days_folded += 1;
+        };
+        return report;
+    }
+
+    const date_dir = try std.fs.path.join(a, &.{ logs_dir, "date" });
+    defer a.free(date_dir);
+    try cwd.createDirPath(io, date_dir);
+
+    // A shelf header pointed at `../CHAPTERS.md` unconditionally, and exactly one room in this
+    // tree has that page. Folding active-designing therefore wrote 21 shelves each carrying one
+    // link to a file that was never there (REDS %200). A shelf is immutable once written, so a
+    // header naming a page that does not exist is a broken link nobody may later repair in
+    // place -- the room is asked instead, and a room that grows a roster later gets it in the
+    // shelves written from then on.
+    const roster_path = try std.fs.path.join(a, &.{ logs_dir, "CHAPTERS.md" });
+    defer a.free(roster_path);
+    const roster_line = if (path_exists(io, roster_path))
+        "Roster: [`../CHAPTERS.md`](../CHAPTERS.md) - living pin: [`../README.md`](../README.md)."
+    else
+        "Living pin: [`../README.md`](../README.md).";
+
+    var d: u32 = 0;
+    while (d < day_n) : (d += 1) {
+        if (!folds[d]) continue;
+        if (shelves[d].items.len == 0) continue;
+        report.days_folded += 1;
+        const name = try std.fmt.allocPrint(a, "README-index-{s}.md", .{days[d]});
+        defer a.free(name);
+        const shelf_path = try std.fs.path.join(a, &.{ date_dir, name });
+        defer a.free(shelf_path);
+
+        var body = std.ArrayListUnmanaged(u8).empty;
+        defer body.deinit(a);
+        if (path_exists(io, shelf_path)) {
+            const prior = try cwd.readFileAlloc(io, shelf_path, a, .unlimited);
+            defer a.free(prior);
+            try body.appendSlice(a, prior);
+            if (prior.len != 0 and prior[prior.len - 1] != '\n') try body.append(a, '\n');
+        } else {
+            const head = try std.fmt.allocPrint(a,
+                \\# {s} season index -- {s}
+                \\
+                \\**Language:** EN
+                \\**Status:** Chapter index -- immutable once folded
+                \\**Chapter:** `{s}`
+                \\**Folded:** `{s}` from the living pin
+                \\
+                \\Closed rows for `{s}`, in the order the pin held them.
+                \\{s}
+                \\
+                \\
+            , .{ room, days[d], days[d], stamp, days[d], roster_line });
+            defer a.free(head);
+            try body.appendSlice(a, head);
+        }
+        // A Markdown table needs a delimiter row under its header or it renders as literal
+        // text with pipes in it, which is how 1,658 rows of the living pin came to be no table
+        // at all. The header is written only for a day whose rows are table rows -- the elder
+        // list shape carries its own punctuation and wants none.
+        if (shelves[d].items.len != 0 and shelves[d].items[0] == '|') {
+            try body.appendSlice(a, "| Stamp | Log | What it recorded |\n|---|---|---|\n");
+        }
+        try body.appendSlice(a, shelves[d].items);
+        try cwd.writeFile(io, .{ .sub_path = shelf_path, .data = body.items });
+    }
+
+    try cwd.writeFile(io, .{ .sub_path = readme_path, .data = pin.items });
+    return report;
+}
+
+fn copy_tree(a: std.mem.Allocator, io: std.Io, src_root: []const u8, dst_root: []const u8) !void {
+    const cwd = std.Io.Dir.cwd();
+    try cwd.createDirPath(io, dst_root);
+    const src = try cwd.openDir(io, src_root, .{ .iterate = true });
+    var it = src.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (std.mem.eql(u8, entry.name, "README.md")) continue;
+        if (std.mem.startsWith(u8, entry.name, "_")) continue;
+        const from = try std.fs.path.join(a, &.{ src_root, entry.name });
+        defer a.free(from);
+        const to = try std.fs.path.join(a, &.{ dst_root, entry.name });
+        defer a.free(to);
+        const data = try cwd.readFileAlloc(io, from, a, .unlimited);
+        defer a.free(data);
+        try cwd.writeFile(io, .{ .sub_path = to, .data = data });
+    }
+    const readme_src = try std.fs.path.join(a, &.{ src_root, "README.md" });
+    defer a.free(readme_src);
+    const readme_dst = try std.fs.path.join(a, &.{ dst_root, "README.md" });
+    defer a.free(readme_dst);
+    const readme = try cwd.readFileAlloc(io, readme_src, a, .unlimited);
+    defer a.free(readme);
+    try cwd.writeFile(io, .{ .sub_path = readme_dst, .data = readme });
+}
+
+fn path_exists(io: std.Io, path: []const u8) bool {
+    const cwd = std.Io.Dir.cwd();
+    cwd.access(io, path, .{}) catch return false;
+    return true;
+}
+
+fn run_selftest(a: std.mem.Allocator, io: std.Io, root: []const u8) !void {
+    const sandbox = try std.fs.path.join(a, &.{ root, fixture_root, "_sandbox" });
+    defer a.free(sandbox);
+    const fixture = try std.fs.path.join(a, &.{ root, fixture_root });
+    defer a.free(fixture);
+    const logs = try std.fs.path.join(a, &.{ sandbox, "session-logs" });
+    defer a.free(logs);
+
+    const cwd = std.Io.Dir.cwd();
+    cwd.deleteTree(io, sandbox) catch {};
+    try copy_tree(a, io, fixture, logs);
+
+    const today = "20260704";
+
+    // Four prior-day files now: alpha (.md, sprig), gamma (.kyri, sprig), delta (.bron, no
+    // sprig), zeta (.md, whose index row reaches out of the room). The count is the whole proof
+    // that each shape is folded rather than merely accepted by the filter -- and epsilon, a
+    // day-only name, is a fifth prior-day file on disk that must NOT appear in it, so the same
+    // number proves the refusal too.
+    const preview_count = try fold_session_logs(a, io, sandbox, "session-logs", today, true);
+    if (preview_count != 4) return error.SelftestPreviewCount;
+    const alpha_flat = try std.fs.path.join(a, &.{ logs, "20260703-100000_alpha.md" });
+    defer a.free(alpha_flat);
+    if (!path_exists(io, alpha_flat)) return error.SelftestPreviewMutated;
+
+    const moved1 = try fold_session_logs(a, io, sandbox, "session-logs", today, false);
+    if (moved1 != 4) return error.SelftestMovedCount;
+
+    const alpha_arch = try std.fs.path.join(a, &.{ logs, "date", "20260703", "20260703-100000_alpha.md" });
+    defer a.free(alpha_arch);
+    const beta_flat = try std.fs.path.join(a, &.{ logs, "20260704-100000_beta.md" });
+    defer a.free(beta_flat);
+    const gamma_dated = try std.fs.path.join(a, &.{ logs, "date", "20260703", "20260703-110000_gamma.kyri" });
+    defer a.free(gamma_dated);
+    // A prior-day log whose stamp runs straight into its extension folds like any other. The
+    // sprig is optional by the session-logs law, and 237 such logs stood in the tree while the
+    // fold could not see one of them (REDS %180).
+    const delta_dated = try std.fs.path.join(a, &.{ logs, "date", "20260703", "20260703-120000.bron" });
+    defer a.free(delta_dated);
+    // A day-only name carries no time, so no resolver could compute its home again. It stays.
+    const epsilon_flat = try std.fs.path.join(a, &.{ logs, "20260814-fill-epsilon-x.md" });
+    defer a.free(epsilon_flat);
+    if (!path_exists(io, alpha_arch)) return error.SelftestAlphaNotFolded;
+    if (!path_exists(io, gamma_dated)) return error.SelftestKyriNotFolded;
+    if (!path_exists(io, delta_dated)) return error.SelftestSpriglessNotFolded;
+    if (!path_exists(io, beta_flat)) return error.SelftestBetaNotFlat;
+    if (!path_exists(io, epsilon_flat)) return error.SelftestDayOnlyMoved;
+
+    const readme_path = try std.fs.path.join(a, &.{ logs, "README.md" });
+    defer a.free(readme_path);
+    const readme1 = try cwd.readFileAlloc(io, readme_path, a, .unlimited);
+    defer a.free(readme1);
+    if (std.mem.indexOf(u8, readme1, "](date/20260703/20260703-100000_alpha.md)") == null) return error.SelftestReadmeLink;
+    if (std.mem.indexOf(u8, readme1, "](date/20260703/20260703-110000_gamma.kyri)") == null) return error.SelftestKyriReadmeLink;
+    if (std.mem.indexOf(u8, readme1, "](date/20260703/20260703-120000.bron)") == null) return error.SelftestSpriglessReadmeLink;
+    // The day-only name never moved, so its link must still read as it was written.
+    if (std.mem.indexOf(u8, readme1, "](20260814-fill-epsilon-x.md)") == null) return error.SelftestDayOnlyLinkMoved;
+    // Today's log did not move, so its link must not move either. The single-pass rewrite would
+    // happily repoint it if it were not told which day stays flat.
+    if (std.mem.indexOf(u8, readme1, "](20260704-100000_beta.md)") == null) return error.SelftestTodayLinkMoved;
+
+    const moved2 = try fold_session_logs(a, io, sandbox, "session-logs", today, false);
+    if (moved2 != 0) return error.SelftestNotIdempotent;
+
+    const readme2 = try cwd.readFileAlloc(io, readme_path, a, .unlimited);
+    defer a.free(readme2);
+    if (!std.mem.eql(u8, readme1, readme2)) return error.SelftestReadmeDrift;
+
+    // The index folds the way the room does, and only for days the room has already folded --
+    // so a shelf's links are computable once and never again (REDS %182).
+    const idx1 = try fold_index(a, io, sandbox, "session-logs", "20260704.120000", false);
+    if (idx1.days_folded != 1) return error.SelftestIndexDaysFolded;
+    if (idx1.rows_folded != 4) return error.SelftestIndexRowsFolded;
+
+    const shelf_path = try std.fs.path.join(a, &.{ logs, "date", "README-index-20260703.md" });
+    defer a.free(shelf_path);
+    const shelf1 = try cwd.readFileAlloc(io, shelf_path, a, .unlimited);
+    defer a.free(shelf1);
+    // A row that read `](date/20260703/...)` from the pin reads `](20260703/...)` from a shelf
+    // one directory down. That is the whole rewrite, and it has exactly one answer.
+    if (std.mem.indexOf(u8, shelf1, "](20260703/20260703-100000_alpha.md)") == null) return error.SelftestShelfLink;
+    if (std.mem.indexOf(u8, shelf1, "](20260703/20260703-120000.bron)") == null) return error.SelftestShelfSpriglessLink;
+    if (std.mem.indexOf(u8, shelf1, "**Chapter:** `20260703`") == null) return error.SelftestShelfHeader;
+    // A table with no delimiter row is not a table, so a shelf of table rows writes one.
+    if (std.mem.indexOf(u8, shelf1, "\n|---|---|---|\n") == null) return error.SelftestShelfDelimiter;
+    // A shelf sits one directory deeper than the pin, so a target reaching past the room reaches
+    // one level further from the shelf. 62 links in session-logs did exactly this (REDS %183).
+    if (std.mem.indexOf(u8, shelf1, "](../../ORGANIZING.md)") == null) return error.SelftestShelfDepth;
+    // The shelf's own header links are written FOR that depth and must stay as the tool wrote them.
+    if (std.mem.indexOf(u8, shelf1, "](../CHAPTERS.md)") == null) return error.SelftestShelfHeaderDepth;
+
+    const pin1 = try cwd.readFileAlloc(io, readme_path, a, .unlimited);
+    defer a.free(pin1);
+    if (std.mem.indexOf(u8, pin1, "20260703-100000_alpha.md") != null) return error.SelftestPinKeptFoldedRow;
+    // Beta's logs are still flat, so beta's row stays in the pin -- the index describes exactly
+    // the set the room holds flat, which is what makes both bounds one bound.
+    if (std.mem.indexOf(u8, pin1, "](20260704-100000_beta.md)") == null) return error.SelftestPinLostFlatRow;
+    // And it stays WHERE it stood, inside the table, rather than being appended after every line
+    // of prose. The fixture README now carries a closing line beneath its table, so a kept row
+    // landing below that line is caught here rather than in a room (REDS %200).
+    const kept_at = std.mem.indexOf(u8, pin1, "](20260704-100000_beta.md)") orelse return error.SelftestPinLostFlatRow;
+    const closing_at = std.mem.indexOf(u8, pin1, "*A closing line beneath the table.") orelse return error.SelftestFixtureClosingLine;
+    if (kept_at > closing_at) return error.SelftestKeptRowLeftItsTable;
+    // The fold removes the rows between the table and what follows it, so the blank line it
+    // consumed is put back: the fixture writes `---` directly beneath its last row, and the pin
+    // must read a blank line between them (REDS %200).
+    // And no blank may land BETWEEN two table rows, which would end the table where it stands.
+    // The day-only epsilon row carries no time, so the fold reads it as prose and would have
+    // split the table here had the test been the date rather than the pipe.
+    if (std.mem.indexOf(u8, pin1, "stays flat |\n\n| 20260814") != null) return error.SelftestBlankSplitTheTable;
+    // The fixture writes `---` directly beneath its last table row, and the pin must read a blank
+    // line between them -- the blank the fold consumed, put back (REDS %200).
+    if (std.mem.indexOf(u8, pin1, "whole stamp |\n\n---\n") == null) return error.SelftestHeadingAbutsTable;
+
+    const idx2 = try fold_index(a, io, sandbox, "session-logs", "20260704.130000", false);
+    if (idx2.rows_folded != 0) return error.SelftestIndexNotIdempotent;
+
+    // A shelf header links to the room's seasons roster when the room keeps one, and names only
+    // the living pin when it does not. The fixture room keeps one, which is what the assertion
+    // above proves; this leg takes it away and folds a day the room has no flat log for, so the
+    // header written next carries no link to a page that is not there (REDS %200).
+    const roster_path = try std.fs.path.join(a, &.{ logs, "CHAPTERS.md" });
+    defer a.free(roster_path);
+    try cwd.deleteFile(io, roster_path);
+    const pin_now = try cwd.readFileAlloc(io, readme_path, a, .unlimited);
+    defer a.free(pin_now);
+    // The planted row names a log that really sits under date/20260702/, so the shelf link it
+    // becomes resolves. A pen reference that resolves nowhere raises the tree's own lost-reference
+    // census, since tools/fixtures/d/dated_path_scan.sh reads the filesystem rather than the index,
+    // and a sandbox left behind by a selftest is on that filesystem (REDS %200).
+    const theta_dir = try std.fs.path.join(a, &.{ logs, "date", "20260702" });
+    defer a.free(theta_dir);
+    try cwd.createDirPath(io, theta_dir);
+    const theta_path = try std.fs.path.join(a, &.{ theta_dir, "20260702-090000_theta.md" });
+    defer a.free(theta_path);
+    try cwd.writeFile(io, .{ .sub_path = theta_path, .data = "theta\n" });
+    const with_row = try std.fmt.allocPrint(a, "{s}| 20260702.090000 | [theta](date/20260702/20260702-090000_theta.md) | a day already folded out of the room |\n", .{pin_now});
+    defer a.free(with_row);
+    try cwd.writeFile(io, .{ .sub_path = readme_path, .data = with_row });
+    const idx3 = try fold_index(a, io, sandbox, "session-logs", "20260704.140000", false);
+    if (idx3.rows_folded != 1) return error.SelftestRosterlessFoldCount;
+    const shelf3_path = try std.fs.path.join(a, &.{ logs, "date", "README-index-20260702.md" });
+    defer a.free(shelf3_path);
+    const shelf3 = try cwd.readFileAlloc(io, shelf3_path, a, .unlimited);
+    defer a.free(shelf3);
+    if (std.mem.indexOf(u8, shelf3, "](../CHAPTERS.md)") != null) return error.SelftestShelfNamesAbsentRoster;
+    if (std.mem.indexOf(u8, shelf3, "Living pin: [`../README.md`](../README.md).") == null) return error.SelftestShelfLostItsPinLink;
+    const shelf2 = try cwd.readFileAlloc(io, shelf_path, a, .unlimited);
+    defer a.free(shelf2);
+    if (!std.mem.eql(u8, shelf1, shelf2)) return error.SelftestShelfDrift;
+
+    std.debug.print("GREEN: session_logs_archive selftest -- preview, fold of .md, .kyri and a sprigless .bron, a day-only name refused, link rewrite, idempotency, and the index folded to its shelf.\n", .{});
+}
+
+fn parse_today_arg(a: std.mem.Allocator, args: []const []const u8, start: usize) !?[]const u8 {
+    var i = start;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--today") and i + 1 < args.len) {
+            i += 1;
+            return try a.dupe(u8, args[i]);
+        }
+    }
+    return null;
+}
+
+fn parse_named_arg(a: std.mem.Allocator, args: []const []const u8, start: usize, flag: []const u8) !?[]const u8 {
+    var i = start;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], flag) and i + 1 < args.len) {
+            i += 1;
+            return try a.dupe(u8, args[i]);
+        }
+    }
+    return null;
+}
+
+fn run_preview_or_fold(a: std.mem.Allocator, io: std.Io, root: []const u8, dry_run: bool, args: []const []const u8) !u8 {
+    const today_owned = try parse_today_arg(a, args, 2);
+    defer if (today_owned) |t| a.free(t);
+    const today = today_owned orelse try today_from_env_or_date(a, io);
+    const room_owned = try parse_named_arg(a, args, 2, "--room");
+    defer if (room_owned) |r| a.free(r);
+    const room = room_owned orelse "session-logs";
+    std.debug.print("room={s}\n", .{room});
+    const moved = try fold_session_logs(a, io, root, room, today, dry_run);
+    std.debug.print("moved={d}\n", .{moved});
+    if (dry_run) {
+        std.debug.print("PREVIEW: no files moved; README untouched.\n", .{});
+    } else {
+        std.debug.print("GREEN: fold complete — files moved and links in README.md updated in place.\n", .{});
+    }
+    return 0;
+}
+
+fn run_index_fold(a: std.mem.Allocator, io: std.Io, root: []const u8, dry_run: bool, args: []const []const u8) !u8 {
+    const room_owned = try parse_named_arg(a, args, 2, "--room");
+    defer if (room_owned) |r| a.free(r);
+    const room = room_owned orelse "session-logs";
+    const stamp_owned = try parse_named_arg(a, args, 2, "--stamp");
+    defer if (stamp_owned) |t| a.free(t);
+    const stamp = stamp_owned orelse try stamp_from_date(a, io);
+    const report = try fold_index(a, io, root, room, stamp, dry_run);
+    std.debug.print("room={s}\n", .{room});
+    std.debug.print("days_seen={d}\n", .{report.days_seen});
+    std.debug.print("days_folded={d}\n", .{report.days_folded});
+    std.debug.print("rows_folded={d}\n", .{report.rows_folded});
+    std.debug.print("rows_kept={d}\n", .{report.rows_kept});
+    std.debug.print("pin_bytes={d}\n", .{report.pin_bytes});
+    if (dry_run) {
+        std.debug.print("PREVIEW: no shelf written; README.md untouched.\n", .{});
+    } else {
+        std.debug.print("GREEN: index fold complete -- closed days rest on their own shelves.\n", .{});
+    }
+    return 0;
+}
+
+/// The one-clock stamp a shelf header records, read from the host clock rather than composed.
+fn stamp_from_date(a: std.mem.Allocator, io: std.Io) ![]const u8 {
+    const result = try std.process.run(a, io, .{ .argv = &.{ "date", "+%Y%m%d.%H%M%S" } });
+    defer {
+        a.free(result.stdout);
+        a.free(result.stderr);
+    }
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => return error.StampFailed,
+    };
+    if (code != 0) return error.StampFailed;
+    const trimmed = std.mem.trim(u8, result.stdout, " \t\n\r");
+    // invariant: YYYYMMDD.HHMMSS is fifteen characters, and a shorter answer means the host
+    // clock was read wrong rather than that the stamp is merely unusual.
+    if (trimmed.len != 15) return error.StampFormat;
+    return try a.dupe(u8, trimmed);
+}
+
+fn today_from_env_or_date(a: std.mem.Allocator, io: std.Io) ![]const u8 {
+    const result = try std.process.run(a, io, .{ .argv = &.{ "date", "+%Y%m%d" } });
+    defer {
+        a.free(result.stdout);
+        a.free(result.stderr);
+    }
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => return error.TodayFailed,
+    };
+    if (code != 0) return error.TodayFailed;
+    const trimmed = std.mem.trim(u8, result.stdout, " \t\n\r");
+    if (trimmed.len != 8) return error.TodayFormat;
+    return try a.dupe(u8, trimmed);
+}
+
+test "day_from_log_fname parses stamp prefix" {
+    try std.testing.expectEqualStrings("20260703", day_from_log_fname("20260703-100000_alpha.md").?);
+    // A day-only name is NOT a one-clock stamp: the resolver cannot compute a home without the
+    // time, so a fold must not move what a resolver cannot find. active-designing holds 33 of
+    // these and they stay flat.
+    try std.testing.expect(day_from_log_fname("20260814-fill-ales28-lotus-insert.md") == null);
+    try std.testing.expect(day_from_log_fname("20260703-100000-alpha.md") == null);
+    // The sprig is optional: character 15 may open the extension instead (REDS %180). Both
+    // names below are real files in this tree, since a real-looking stamp over a file that
+    // exists nowhere reads as a citation to every reader and every census (the mark law's
+    // "illustrate with placeholders, cite only what exists" -- and REDS %181, which is this
+    // guard catching that mistake in this very test on the lap it was written).
+    try std.testing.expectEqualStrings("20260619", day_from_log_fname("20260619-072600.md").?);
+    try std.testing.expectEqualStrings("20260703", day_from_log_fname("20260703-120000.bron").?);
+    // A retired countdown-prefix name carries a stamp that does not begin the filename, so the
+    // stamp has to start at character zero for this to be a dated name at all.
+    try std.testing.expect(day_from_log_fname("99991_20260619-072600.md") == null);
+    try std.testing.expectEqualStrings("20260717", day_from_log_fname("20260717-125858_skate-seen-on-pixel.bron").?);
+    try std.testing.expect(day_from_log_fname("README.md") == null);
+}
+
+test "should_fold_flat keeps today flat" {
+    try std.testing.expect(should_fold_flat("20260703-100000_alpha.md", "20260704"));
+    try std.testing.expect(!should_fold_flat("20260704-100000_beta.md", "20260704"));
+    try std.testing.expect(should_fold_flat("20260716-145955_rune.bron", "20260717"));
+    try std.testing.expect(!should_fold_flat("20260717-125858_skate.bron", "20260717"));
+}
+
+test "rewrite_readme_link is idempotent" {
+    const a = std.testing.allocator;
+    const readme = "| [alpha](20260703-100000_alpha.md) | note |\n";
+    const once = try rewrite_readme_links(readme, "20260704", a);
+    defer a.free(once);
+    try std.testing.expect(std.mem.indexOf(u8, once, "date/20260703/") != null);
+    const twice = try rewrite_readme_links(once, "20260704", a);
+    defer a.free(twice);
+    try std.testing.expectEqualStrings(once, twice);
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    const a = init.arena.allocator();
+    const io = init.io;
+    const root = try root_mod.resolve_root(a, io, init);
+    defer a.free(root);
+
+    const args = init.minimal.args.toSlice(a) catch return error.OutOfMemory;
+    if (args.len < 2) {
+        std.debug.print("usage: session_logs_archive.rye preview|fold [--today YYYYMMDD] [--room NAME] | index-preview|index-fold [--room NAME] [--stamp YYYYMMDD.HHMMSS] | selftest\n", .{});
+        return 2;
+    }
+
+    if (std.mem.eql(u8, args[1], "selftest")) {
+        try run_selftest(a, io, root);
+        return 0;
+    }
+    if (std.mem.eql(u8, args[1], "preview")) {
+        return run_preview_or_fold(a, io, root, true, args);
+    }
+    if (std.mem.eql(u8, args[1], "fold")) {
+        return run_preview_or_fold(a, io, root, false, args);
+    }
+    if (std.mem.eql(u8, args[1], "index-preview")) {
+        return run_index_fold(a, io, root, true, args);
+    }
+    if (std.mem.eql(u8, args[1], "index-fold")) {
+        return run_index_fold(a, io, root, false, args);
+    }
+    std.debug.print("unknown subcommand: {s}\n", .{args[1]});
+    return 2;
+}

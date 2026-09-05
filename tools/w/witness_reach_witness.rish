@@ -1,0 +1,154 @@
+# tools/w/witness_reach_witness.rish -- a witness nobody runs guards nothing, and now the tree counts them.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/w/witness_reach_witness.rish
+#
+# construction/standing-equipment.kyri opens on the sentence this guard measures: a guard that is
+# never run guards nothing either. The roster named 58 guards and the tree holds 1,690 tracked
+# *_witness.rish files, and until 20260825 nothing asked what the other 1,632 are reached by.
+# active-designing/20260824-080208_the-roster-that-decides-what-gets-measured.md booked the question
+# by name -- tracing reachability rather than comparing counts -- and left it open. This closes it.
+#
+# SEVEN READINGS, ONE GATE. total, standing, cadence, reached, sung, unclocked, unheard, and the
+# gated `unreached`. The gate is on `unreached` -- every witness no roster row reaches on either
+# clock -- under a ceiling that only falls. The rest are reported rather than gated, because what
+# belongs on the every-lap roster is a cost decision the maintainer owns and a ceiling on it would be this
+# guard deciding it quietly.
+#
+# THE GATE MOVED ON 20260825.162410 (REDS %224), and the reason is worth carrying here. It stood on
+# `unheard`, the count of witnesses no file names, and that number falls when a choir is WRITTEN:
+# list a hundred witnesses in a new file, leave it off the roster, and the number drops by a hundred
+# while exactly the same guards run. Measured that day, 265 witnesses stood named by a runner no
+# roster row reaches, so the gate read 937 while 1,202 of 1,692 were carried by no clock. On
+# `unreached` the number falls when a roster row LANDS, which is the lap the rungs begin to run --
+# and it is strictly stronger, since every unheard witness is also unreached.
+#
+# THE FAMILY READING, ADDED 20260828. `unreached` is one number over the whole tree, and one number
+# cannot say whether 1,140 is a long tail spread thin or whole systems carrying no clock at all. It
+# was the second: 222 of the tree's 291 witness families have every member unreached -- all 86 of
+# `hunk`, all 49 of `buhr`, all 31 of `fora`. The census that should have shown this printed twenty
+# absolute counts with no denominator and dropped the other 224 families in silence, so `comlink` at
+# 4 of 5 and `mantra` at 6 of 7 never appeared at all.
+#
+# So a census line now carries `unreached/total` and its share, the list prints whole, and
+# `wholly_unreached` is gated under its own ceiling that only falls. It catches one thing the total
+# cannot see: delete a family's only REACHED member and `total` and `standing` both fall by one, so
+# `unreached` stands exactly still while the family loses its last clock. The control proves that
+# case by doing it.
+#
+# WHY A CEILING RATHER THAN ZERO. 1,154 witnesses stand unreached (20260825.234902, after the
+# season leaf choir's row carried 47 of them across). A wall at zero would refuse
+# every ordinary lap, and a wall that refuses ordinary work is a wall somebody turns off. The
+# ceiling falls whenever a choir lands with its roster row, and a witness born today is born
+# reached, which is the same discipline .claude/rules/exec-bit.md keeps for the mode bit.
+
+say "witness-reach: Language EN -- every witness on disk is asked one question: does anything actually run you?"
+say "witness-reach: Style Gauge -- every number below is printed by the scan on this run, never recited here."
+say "witness-reach: Lens TAME -- safety first: a MENTION is refused and only a CALL is heard, because counting a grep argument as a call would report a guard as covered when nothing runs it. Purely local -- no key, no network, no funds, no device."
+
+# The control first. The call/mention line is this meter's whole difficulty, and the tree cannot
+# show it every shape it must judge, so the shapes are planted in throwaway git repositories.
+let control = run ["sh" "tools/fixtures/w/witness_reach_control.sh"]
+assert control.ok else "witness-reach: the control must complete -- ${control.err}"
+say control.out
+assert control.out contains "control_verdict=ok" else "witness-reach: the control must reach its own verdict -- ${control.out}"
+
+# A call is heard, in every shape this tree writes one.
+assert control.out contains "ok   heard: called_direct" else "witness-reach: run [rishi run <path>] is a call"
+assert control.out contains "ok   heard: called_dashc" else "witness-reach: a -c payload is shell text and its command position is a call"
+assert control.out contains "ok   heard: called_choir" else "witness-reach: a choir's list literal is sung"
+assert control.out contains "ok   heard: called_shell" else "witness-reach: sh <path> in command position is a call"
+assert control.out contains "ok   heard: after_semi" else "witness-reach: a call after a separator is still a call"
+assert control.out contains "ok   heard: in_subst" else "witness-reach: a call inside a substitution is still a call"
+assert control.out contains "ok   heard: called_cadence" else "witness-reach: a roster row at tier cadence is a call"
+
+# A mention is refused. Each of these four was found in a real source while the meter was written.
+assert control.out contains "ok   refused: mentioned_comment" else "witness-reach: a path in a comment is a citation, never a call"
+assert control.out contains "ok   refused: mentioned_grep" else "witness-reach: a path read as data is never a call"
+assert control.out contains "ok   refused: mentioned_string" else "witness-reach: a path a script PRINTS is never a call"
+assert control.out contains "ok   refused: mentioned_usage" else "witness-reach: a comment's own usage line is never a call"
+assert control.out contains "ok   refused: untracked_two never counted" else "witness-reach: the meter reads the tracked tree, so an untracked file is in neither column"
+
+# The distinction the whole meter exists for: a choir may sing a witness the roster never reaches.
+assert control.out contains "ok   sung yet not standing: choir_only" else "witness-reach: sung and standing are two readings and must stay two"
+assert control.out contains "ok   standing: called_roster" else "witness-reach: a roster row makes its witness standing"
+assert control.out contains "ok   cadence: called_cadence" else "witness-reach: a cadence row must be heard on the cadence reading"
+assert control.out contains "ok   cadence is not standing: called_cadence" else "witness-reach: a cadence row must never read as sung every lap"
+
+# The bands the gate now reads, each proven on the planted repository (REDS %224).
+assert control.out contains "ok   unclocked: choir_only is named, and by nobody the roster reaches" else "witness-reach: a witness sung only by an off-roster choir belongs in unclocked"
+assert control.out contains "ok   unreached: carries choir_only" else "witness-reach: the gated set must see a witness no roster row reaches"
+assert control.out contains "ok   unreached: carries the off-roster choir itself" else "witness-reach: the choir nothing names is unreached too"
+assert control.out contains "ok   unreached: never a standing witness" else "witness-reach: a witness on the every-lap clock is never unreached"
+assert control.out contains "ok   unreached: never a cadence witness" else "witness-reach: a witness on the fifth-round clock is never unreached"
+assert control.out contains "ok   bands partition: unreached == unclocked + unheard" else "witness-reach: the two silent bands must sum to the gated one"
+assert control.out contains "ok   identity: unreached == total - standing - cadence" else "witness-reach: the gated number must be total minus what the roster reaches"
+
+# The promotion -- the behavior the gate exists to require, proven by doing it.
+assert control.out contains "ok   promotion: rostering the choir makes its member standing" else "witness-reach: a roster row must carry the choir's rungs onto the clock"
+assert control.out contains "ok   promotion: the member leaves unclocked" else "witness-reach: a promoted rung must leave the unclocked band"
+assert control.out contains "ok   promotion: unreached falls by exactly the two files that moved" else "witness-reach: the gated number must fall by what the roster row actually moved"
+
+# The ceiling, from both sides. A refusal proven only in the passing direction cannot be told from
+# a bypass, so the pen is pushed one past the ceiling and then walked back to green.
+assert control.out contains "ok   ceiling: one past it refuses" else "witness-reach: one unreached past the ceiling must refuse"
+assert control.out contains "ok   ceiling: exactly at it passes" else "witness-reach: exactly at the ceiling must pass"
+assert control.out contains "ok   ceiling: removing the plant returns green" else "witness-reach: removing the plant must return the reading to green"
+
+# The family census (20260828). A count without its denominator, and a list that stops at twenty
+# without saying so, are the two halves of one defect: they report a passing tail nobody looked at.
+assert control.out contains "ok   census: every line carries share and unreached/total" else "witness-reach: a family count without its total cannot say whether a family is wholly unreached"
+assert control.out contains "ok   census: prints every family, none dropped" else "witness-reach: a census that truncates in silence hides the family a reader came to check"
+assert control.out contains "ok   wholly_unreached: a family with one reached member is not counted" else "witness-reach: one member on a clock keeps a family off the wholly-unreached reading"
+assert control.out contains "ok   wholly_unreached: the mixed family still raises unreached by its one silent member" else "witness-reach: the family reading must not swallow what the total already sees"
+assert control.out contains "ok   wholly_unreached: unreached stands still when a family's only reached member is deleted" else "witness-reach: this is the case the single total is blind to, and it must be proven blind"
+assert control.out contains "ok   wholly_unreached: rises by one when a family loses its last clock" else "witness-reach: losing the last clock in a family must be visible somewhere"
+assert control.out contains "ok   wholly_unreached: falls by one when a family's first roster row lands" else "witness-reach: a ratchet that only rises is a ratchet nobody can close"
+assert control.out contains "ok   wholly_unreached: the same roster row lowers unreached by one" else "witness-reach: the two readings must move together when a roster row lands"
+assert control.out contains "ok   family ceiling: exactly at it passes" else "witness-reach: exactly at the family ceiling must pass"
+assert control.out contains "ok   family ceiling: one past it refuses" else "witness-reach: one family past the ceiling must refuse"
+assert control.out contains "ok   family ceiling: removing the plant returns green" else "witness-reach: removing the planted family must return the reading to green"
+
+# The wrapper and the env prefix (REDS %317). Both shapes genuinely call a witness and this meter
+# read neither, so `unheard` -- "named by no runner at all" -- was reporting 89 witnesses that
+# tools/p/parity_ch01.rish names in plain command position through a timing wrapper. Each is
+# asserted from both sides in the control: the plant heard, and the reading returning when the
+# caller is removed, since a shape proven only while its plant stands cannot be told from a shape
+# nobody reads.
+assert control.out contains "ok   wrapper: a payload after -- is heard as a call" else "witness-reach: a command after a wrapper's -- is a call, and must be heard as one"
+assert control.out contains "ok   wrapper: the payload is no longer unheard" else "witness-reach: a payload a runner names must leave the unheard set"
+assert control.out contains "ok   env prefix: the command after the assignments is heard" else "witness-reach: env VAR=x rishi run <path> is a call, and must be heard as one"
+assert control.out contains "ok   env prefix: the payload is no longer unheard" else "witness-reach: the env-prefixed payload must leave the unheard set"
+assert control.out contains "ok   wrapper: the wrapper itself is still heard, beside its payload" else "witness-reach: reading the payload must not cost the older reading of the wrapper"
+assert control.out contains "ok   wrapper and env: removing the caller returns both to unheard" else "witness-reach: both shapes must be proven from the far side too"
+
+# Outside the convention -- reported, never gated. The suffix `*_witness.rish` IS the population,
+# so a file that names itself a witness and asserts without wearing it is guarded by nothing and
+# counted by nothing. Caravan found eight such files by hand on 20260827 and one had been RED.
+assert control.out contains "ok   outside_convention: counts the self-declared asserting pair, not the quiet one" else "witness-reach: the reading takes a first-line self-declaration AND a top-level assert, never one alone"
+assert control.out contains "ok   outside_convention: a self-declared file asserting nothing is left free" else "witness-reach: a file that asserts nothing is no hidden guard, and must pass free"
+assert control.out contains "ok   outside_dark: both plants are dark, nothing names them" else "witness-reach: an outside-convention file no runner names must read dark"
+assert control.out contains "ok   outside_convention: removing the plants returns the reading" else "witness-reach: the outside reading must be proven from the far side too"
+
+# Now the living tree.
+let living = run ["sh" "tools/fixtures/w/witness_reach_scan.sh"]
+assert living.ok else "witness-reach: the living scan must complete -- ${living.err}"
+say living.out
+assert living.out contains "WITNESS_REACH" else "witness-reach: the scan must print its own reading"
+assert living.out contains "under_ceiling=yes" else "witness-reach: unreached witnesses rose above the ceiling -- put the new one on a clock, in a choir WITH its roster row, rather than raising it -- ${living.out}"
+assert living.out contains "under_family_ceiling=yes" else "witness-reach: a whole witness family lost its last clock -- give it a roster row rather than raising the family ceiling -- ${living.out}"
+
+# Both outside readings are REPORTED rather than gated, and the scan's header argues why at length:
+# the established repair is Caravan's rename, and a renamed file joins `total` unclocked, so each
+# rename raises `unreached` against a ceiling that only falls. A gate here would demand what the
+# gate beside it forbids. The witness proves the readings PRINT; the tier that rosters
+# tools/p/parity.rish is the maintainer's word.
+assert living.out contains "outside_convention=" else "witness-reach: the outside-convention reading must print on every run"
+assert living.out contains "outside_dark=" else "witness-reach: the dark reading must print on every run"
+
+# The standing reading is read from the roster, so it can never be zero while the roster has rows.
+let standing = run ["sh" "-c" "sh tools/fixtures/w/witness_reach_scan.sh --standing | wc -l | tr -d ' \n'"]
+assert standing.ok else "witness-reach: could not count the standing set -- ${standing.err}"
+assert (trim standing.out) != "0" else "witness-reach: the roster has rows, so the standing set must not be empty"
+
+say "witness-reach: GREEN -- the call/mention line is proven on planted repositories from both sides, the family census carries its denominator, and the living tree reads under both ceilings."

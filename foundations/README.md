@@ -1,0 +1,102 @@
+# Foundations
+
+**Language:** EN
+**Last updated:** `20260822.014628` (seat [The Mechanism and the Metaphor](20260822-014628_the-mechanism-and-the-metaphor.md) -- a commit body names the change in plain engineering words before it reaches for an image, with a wall in the commit hook and a meter behind it)
+**Style:** Gauge (see `context/GAUGE_STYLE.md`) - **Voice:** Kyri
+
+---
+
+This folder holds the why beneath the work -- the reasons the building means something, at two scales. The foundation briefs name why the daily craft is an offering and a service. The vision documents name the larger civic horizon the work ultimately serves. The front door that opens onto all of it is the root [`../README.md`](../README.md); the habit that returns you here is [**follow our compass**](20260826-024943_follow-our-compass.md).
+
+These rest beneath the specifications. The specs say what to build and how; these say what it is for.
+
+**Newest foundation briefs**
+
+| Stamp | Note | Meaning |
+|-------|------|---------|
+| `20260826.021735` | [Earth, the row that breathes in](20260826-021735_earth-the-row-that-breathes-in.md) | the row's threshold page: theme, sense, and both palette triads |
+| `20260826.021734` | [Water, the row that tastes](20260826-021734_water-the-row-that-tastes.md) | the row's threshold page: theme, sense, and both palette triads |
+| `20260826.021733` | [Fire, the row that sees](20260826-021733_fire-the-row-that-sees.md) | the row's threshold page: theme, sense, and both palette triads |
+| `20260826.021732` | [Air, the row that feels](20260826-021732_air-the-row-that-feels.md) | the row's threshold page: theme, sense, and both palette triads |
+| `20260826.021731` | [Aether, the row that hears](20260826-021731_aether-the-row-that-hears.md) | the row's threshold page: theme, sense, and both palette triads |
+| `20260826.014901` | [The Panchanga](20260826-014901_the-panchanga.md) | rings of five over the rota of fifteen; chapter replaces season |
+| `20260825.171919` | [Where the Water Enters](20260825-171919_where-the-water-enters.md) | the headwater companion to *the water and the work* |
+| `20260825.171913` | [The First User](20260825-171913_the-first-user.md) | the headwaters companion to *the water and the work* |
+| `20260825.171907` | [The Water and the Work](20260825-171907_the-water-and-the-work.md) | the water-forward companion to *every climate has a fiber* |
+| `20260822.014628` | [The Mechanism and the Metaphor](20260822-014628_the-mechanism-and-the-metaphor.md) | mechanism first, meaning after -- the morning six commits of a sound refactoring arc left their own maintainer unable to say what it did, because the bodies named the change entirely in image and the words *file*, *function*, *parameter*, *import*, and *call* appeared in none of them. The cause is named honestly as **structural**: the style guide rewards the landed line, the commit rule asks every body to be written in that voice, and a capable author aims where the rules point -- the same shape the negation ratchet found a day earlier in law-shaped prose. The repair is a rule with a wall behind it ([`../.claude/rules/mechanism-sentence.md`](../.claude/rules/mechanism-sentence.md)), and an honest limit stated where a person will read it: the meter counts vocabulary, so **word presence is the check and a reader reconstructing the diff is the standard**. Field read: [`../external-research/20260822-014628_the-model-prose-read-and-the-regime-confound.md`](../external-research/20260822-014628_the-model-prose-read-and-the-regime-confound.md) |
+| `20260821.175723` | [The Words a Round Uses](20260821-175723_the-words-a-round-uses.md) | ten words a round reaches for daily, defined for a first morning -- arc, round, lap, ladder, rung, fold, lift, carry, delegate, fascia -- and an honest account of the two that were carrying more than one meaning. `fascia` kept as it is (`myofascia` declined); `Sundial` and `Plumb` split from one word wearing two jobs. Adds no coinage: a vocabulary problem is almost never solved by more vocabulary |
+| `20260821.035846` | [Every Climate Has a Fiber](20260824-003828_every-climate-has-a-fiber.md) | the materials companion to the money that stays close to home -- buildings grown rather than extracted, fertility raised without animals (**Atthowe ecological**, kin to biocyclic veganic), and three water refusals that carry most of the ecological case: no animal-sourced fertility, no retting into open water, no wet finishing that leaves the loop. Universalized by climate rather than by crop -- flax, hemp, jute, agave, coir, timber, and in every region the residue already lying in the field. Funded by public money bound by what is *real* rather than by accounting, with preference on measured performance, long performance bonds, and soil outcomes spot-verified; proven by a provenance ledger anchored on an identity outside our own tree, because accountability that depends on our good behaviour is not accountability |
+| `20260818.081438` | [The Three Depths of Removal](20260818-081438_the-three-depths-of-removal.md) | molt (prep, no cut) - breach (rename, the past stays honest) - debride (remove from all history, re-seal) -- a name lives on three surfaces (living tree - history metadata - history content) and is gone only when all three are clean; the dead thing is not named even to say it was removed; the source of truth and sealed record are protected by identity; the one cost is the re-clone. Kitchen: [`../external-research/20260818-081438_the-craft-of-deep-removal.md`](../external-research/20260818-081438_the-craft-of-deep-removal.md) |
+| `20260814.071700` | [Hardware & Right-to-Repair](20260814-071700_hardware-and-right-to-repair.md) | the Chapter A front door -- the body you can hold: the Mikrophone that forgets on purpose (DREY, thirteen rungs), the open image module with the Photos app and parts marketplace above it (HUNK), four surfaces proven pure in Rye before the metal, real hardware held as custody gate #2/#3 |
+| `20260825.211055` | [Mycelium -- the Consensus Protocol](20260825-211055_mycelium-the-consensus-protocol.md) | the tree's own leaderless consensus chapter gathered into one map -- 98 modules from the Cord to the Testament, TigerBeetle + Mysticeti thanked clean-room, the order decided once and read by all the same; 80 witnesses on metal, every real-world crossing a held gate |
+| `20260811.233509` | [The Singularity](20260811-233509_the-singularity.md) | the night the tool began to tend itself -- autonomous agent development proven *within* bound, witness, and human custody; the Grain OS - Linengrow real-world timeline; written in Radiant + Twilight combined |
+| `20260811.211431` | [The Lindy Effect and the Long Return](20260811-211431_the-lindy-effect-and-the-long-return.md) | the longer a non-perishable thing has lasted, the longer it will -- why we write the front door for the reader three years on, in plain durable words |
+| `20260726.020537` | [The Breach](20260726-020537_the-breach.md) | accrete by default - breach by declaration - expiry at first outside consumer |
+| `20260726.020607` | [Output over Activity](20260726-020607_output-over-activity.md) | measure whole-pier output - leverage - counted simplification |
+
+**The long return** -- the [Lindy foundation](20260811-211431_the-lindy-effect-and-the-long-return.md) names why front doors and foundations are the highest-leverage prose we own, and it grounds the standing order [**Lindy-first, crux-first**](../.claude/rules/lindy-first-crux.md): do the longest-lived work first, and within a tier take the *crux* -- the hardest solvable problem. The **AHOY** front-door chapter ([`../expanding-prompts/date/20260811/20260811-211431_ahoy-front-door-season.md`](../expanding-prompts/date/20260811/20260811-211431_ahoy-front-door-season.md)) runs this room's weave.
+
+**The grain** -- ten standing strands and the crossing test live in [`../foundations/20260826-024942_the-grain-and-the-crossing.md`](../foundations/20260826-024942_the-grain-and-the-crossing.md); companion to [`../context/SILO_TECHNIQUE.md`](../context/SILO_TECHNIQUE.md). Strand briefs that silo here point back to that index; the index points to each brief.
+
+**The compass** -- the return habit (foundations -> grain -> active-designing -> TASKS -> witnesses) lives in [`20260826-024943_follow-our-compass.md`](20260826-024943_follow-our-compass.md) - **landed** `20260706.185512 UDT`. Say **follow our compass** for navigation; keep **grain strand** for structural fit.
+
+**Seam chapter (`20260712.052806`)** -- nib-430 horizon door: universality through the application seam. Wire serves the fold and sameness stay the why; studies 1-4 landed; CapTP-as-fold **declined** [`../context/specs/20260712-054650_captp-as-fold-carriage-declined.md`](../context/specs/20260712-054650_captp-as-fold-carriage-declined.md); giving-lane T0 in [`20260629-014512_money-that-stays-close-to-home.md`](20260629-014512_money-that-stays-close-to-home.md). Living hammock [`../active-designing/seam-season-hammock.md`](../active-designing/seam-season-hammock.md) - counsel [`../counsel/date/20260712/20260712-052806_claude-counsel-three-doors-and-teacher.md`](../counsel/date/20260712/20260712-052806_claude-counsel-three-doors-and-teacher.md).
+
+**Docs compression (`20260712.223300`)** -- raw beneath - compress above - keeper honest: [`../docs/`](../docs/README.md) shelf - `living_docs_lint.rish` ratchet-advisory - Karpathy pattern distillation [`../external-research/20260712-223300_living-docs-lint-and-karpathy-wiki-pattern.md`](../external-research/20260712-223300_living-docs-lint-and-karpathy-wiki-pattern.md). Compass step 5-6: [`TASKS.md`](../construction/TASKS.md) - [`ROADMAP.md`](../construction/ROADMAP.md).
+
+**Day-one compressor (`20260717.173848`)** -- when context is short, open [`../docs/COMPASS.md`](../docs/COMPASS.md) or the Bron card [`../docs/compass_card.bron`](../docs/compass_card.bron). This shelf stays; compressors point and never replace. Study [`../external-research/20260717-173848_foundations-archive-bron-compress-for-llm-context.md`](../external-research/20260717-173848_foundations-archive-bron-compress-for-llm-context.md).
+
+## What Lives Here
+
+**Foundation briefs** -- the why beneath the daily work, on our own roots:
+
+- `20260725-034254_always-in-it-responsive-rhythm.md` -- chapters ongoing - attention over calendar - undivided over unbounded; being gathers, doing forms; counsel practice; answers OPEN_QUESTIONS #5; **seated** `20260725.034807`.
+- `20260724-220625_five-pillars-direction.md` -- five direction pillars siloed (non-harming - devotion - meditation - sound - scripture); teachers named only in the gratitude close; **seated** `20260724.220625`.
+- `20260724-200912_nothing-to-give-custody-first-principle.md` -- **build nothing that destroys**; minimize - encrypt-with-external-key - delete-by-key; safe-by-default configuration; Seva (preference) / **Mand** (policy) settings split; **landed** `20260724.201334` - Mand name `20260724.202412` (Mona prior under erratum) - living pointer to redaction stance `20260725.001538`.
+- `20260703-182612_sameness-is-the-macro.md` -- compression without magic: sameness as the macro we accept, syntax macros we refuse; **grain strand seated** `20260704.023400 UDT`; siloed from [`../external-research/20260703-182612_sameness-is-the-macro.md`](../external-research/20260703-182612_sameness-is-the-macro.md).
+- `20260706-022912_the-wire-serves-the-fold.md` -- carriage first-principles for Comlink: the record is sovereign and the wire serves it; **landed** at ruling `20260706.232812`.
+- `20260703-140212_the-learning-chapter.md` -- the candidate Civic Style education chapter: learning as apprenticeship, a dignity floor per learner, the unlocked door in existing law, accreditation resung as a witness suite; enters canon on the maintainer's word. Kitchen twin: [`../external-research/20260710-000725_learning-chapter-plainly.md`](../external-research/20260710-000725_learning-chapter-plainly.md).
+- `20260702-202612_a-conversation-with-serena.md` -- the hearth episode: the long cycles, the diary that can't be quietly rewritten, grace as the ground and the ledger for the weeds; a mother's questions as the best part.
+- `20260628-121512_the-foundation-beneath-the-work.md` -- work as offering, building as service, freedom as the thing we build toward, grace as the ground we stand on.
+- `20260628-121512_the-heart-in-the-work.md` -- the path with heart as the test for what we take up, conserved energy as strength, clean craft as energy spent without leak.
+- `20260826-194850_the-happy-zone-and-the-thin-edge.md` -- the testing teaching siloed: two small answers at every seam turn multiplication into addition; the pure fold core proven fast inside, the world's few honest checks kept to a thin edge at the edge. **Reviewed and kept** `2026-07-10`. Metalsmoke kitchen twin: [`../external-research/20260710-002017_metalsmoke-plainly.md`](../external-research/20260710-002017_metalsmoke-plainly.md). Gate - witness - toll vocabulary: [`../context/specs/20260704-020800_one-word-one-gate.md`](../context/specs/20260704-020800_one-word-one-gate.md).
+
+**Vision documents** -- the larger civic horizon, adaptable to any community:
+
+- `20260826-024940_anywhere-we-are-found.md` -- the unifying vision above both tracks: a free open-source OS given away, open hardware, regenerative communities, a decentralized ledger with USDsui, and the creator tools and access passes that Linengrow carries forward.
+- `20260629-014512_money-that-stays-close-to-home.md` -- sovereign money for the public good, and a lawful complementary local currency beside it that circulates close to home, settling on the same decentralized ledger with USDsui.
+- `20260801-005853_mantrapod-venture-pitch.md` -- **living speech** of the Mantrapod venture pitch (Riyo - the maintainer - Grain): reflective screen, no radios, memory that forgets, a held key, screwdriver repair, local currency on the shared ledger. June fossil kept whole: `20260629-020012_mantrapod-venture-pitch.md` (Reya 2 - the maintainer - Rye OS).
+- `the-aspiring-radiance-universal.md` -- a regenerative policy design framework for every climate and community. **Reviewed and kept** `2026-07-10`.
+- `the-regenerative-experiment-universal.md` -- a literary vision of renewal across every landscape. **Reviewed and kept** `2026-07-10`.
+
+**The far horizon** -- four visions that compose one layered stack the project grows toward, distinct from the active laps (SLC-1 done; TAME hardening now). Read top to bottom: surface -> graph -> hardware -> model. Gall's Law holds -- complex systems grow from working simple ones; these name aspiration, not near-term build order.
+
+- `20260825-233310_realidream.md` -- **living** Realidream vision (Surface p29 mutant): editor-and-browser branded Pond/Pool face over one graph; Skate as paint target; invent held. June elder shed `20260827.162143`.
+- `20260826-024939_the-graph-beneath-the-surface.md` -- **living Weave** (Surface p31 thin): streaming DAG under Realidream; Mantra projection; Tally - Tablecloth. June elder shed `20260827.162143`.
+- `20260728-225239_the-wafer-and-the-sovereign-coin.md` -- **living** wafer + sovereign coin (Surface p33 thin): memory beside cores - open public infrastructure. June elder shed `20260827.162143`.
+- `20260827-025117_lantern-lattice-kiln.md` -- **living** open model layer (bake seat **Kiln**, was Oven; Ember keeps the training forge): Kiln - Lattice - Lantern. Three elders shed `20260827.162143`.
+
+**How the bench walks** -- workflow law for nested chapters (Nona n1):
+
+- `20260729-130535_season-driven-development.md` -- **living** Chapter-Driven Development (SDD) - Nest-Chapter Development: finishing edge - waymark - handback - dual editors - silo map. Study: [`../external-research/20260729-130535_season-driven-development.md`](../external-research/20260729-130535_season-driven-development.md) - template: [`../expanding-prompts/date/20260729/20260729-130535_season-open-template.md`](../expanding-prompts/date/20260729/20260729-130535_season-open-template.md).
+
+**Distilled essays** -- single-stranded meditations drawn from a year of notes, each self-contained and composable:
+
+- `20260628-133212_the-key-you-hold.md` -- identity that grows from one root you keep yourself (the keypair primitive).
+- `20260826-024941_a-home-in-plain-text.md` -- the terminal as a calm, portable, lasting place to work (Rishi, SLC-1).
+- `20260628-133212_four-promises-a-tool-can-keep.md` -- do no harm, tell the truth, hold lightly, be kind (the ethic of both tracks).
+- `20260628-133212_a-free-and-open-room.md` -- the library as the oldest knowledge commons (the open core).
+- `20260628-133212_an-open-way-to-learn.md` -- learning as a path you lay yourself, in the open (the learning record).
+- `20260628-133212_the-shape-of-a-day.md` -- a rhythm that holds a life: learn, build, gather, rest.
+- `20260628-133212_the-device-that-forgets.md` -- a pocket tool that holds nothing and hands your attention back (a hardware horizon).
+
+**The weave** -- `20260628-140812_the-roots-beneath-the-work.md` reads the seven together and connects each to the part of the system it grounds.
+
+**Birth-chart readings** -- graduated to their own lane on `2026-07-02`: the siloed study library, the reading templates, the sample reading, and the caster now live whole in [`classical-vedic-astrology/`](../classical-vedic-astrology/README.md).
+
+The gratitude syntheses that seed the briefs -- `DevotionAndCreativeFreedom.md`, `PathWithHeart.md` -- live in `../gratitude/`, beside the sources they thank.
+
+---
+
+*May the why stay in view beneath the how. May the work remain an offering. May what we build serve the hands that need it, chapter after chapter.*
+

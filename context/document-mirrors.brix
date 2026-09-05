@@ -1,0 +1,47 @@
+# context/document-mirrors.brix -- one document, several homes, proven identical.
+#
+# WHY. A document sometimes belongs in more than one room, and the usual answers are both poor:
+# move it and break every inbound reference, or copy it and let the copies drift apart in the dark.
+# A third answer is available to a tree that already measures things. DECLARE the homes here, and
+# let a witness prove every home holds the same bytes. Divergence becomes a red on the lap it
+# enters rather than a discovery months later.
+#
+# This is Tablecloth's own idea reaching the document shelf: content addressed by its hash, so
+# sameness is a fact a machine checks rather than a promise a person keeps.
+#
+# SHAPE. One `mirror` block per document. `canonical` names the copy that is edited; `at` names
+# each additional home, and the witness copies canonical over every `at` when asked to `write`.
+# Edit the canonical, run the write, commit both -- never edit a mirror by hand.
+#
+#   mirror <name>
+#   canonical <path>
+#   at <path>
+#
+# Proven by tools/d/document_mirror_witness.rish over tools/fixtures/d/document_mirror_scan.sh.
+# Seated 20260823.173634 on the maintainer's word.
+
+mirror kyri-voice
+canonical context/KYRI.md
+at ember-voices/KYRI.md
+
+mirror spellbook
+canonical context/SPELLBOOK.md
+at spellbook/README.md
+
+mirror chemical-formulas
+canonical context/CHEMICAL_FORMULAS.md
+at biochemistry/README.md
+
+# A NAMING NOTE, and a fault this descriptor was built with. the maintainer offered two homes for the
+# voices: `ember/voices/` and `ember-voices/`. The first was tried and is wrong for a reason that
+# has nothing to do with taste: **a mirror is byte-identical, and a relative link is depth-dependent**,
+# so `../foundations/x.md` resolves from `context/` (depth 1) and lands on `ember/foundations/x.md`
+# from `ember/voices/` (depth 2). Eight links broke the moment the canonical gained them. `ember-voices/`
+# stands at depth 1 beside `context/`, so every relative link resolves identically from both homes.
+#
+# The rule that follows, and the guard now proves it: **every home of a mirrored document must sit at
+# the same depth**, or the copies cannot be byte-identical and correct at once. Recorded as REDS %176.
+#
+# It also settles a second thing the elder note raised. `ember/voices/` read as a room named after one
+# of its own contents, since **Ember is one of the four voices Kyri carries**. At the root the name is
+# a compound rather than a containment, and the inversion goes away.

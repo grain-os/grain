@@ -1,0 +1,579 @@
+//! glow/lower_compose_lib_witness.rye -- proves `/+` library compose.
+//!
+//!   rye build glow/lower_compose_lib_witness.rye -femit-bin=glow/bin/lower_compose_lib_witness
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const lower = @import("lower_compose_lib.rye");
+
+const witness_version = "20260719.181259";
+
+const use_src =
+    \\::  Import Glow library then call open arm (STOA26).
+    \\/+  lib-core-open
+    \\=/  amount  5
+    \\%-  id  amount
+;
+
+const lib_src =
+    \\::  Library open arm (STOA26).
+    \\|%
+    \\++  id  sample
+    \\--
+;
+
+const use_nest_src =
+    \\::  Import nest library then call pack (STOA29).
+    \\/+  lib-core-nest
+    \\=/  amount  5
+    \\%-  pack  amount
+;
+
+const lib_nest_src =
+    \\::  Library nest arm (STOA29).
+    \\|%
+    \\++  pack  (jam sample sample)
+    \\--
+;
+
+const use_pay_src =
+    \\::  Import payload nest library then call pack (STOA31).
+    \\/+  lib-core-payload-nest
+    \\=/  amount  5
+    \\%-  pack  amount
+;
+
+const lib_pay_src =
+    \\::  Library payload nest arm (STOA31).
+    \\|%
+    \\=/  amount  5
+    \\++  pack  (jam amount amount)
+    \\--
+;
+
+const use_cue_src =
+    \\::  Import cue-jam library then call unpack (STOA57).
+    \\/+  lib-core-cue-jam
+    \\=/  amount  5
+    \\%-  unpack  amount
+;
+
+const lib_cue_src =
+    \\::  Library cue-of-jam arm (STOA57).
+    \\|%
+    \\++  unpack  (cue (jam sample sample))
+    \\--
+;
+
+const use_cue_nest_src =
+    \\::  Import nest-left cue-jam library then call unpack (STOA58).
+    \\/+  lib-core-cue-jam-nest
+    \\=/  amount  5
+    \\%-  unpack  amount
+;
+
+const lib_cue_nest_src =
+    \\::  Library nest-left cue-of-jam arm (STOA58).
+    \\|%
+    \\++  unpack  (cue (jam (mix sample sample) sample))
+    \\--
+;
+
+const use_cue_right_src =
+    \\::  Import nest-right cue-jam library then call unpack (STOA59).
+    \\/+  lib-core-cue-jam-right-nest
+    \\=/  amount  5
+    \\%-  unpack  amount
+;
+
+const lib_cue_right_src =
+    \\::  Library nest-right cue-of-jam arm (STOA59).
+    \\|%
+    \\++  unpack  (cue (jam sample (mix sample sample)))
+    \\--
+;
+
+const use_cue_both_src =
+    \\::  Import nest-both cue-jam library then call unpack (STOA60).
+    \\/+  lib-core-cue-jam-both-nest
+    \\=/  amount  5
+    \\%-  unpack  amount
+;
+
+const lib_cue_both_src =
+    \\::  Library nest-both cue-of-jam arm (STOA60).
+    \\|%
+    \\++  unpack  (cue (jam (mix sample sample) (mix sample sample)))
+    \\--
+;
+
+const use_pay_cue_src =
+    \\::  Import payload cue-jam library then call unpack (STOA65).
+    \\/+  lib-core-payload-cue-jam
+    \\=/  amount  5
+    \\%-  unpack  amount
+;
+
+const lib_pay_cue_src =
+    \\::  Library payload cue-of-jam arm (STOA65).
+    \\|%
+    \\=/  amount  5
+    \\++  unpack  (cue (jam amount amount))
+    \\--
+;
+
+const use_pay_cue_nest_src =
+    \\::  Import payload nest-left cue-jam library then call unpack (STOA66).
+    \\/+  lib-core-payload-cue-jam-nest
+    \\=/  amount  5
+    \\%-  unpack  amount
+;
+
+const lib_pay_cue_nest_src =
+    \\::  Library payload nest-left cue-of-jam arm (STOA66).
+    \\|%
+    \\=/  amount  5
+    \\++  unpack  (cue (jam (mix amount amount) amount))
+    \\--
+;
+
+const use_pay_cue_right_src =
+    \\::  Import payload nest-right cue-jam library then call unpack (STOA67).
+    \\/+  lib-core-payload-cue-jam-right-nest
+    \\=/  amount  5
+    \\%-  unpack  amount
+;
+
+const lib_pay_cue_right_src =
+    \\::  Library payload nest-right cue-of-jam arm (STOA67).
+    \\|%
+    \\=/  amount  5
+    \\++  unpack  (cue (jam amount (mix amount amount)))
+    \\--
+;
+
+const use_pay_cue_both_src =
+    \\::  Import payload nest-both cue-jam library then call unpack (STOA68).
+    \\/+  lib-core-payload-cue-jam-both-nest
+    \\=/  amount  5
+    \\%-  unpack  amount
+;
+
+const lib_pay_cue_both_src =
+    \\::  Library payload nest-both cue-of-jam arm (STOA68).
+    \\|%
+    \\=/  amount  5
+    \\++  unpack  (cue (jam (mix amount amount) (mix amount amount)))
+    \\--
+;
+
+const use_next_root_src =
+    \\::  Import next-root product library then call next-root (STOA69).
+    \\/+  lib-next-root-cue-jam
+    \\=/  root  5
+    \\%-  next-root  root
+;
+
+const lib_next_root_src =
+    \\::  Library next-root product arm (STOA69).
+    \\|%
+    \\=/  root  5
+    \\++  next-root  (cue (jam root root))
+    \\--
+;
+
+const use_session_root_src =
+    \\::  Import session-root product library then call session-root (STOA70).
+    \\/+  lib-session-root-nest-cue-jam
+    \\=/  root  5
+    \\%-  session-root  root
+;
+
+const lib_session_root_src =
+    \\::  Library session-root product arm (STOA70).
+    \\|%
+    \\=/  root  5
+    \\++  session-root  (cue (jam (mix root root) root))
+    \\--
+;
+
+fn run_selftest(init: std.process.Init) !u8 {
+    const io = init.io;
+    const a = init.arena.allocator();
+    const cwd = std.Io.Dir.cwd();
+    var buf: [4096]u8 = undefined;
+
+    const spec = try lower.parse_compose_lib(use_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&spec), "lib-core-open"));
+    assert(std.mem.eql(u8, lower.face_slice(&spec), "amount"));
+    assert(spec.value == 5);
+    assert(std.mem.eql(u8, lower.gate_slice(&spec), "id"));
+    print("compose-lib: /+ face %- parses -- GREEN\n", .{});
+
+    const bound = try lower.bind_library(&spec, lib_src);
+    assert(bound.expect == 5);
+    assert(!bound.has_payload);
+    print("compose-lib: open arm id expects sample -- GREEN\n", .{});
+
+    const n1 = try lower.lower_source_welcome(use_src, lib_src, &buf);
+    const rye1 = buf[0..n1];
+    assert(std.mem.indexOf(u8, rye1, "import(\"lib_core_open.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye1, "lib.Core.id(amount) == 5") != null);
+    assert(std.mem.indexOf(u8, rye1, "pub fn main") != null);
+    print("compose-lib: welcome imports lib and calls Core.id -- GREEN\n", .{});
+
+    const n2 = try lower.lower_source_unwelcome(use_src, lib_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n2], "lib.Core.id(amount) == 6") != null);
+    print("compose-lib: unwelcome expects mismatch -- GREEN\n", .{});
+
+    if (lower.parse_compose_lib(
+        \\/+  lib-core-open
+        \\=/  amount  5
+        \\%-  id  other
+    )) |_| {
+        return error.SampleMismatchNotCaught;
+    } else |err| {
+        if (err != lower.LowerError.SampleMismatch) return err;
+    }
+    print("compose-lib: sample mismatch refused -- GREEN\n", .{});
+
+    if (lower.bind_library(&spec,
+        \\|%
+        \\++  double
+        \\--
+    )) |_| {
+        return error.UnknownArmNotCaught;
+    } else |err| {
+        if (err != lower.LowerError.UnknownArm) return err;
+    }
+    print("compose-lib: missing arm refused UnknownArm -- GREEN\n", .{});
+
+    const nest_spec = try lower.parse_compose_lib(use_nest_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&nest_spec), "lib-core-nest"));
+    assert(std.mem.eql(u8, lower.gate_slice(&nest_spec), "pack"));
+    const nest_bound = try lower.bind_library(&nest_spec, lib_nest_src);
+    assert(nest_bound.expect == 327685);
+    assert(!nest_bound.has_payload);
+    print("compose-lib: nest pack expects jam -- GREEN\n", .{});
+
+    const n_nest = try lower.lower_source_welcome(use_nest_src, lib_nest_src, &buf);
+    const rye_nest = buf[0..n_nest];
+    assert(std.mem.indexOf(u8, rye_nest, "import(\"lib_core_nest.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_nest, "lib.Core.pack(amount) == 327685") != null);
+    print("compose-lib: nest welcome imports lib and calls Core.pack -- GREEN\n", .{});
+
+    const pay_spec = try lower.parse_compose_lib(use_pay_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&pay_spec), "lib-core-payload-nest"));
+    const pay_bound = try lower.bind_library(&pay_spec, lib_pay_src);
+    assert(pay_bound.expect == 327685);
+    assert(pay_bound.has_payload);
+    print("compose-lib: payload nest pack expects jam -- GREEN\n", .{});
+
+    const n_pay = try lower.lower_source_welcome(use_pay_src, lib_pay_src, &buf);
+    const rye_pay = buf[0..n_pay];
+    assert(std.mem.indexOf(u8, rye_pay, "import(\"lib_core_payload_nest.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_pay, "const core = lib.Core{}") != null);
+    assert(std.mem.indexOf(u8, rye_pay, "amount == 5 and core.pack() == 327685") != null);
+    print("compose-lib: payload welcome constructs Core and calls pack -- GREEN\n", .{});
+
+    if (lower.bind_library(&pay_spec,
+        \\|%
+        \\=/  amount  9
+        \\++  pack  (jam amount amount)
+        \\--
+    )) |_| {
+        return error.MalformedValueNotCaught;
+    } else |err| {
+        if (err != lower.LowerError.MalformedValue) return err;
+    }
+    print("compose-lib: face/payload mismatch refused MalformedValue -- GREEN\n", .{});
+
+    const cue_spec = try lower.parse_compose_lib(use_cue_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&cue_spec), "lib-core-cue-jam"));
+    assert(std.mem.eql(u8, lower.gate_slice(&cue_spec), "unpack"));
+    const cue_bound = try lower.bind_library(&cue_spec, lib_cue_src);
+    assert(cue_bound.expect == 5);
+    assert(!cue_bound.has_payload);
+    print("compose-lib: cue-of-jam unpack expects low half -- GREEN\n", .{});
+
+    const n_cue = try lower.lower_source_welcome(use_cue_src, lib_cue_src, &buf);
+    const rye_cue = buf[0..n_cue];
+    assert(std.mem.indexOf(u8, rye_cue, "import(\"lib_core_cue_jam.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_cue, "lib.Core.unpack(amount) == 5") != null);
+    print("compose-lib: cue-jam welcome imports lib and calls Core.unpack -- GREEN\n", .{});
+
+    const n_cue_u = try lower.lower_source_unwelcome(use_cue_src, lib_cue_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_cue_u], "lib.Core.unpack(amount) == 6") != null);
+    print("compose-lib: cue-jam unwelcome expects mismatch -- GREEN\n", .{});
+
+    const cue_nest_spec = try lower.parse_compose_lib(use_cue_nest_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&cue_nest_spec), "lib-core-cue-jam-nest"));
+    assert(std.mem.eql(u8, lower.gate_slice(&cue_nest_spec), "unpack"));
+    const cue_nest_bound = try lower.bind_library(&cue_nest_spec, lib_cue_nest_src);
+    assert(cue_nest_bound.expect == 5);
+    assert(!cue_nest_bound.has_payload);
+    print("compose-lib: nest-left cue-of-jam unpack expects low half -- GREEN\n", .{});
+
+    const n_cue_nest = try lower.lower_source_welcome(use_cue_nest_src, lib_cue_nest_src, &buf);
+    const rye_cue_nest = buf[0..n_cue_nest];
+    assert(std.mem.indexOf(u8, rye_cue_nest, "import(\"lib_core_cue_jam_nest.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_cue_nest, "lib.Core.unpack(amount) == 5") != null);
+    print("compose-lib: nest-left cue-jam welcome imports lib and calls Core.unpack -- GREEN\n", .{});
+
+    const n_cue_nest_u = try lower.lower_source_unwelcome(use_cue_nest_src, lib_cue_nest_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_cue_nest_u], "lib.Core.unpack(amount) == 6") != null);
+    print("compose-lib: nest-left cue-jam unwelcome expects mismatch -- GREEN\n", .{});
+
+    const cue_right_spec = try lower.parse_compose_lib(use_cue_right_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&cue_right_spec), "lib-core-cue-jam-right-nest"));
+    assert(std.mem.eql(u8, lower.gate_slice(&cue_right_spec), "unpack"));
+    const cue_right_bound = try lower.bind_library(&cue_right_spec, lib_cue_right_src);
+    assert(cue_right_bound.expect == 0);
+    assert(!cue_right_bound.has_payload);
+    print("compose-lib: nest-right cue-of-jam unpack expects zero -- GREEN\n", .{});
+
+    const n_cue_right = try lower.lower_source_welcome(use_cue_right_src, lib_cue_right_src, &buf);
+    const rye_cue_right = buf[0..n_cue_right];
+    assert(std.mem.indexOf(u8, rye_cue_right, "import(\"lib_core_cue_jam_right_nest.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_cue_right, "lib.Core.unpack(amount) == 0") != null);
+    print("compose-lib: nest-right cue-jam welcome imports lib and calls Core.unpack -- GREEN\n", .{});
+
+    const n_cue_right_u = try lower.lower_source_unwelcome(use_cue_right_src, lib_cue_right_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_cue_right_u], "lib.Core.unpack(amount) == 1") != null);
+    print("compose-lib: nest-right cue-jam unwelcome expects mismatch -- GREEN\n", .{});
+
+    const cue_both_spec = try lower.parse_compose_lib(use_cue_both_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&cue_both_spec), "lib-core-cue-jam-both-nest"));
+    assert(std.mem.eql(u8, lower.gate_slice(&cue_both_spec), "unpack"));
+    const cue_both_bound = try lower.bind_library(&cue_both_spec, lib_cue_both_src);
+    assert(cue_both_bound.expect == 0);
+    assert(!cue_both_bound.has_payload);
+    print("compose-lib: nest-both cue-of-jam unpack expects zero -- GREEN\n", .{});
+
+    const n_cue_both = try lower.lower_source_welcome(use_cue_both_src, lib_cue_both_src, &buf);
+    const rye_cue_both = buf[0..n_cue_both];
+    assert(std.mem.indexOf(u8, rye_cue_both, "import(\"lib_core_cue_jam_both_nest.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_cue_both, "lib.Core.unpack(amount) == 0") != null);
+    print("compose-lib: nest-both cue-jam welcome imports lib and calls Core.unpack -- GREEN\n", .{});
+
+    const n_cue_both_u = try lower.lower_source_unwelcome(use_cue_both_src, lib_cue_both_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_cue_both_u], "lib.Core.unpack(amount) == 1") != null);
+    print("compose-lib: nest-both cue-jam unwelcome expects mismatch -- GREEN\n", .{});
+
+    const pay_cue_spec = try lower.parse_compose_lib(use_pay_cue_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&pay_cue_spec), "lib-core-payload-cue-jam"));
+    assert(std.mem.eql(u8, lower.gate_slice(&pay_cue_spec), "unpack"));
+    const pay_cue_bound = try lower.bind_library(&pay_cue_spec, lib_pay_cue_src);
+    assert(pay_cue_bound.expect == 5);
+    assert(pay_cue_bound.has_payload);
+    print("compose-lib: payload cue-of-jam unpack expects low half -- GREEN\n", .{});
+
+    const n_pay_cue = try lower.lower_source_welcome(use_pay_cue_src, lib_pay_cue_src, &buf);
+    const rye_pay_cue = buf[0..n_pay_cue];
+    assert(std.mem.indexOf(u8, rye_pay_cue, "import(\"lib_core_payload_cue_jam.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_pay_cue, "const core = lib.Core{}") != null);
+    assert(std.mem.indexOf(u8, rye_pay_cue, "amount == 5 and core.unpack() == 5") != null);
+    print("compose-lib: payload cue-jam welcome constructs Core and calls unpack -- GREEN\n", .{});
+
+    const n_pay_cue_u = try lower.lower_source_unwelcome(use_pay_cue_src, lib_pay_cue_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_pay_cue_u], "amount == 5 and core.unpack() == 6") != null);
+    print("compose-lib: payload cue-jam unwelcome expects mismatch -- GREEN\n", .{});
+
+    const pay_cue_nest_spec = try lower.parse_compose_lib(use_pay_cue_nest_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&pay_cue_nest_spec), "lib-core-payload-cue-jam-nest"));
+    assert(std.mem.eql(u8, lower.gate_slice(&pay_cue_nest_spec), "unpack"));
+    const pay_cue_nest_bound = try lower.bind_library(&pay_cue_nest_spec, lib_pay_cue_nest_src);
+    assert(pay_cue_nest_bound.expect == 5);
+    assert(pay_cue_nest_bound.has_payload);
+    print("compose-lib: payload nest-left cue-of-jam unpack expects low half -- GREEN\n", .{});
+
+    const n_pay_cue_nest = try lower.lower_source_welcome(use_pay_cue_nest_src, lib_pay_cue_nest_src, &buf);
+    const rye_pay_cue_nest = buf[0..n_pay_cue_nest];
+    assert(std.mem.indexOf(u8, rye_pay_cue_nest, "import(\"lib_core_payload_cue_jam_nest.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_pay_cue_nest, "const core = lib.Core{}") != null);
+    assert(std.mem.indexOf(u8, rye_pay_cue_nest, "amount == 5 and core.unpack() == 5") != null);
+    print("compose-lib: payload nest-left cue-jam welcome constructs Core and calls unpack -- GREEN\n", .{});
+
+    const n_pay_cue_nest_u = try lower.lower_source_unwelcome(use_pay_cue_nest_src, lib_pay_cue_nest_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_pay_cue_nest_u], "amount == 5 and core.unpack() == 6") != null);
+    print("compose-lib: payload nest-left cue-jam unwelcome expects mismatch -- GREEN\n", .{});
+
+    const pay_cue_right_spec = try lower.parse_compose_lib(use_pay_cue_right_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&pay_cue_right_spec), "lib-core-payload-cue-jam-right-nest"));
+    assert(std.mem.eql(u8, lower.gate_slice(&pay_cue_right_spec), "unpack"));
+    const pay_cue_right_bound = try lower.bind_library(&pay_cue_right_spec, lib_pay_cue_right_src);
+    assert(pay_cue_right_bound.expect == 0);
+    assert(pay_cue_right_bound.has_payload);
+    print("compose-lib: payload nest-right cue-of-jam unpack expects zero -- GREEN\n", .{});
+
+    const n_pay_cue_right = try lower.lower_source_welcome(use_pay_cue_right_src, lib_pay_cue_right_src, &buf);
+    const rye_pay_cue_right = buf[0..n_pay_cue_right];
+    assert(std.mem.indexOf(u8, rye_pay_cue_right, "import(\"lib_core_payload_cue_jam_right_nest.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_pay_cue_right, "const core = lib.Core{}") != null);
+    assert(std.mem.indexOf(u8, rye_pay_cue_right, "amount == 5 and core.unpack() == 0") != null);
+    print("compose-lib: payload nest-right cue-jam welcome constructs Core and calls unpack -- GREEN\n", .{});
+
+    const n_pay_cue_right_u = try lower.lower_source_unwelcome(use_pay_cue_right_src, lib_pay_cue_right_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_pay_cue_right_u], "amount == 5 and core.unpack() == 1") != null);
+    print("compose-lib: payload nest-right cue-jam unwelcome expects mismatch -- GREEN\n", .{});
+
+    const pay_cue_both_spec = try lower.parse_compose_lib(use_pay_cue_both_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&pay_cue_both_spec), "lib-core-payload-cue-jam-both-nest"));
+    assert(std.mem.eql(u8, lower.gate_slice(&pay_cue_both_spec), "unpack"));
+    const pay_cue_both_bound = try lower.bind_library(&pay_cue_both_spec, lib_pay_cue_both_src);
+    assert(pay_cue_both_bound.expect == 0);
+    assert(pay_cue_both_bound.has_payload);
+    print("compose-lib: payload nest-both cue-of-jam unpack expects zero -- GREEN\n", .{});
+
+    const n_pay_cue_both = try lower.lower_source_welcome(use_pay_cue_both_src, lib_pay_cue_both_src, &buf);
+    const rye_pay_cue_both = buf[0..n_pay_cue_both];
+    assert(std.mem.indexOf(u8, rye_pay_cue_both, "import(\"lib_core_payload_cue_jam_both_nest.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_pay_cue_both, "const core = lib.Core{}") != null);
+    assert(std.mem.indexOf(u8, rye_pay_cue_both, "amount == 5 and core.unpack() == 0") != null);
+    print("compose-lib: payload nest-both cue-jam welcome constructs Core and calls unpack -- GREEN\n", .{});
+
+    const n_pay_cue_both_u = try lower.lower_source_unwelcome(use_pay_cue_both_src, lib_pay_cue_both_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_pay_cue_both_u], "amount == 5 and core.unpack() == 1") != null);
+    print("compose-lib: payload nest-both cue-jam unwelcome expects mismatch -- GREEN\n", .{});
+
+    const next_root_spec = try lower.parse_compose_lib(use_next_root_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&next_root_spec), "lib-next-root-cue-jam"));
+    assert(std.mem.eql(u8, lower.gate_slice(&next_root_spec), "next-root"));
+    assert(std.mem.eql(u8, lower.face_slice(&next_root_spec), "root"));
+    const next_root_bound = try lower.bind_library(&next_root_spec, lib_next_root_src);
+    assert(next_root_bound.expect == 5);
+    assert(next_root_bound.has_payload);
+    print("compose-lib: next-root product unpack expects low half -- GREEN\n", .{});
+
+    const n_next_root = try lower.lower_source_welcome(use_next_root_src, lib_next_root_src, &buf);
+    const rye_next_root = buf[0..n_next_root];
+    assert(std.mem.indexOf(u8, rye_next_root, "import(\"lib_next_root_cue_jam.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_next_root, "const core = lib.Core{}") != null);
+    assert(std.mem.indexOf(u8, rye_next_root, "root == 5 and core.next_root() == 5") != null);
+    print("compose-lib: next-root product welcome constructs Core and calls next_root -- GREEN\n", .{});
+
+    const n_next_root_u = try lower.lower_source_unwelcome(use_next_root_src, lib_next_root_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_next_root_u], "root == 5 and core.next_root() == 6") != null);
+    print("compose-lib: next-root product unwelcome expects mismatch -- GREEN\n", .{});
+
+    const session_root_spec = try lower.parse_compose_lib(use_session_root_src);
+    assert(std.mem.eql(u8, lower.stem_slice(&session_root_spec), "lib-session-root-nest-cue-jam"));
+    assert(std.mem.eql(u8, lower.gate_slice(&session_root_spec), "session-root"));
+    assert(std.mem.eql(u8, lower.face_slice(&session_root_spec), "root"));
+    const session_root_bound = try lower.bind_library(&session_root_spec, lib_session_root_src);
+    assert(session_root_bound.expect == 5);
+    assert(session_root_bound.has_payload);
+    print("compose-lib: session-root product unpack expects low half -- GREEN\n", .{});
+
+    const n_session_root = try lower.lower_source_welcome(use_session_root_src, lib_session_root_src, &buf);
+    const rye_session_root = buf[0..n_session_root];
+    assert(std.mem.indexOf(u8, rye_session_root, "import(\"lib_session_root_nest_cue_jam.rye\")") != null);
+    assert(std.mem.indexOf(u8, rye_session_root, "const core = lib.Core{}") != null);
+    assert(std.mem.indexOf(u8, rye_session_root, "root == 5 and core.session_root() == 5") != null);
+    print("compose-lib: session-root product welcome constructs Core and calls session_root -- GREEN\n", .{});
+
+    const n_session_root_u = try lower.lower_source_unwelcome(use_session_root_src, lib_session_root_src, &buf);
+    assert(std.mem.indexOf(u8, buf[0..n_session_root_u], "root == 5 and core.session_root() == 6") != null);
+    print("compose-lib: session-root product unwelcome expects mismatch -- GREEN\n", .{});
+
+    try cwd.createDirPath(io, "glow/.cache");
+    const n3 = try lower.lower_source_welcome(use_src, lib_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_open_welcome.rye", .data = buf[0..n3] });
+    const n4 = try lower.lower_source_welcome(use_nest_src, lib_nest_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_nest_welcome.rye", .data = buf[0..n4] });
+    const n5 = try lower.lower_source_welcome(use_pay_src, lib_pay_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_payload_nest_welcome.rye", .data = buf[0..n5] });
+    const n6 = try lower.lower_source_welcome(use_cue_src, lib_cue_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_cue_jam_welcome.rye", .data = buf[0..n6] });
+    const n7 = try lower.lower_source_welcome(use_cue_nest_src, lib_cue_nest_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_cue_jam_nest_welcome.rye", .data = buf[0..n7] });
+    const n8 = try lower.lower_source_welcome(use_cue_right_src, lib_cue_right_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_cue_jam_right_welcome.rye", .data = buf[0..n8] });
+    const n9 = try lower.lower_source_welcome(use_cue_both_src, lib_cue_both_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_cue_jam_both_welcome.rye", .data = buf[0..n9] });
+    const n10 = try lower.lower_source_welcome(use_pay_cue_src, lib_pay_cue_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_payload_cue_jam_welcome.rye", .data = buf[0..n10] });
+    const n11 = try lower.lower_source_welcome(use_pay_cue_nest_src, lib_pay_cue_nest_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_payload_cue_jam_nest_welcome.rye", .data = buf[0..n11] });
+    const n12 = try lower.lower_source_welcome(use_pay_cue_right_src, lib_pay_cue_right_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_payload_cue_jam_right_welcome.rye", .data = buf[0..n12] });
+    const n13 = try lower.lower_source_welcome(use_pay_cue_both_src, lib_pay_cue_both_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_payload_cue_jam_both_welcome.rye", .data = buf[0..n13] });
+    const n14 = try lower.lower_source_welcome(use_next_root_src, lib_next_root_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_next_root_cue_jam_welcome.rye", .data = buf[0..n14] });
+    const n15 = try lower.lower_source_welcome(use_session_root_src, lib_session_root_src, &buf);
+    try cwd.writeFile(io, .{ .sub_path = "glow/.cache/use_lib_session_root_nest_cue_jam_welcome.rye", .data = buf[0..n15] });
+    print("compose-lib: wrote session-root product consumer cache -- GREEN\n", .{});
+
+    const gen_use = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-open.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use, "/+  lib-core-open") != null);
+    const gen_lib = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-open.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib, "++  id  sample") != null);
+    const gen_use_nest = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_nest, "/+  lib-core-nest") != null);
+    const gen_lib_nest = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_nest, "(jam sample sample)") != null);
+    const gen_use_pay = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-payload-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_pay, "/+  lib-core-payload-nest") != null);
+    const gen_lib_pay = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-payload-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_pay, "=/  amount  5") != null);
+    assert(std.mem.indexOf(u8, gen_lib_pay, "(jam amount amount)") != null);
+    const gen_use_cue = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_cue, "/+  lib-core-cue-jam") != null);
+    const gen_lib_cue = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_cue, "(cue (jam sample sample))") != null);
+    const gen_use_cue_nest = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-cue-jam-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_cue_nest, "/+  lib-core-cue-jam-nest") != null);
+    const gen_lib_cue_nest = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-cue-jam-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_cue_nest, "(cue (jam (mix sample sample) sample))") != null);
+    const gen_use_cue_right = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-cue-jam-right-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_cue_right, "/+  lib-core-cue-jam-right-nest") != null);
+    const gen_lib_cue_right = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-cue-jam-right-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_cue_right, "(cue (jam sample (mix sample sample)))") != null);
+    const gen_use_cue_both = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-cue-jam-both-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_cue_both, "/+  lib-core-cue-jam-both-nest") != null);
+    const gen_lib_cue_both = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-cue-jam-both-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_cue_both, "(cue (jam (mix sample sample) (mix sample sample)))") != null);
+    const gen_use_pay_cue = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-payload-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_pay_cue, "/+  lib-core-payload-cue-jam") != null);
+    const gen_lib_pay_cue = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-payload-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_pay_cue, "=/  amount  5") != null);
+    assert(std.mem.indexOf(u8, gen_lib_pay_cue, "(cue (jam amount amount))") != null);
+    const gen_use_pay_cue_nest = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-payload-cue-jam-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_pay_cue_nest, "/+  lib-core-payload-cue-jam-nest") != null);
+    const gen_lib_pay_cue_nest = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-payload-cue-jam-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_pay_cue_nest, "=/  amount  5") != null);
+    assert(std.mem.indexOf(u8, gen_lib_pay_cue_nest, "(cue (jam (mix amount amount) amount))") != null);
+    const gen_use_pay_cue_right = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-payload-cue-jam-right-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_pay_cue_right, "/+  lib-core-payload-cue-jam-right-nest") != null);
+    const gen_lib_pay_cue_right = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-payload-cue-jam-right-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_pay_cue_right, "=/  amount  5") != null);
+    assert(std.mem.indexOf(u8, gen_lib_pay_cue_right, "(cue (jam amount (mix amount amount)))") != null);
+    const gen_use_pay_cue_both = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-payload-cue-jam-both-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_pay_cue_both, "/+  lib-core-payload-cue-jam-both-nest") != null);
+    const gen_lib_pay_cue_both = try cwd.readFileAlloc(io, "glow/gen/l/lib-core-payload-cue-jam-both-nest.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_pay_cue_both, "=/  amount  5") != null);
+    assert(std.mem.indexOf(u8, gen_lib_pay_cue_both, "(cue (jam (mix amount amount) (mix amount amount)))") != null);
+    const gen_use_next_root = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-next-root-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_next_root, "/+  lib-next-root-cue-jam") != null);
+    assert(std.mem.indexOf(u8, gen_use_next_root, "%-  next-root  root") != null);
+    const gen_lib_next_root = try cwd.readFileAlloc(io, "glow/gen/l/lib-next-root-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_next_root, "=/  root  5") != null);
+    assert(std.mem.indexOf(u8, gen_lib_next_root, "++  next-root  (cue (jam root root))") != null);
+    const gen_use_session_root = try cwd.readFileAlloc(io, "glow/gen/u/use-lib-session-root-nest-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_use_session_root, "/+  lib-session-root-nest-cue-jam") != null);
+    assert(std.mem.indexOf(u8, gen_use_session_root, "%-  session-root  root") != null);
+    const gen_lib_session_root = try cwd.readFileAlloc(io, "glow/gen/l/lib-session-root-nest-cue-jam.glow", a, .limited(4096));
+    assert(std.mem.indexOf(u8, gen_lib_session_root, "=/  root  5") != null);
+    assert(std.mem.indexOf(u8, gen_lib_session_root, "++  session-root  (cue (jam (mix root root) root))") != null);
+    print("compose-lib: desks session-root product carry import -- GREEN\n", .{});
+
+    print("compose-lib: version {s}\n", .{witness_version});
+    print("GREEN: `/+` Glow library compose lowers session-root product desk (STOA57–60/65–70).\n", .{});
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    return run_selftest(init);
+}

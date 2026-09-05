@@ -1,0 +1,88 @@
+# launch-silence-planet-chapter.rish -- print the 24/7 Terminal loop for SILENCE, Sound's planet.
+# STATUS -- elder printer, kept as testimony. The living recipe is
+#   rishi/bin/rishi run tools/l/launch-fleet-chapter.rish silence
+# which reads construction/fleet-roster.kyri, so a ship joins, retires, or is renamed in one row
+# rather than in a printer of its own (REDS %409). This file keeps every byte it wrote -- it
+# carries living and dated references both -- and it names silence in its filename beside an
+# astrological MODALITY, `planet`, which named which body orbits which star. That arrangement
+# changed and the filename did not, so the breach is one line: a launcher is named for its seat,
+# never for its modality. Prepped Class H in construction/SHRED_PREP.md; the cut stays RED until
+# the maintainer circles it, and the ship name itself is not touched.
+#
+#
+# Silence is Sound's own night twin made a working hand: the star sits in the Claude Desktop
+# conversation holding Glow language custody and the interface half, and its planet runs CLAUDE
+# CODE IN A MACOS TERMINAL beside it, all night if asked, lowering THE INFRASTRUCTURE HALF OF
+# GRAIN IN GLOW -- Mantra, Comlink, Tablecloth, the Caravan seams as Glow ports, written high
+# and brought to green-witnessed Rye. The two halves share one language and never one file, and
+# a planet defers to its star where lanes brush. Lane seated by the role swap of
+# 20260827.155213 on the maintainer's word. Charter:
+# active-designing/20260829-203718_the-six-bodies-and-the-always-fleet.md.
+#
+#   rishi/bin/rishi run tools/l/launch-silence-planet-chapter.rish
+
+# invariant: run from the repo root, where the durable memory lives.
+let root = run ["test" "-f" "construction/ITINERARY.md"]
+assert root.ok else "run from the repo root (construction/ITINERARY.md not found)"
+
+# invariant: the living charter this seat lives in must exist.
+let charter = run ["test" "-f" "active-designing/20260829-203718_the-six-bodies-and-the-always-fleet.md"]
+assert charter.ok else "the six-bodies charter is missing"
+
+say "SILENCE -- Sound's planet (the star's own night twin, made a hand)"
+say "=================================================================="
+say ""
+say "Host: CLAUDE CODE IN A MACOS TERMINAL, the background loop beside Sound's"
+say "Desktop session. The shared discipline lives on the living card; the lane"
+say "lives in the six-bodies charter; both are read fresh every lap."
+say ""
+say "0) PRECONDITIONS, once per machine:"
+say "   - power: adapter and  caffeinate -i  keep the longest runs unbroken, and neither is"
+say "     required -- the loop rides battery too. The repo is the durable memory: a battery"
+say "     death cuts one lap, costs only its uncommitted work, and the next round-open pull"
+say "     resumes the thread, the way a mesh survives a lost node."
+say "   - vendored parity targets:  git submodule update --init --recursive"
+say "   - jq for the readable stream:  brew install jq  (or drop the jq tail and raw NDJSON scrolls)."
+say ""
+say "1) BYPASS STANDING (once, gitignored): in .claude/settings.local.json set"
+say "   permissions.defaultMode = bypassPermissions -- or keep the flag in the lines below."
+say ""
+say "2) SMOKE TEST:"
+say "   claude --dangerously-skip-permissions --effort max -p 'reply with exactly: pong'"
+say ""
+
+say "3) THE SEAT PROMPT is a file, tools/l/silence_seat_prompt.txt -- never a shell"
+say "   string: an apostrophe inside a single-quoted one-liner strands the shell at"
+say "   its continuation prompt, which is how this loop broke on 20260829."
+say ""
+say "   ONE ROUND, ONCE -- one lap, same seat and renderer, then stop:"
+say ""
+say "LOOP_LAPS=1 sh tools/l/fleet-loop.sh silence"
+say ""
+say "4) THE 24/7 LOOP -- anchored to the tree that holds the script, so it can never"
+say "   run against a sibling checkout; LOOP_HOURS bounds it (default 18), epoch"
+say "   arithmetic so one spelling fits BSD and GNU date alike:"
+say ""
+say "sh tools/l/fleet-loop.sh silence"
+say ""
+say "5) STREAMING: the loop tees the raw stream to session-output/silence.jsonl and"
+say "   the rendered turns to session-output/silence.txt, inside the tree -- the"
+say "   read-scope law's shared window; /tmp is not durable in every enclosure."
+say ""
+say "6) WHY A FILE SENTINEL: stream-json echoes the prompt, which contains the words"
+say "   GATES-ONLY, so a grep on the stream would false-stop after one lap. The lap"
+say "   touches .loop-gates-only only when nothing but gates remains."
+say ""
+say "7) CUSTODY: the gates in ITINERARY stay MANUAL -- funds and keys, provisioning"
+say "   and paying, the maintainer's own identity, and the public seed. Reds-first,"
+say "   witness-before-narrative, and Lindy-first are seated rules, so the recursion"
+say "   stays disciplined on its own."
+say ""
+say "MANY HANDS (granted 20260828, the maintainer's word): this seat may spin up multiple"
+say "CLI agents and manage them -- subagents, worker sessions, parallel claude or"
+say "codex dependents -- when dividing a lap pays. Every standing law rides into"
+say "each dependent: custody gates stay MANUAL, one writer per checkout (the %291"
+say "habit -- ListAgents, name the peer, precise-stage whole-index commits, %376), and the parent"
+say "seat answers for what its dependents stage."
+say ""
+say "GREEN: Silence 24/7 recipe printed -- the star holds the language by day, and its planet lowers the deep services by night."

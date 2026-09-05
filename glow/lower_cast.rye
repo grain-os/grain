@@ -1,0 +1,145 @@
+//! glow/lower_cast.rye -- lower a parsed `^-` cast to runnable `.rye` text.
+//!
+//! Per active-designing/date/20260716/20260716-033000_sameness-and-the-rune-glow-grammar-riscv.md:
+//! `^-  <mold>` catches a type mismatch at the cast boundary. This hop lowers
+//! unsigned auras `@u8` - `@u16` - `@u32` - `@u64` to checked `std.math.cast`.
+//! Named molds and other auras refuse until a later lap.
+
+const std = @import("std");
+const rc = @import("rune_cast.rye");
+
+pub const LowerError = rc.ParseError || error{
+    Overflow,
+    EmptySource,
+    AuraNotYetLowered,
+    NamedShapeNotYetLowered,
+    ArgvSampleAuraNotYetLowered,
+};
+
+pub const cast_welcome_raw: u64 = 42;
+
+fn zig_type_for_mold(mold: []const u8) LowerError![]const u8 {
+    if (mold.len == 0) return error.MissingMold;
+    if (mold[0] != '@') return error.NamedShapeNotYetLowered;
+    if (std.mem.eql(u8, mold, "@u8")) return "u8";
+    if (std.mem.eql(u8, mold, "@u16")) return "u16";
+    if (std.mem.eql(u8, mold, "@u32")) return "u32";
+    if (std.mem.eql(u8, mold, "@u64")) return "u64";
+    return error.AuraNotYetLowered;
+}
+
+/// Overflow raw for unwelcome path. `@u64` needs a u128 source (2^64).
+fn unwelcome_raw_u64(zig_ty: []const u8) LowerError!u64 {
+    if (std.mem.eql(u8, zig_ty, "u8")) return 256;
+    if (std.mem.eql(u8, zig_ty, "u16")) return 65536;
+    if (std.mem.eql(u8, zig_ty, "u32")) return 4294967296;
+    if (std.mem.eql(u8, zig_ty, "u64")) return error.Overflow; // use u128 emit path
+    return error.AuraNotYetLowered;
+}
+
+fn emit_from_u64(mold: []const u8, zig_ty: []const u8, raw: u64, out: []u8) LowerError!u32 {
+    const written = std.fmt.bufPrint(out,
+        \\const std = @import("std");
+        \\
+        \\/// Lowered from Glow `^-  {s}` — checked cast at the boundary.
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const raw: u64 = {d};
+        \\    const casted: {s} = std.math.cast({s}, raw) orelse return 1;
+        \\    return if (@as(u64, casted) == raw) 0 else 1;
+        \\}}
+        \\
+    , .{ mold, raw, zig_ty, zig_ty }) catch return error.Overflow;
+    return @intCast(written.len);
+}
+
+fn emit_u64_from_u128(mold: []const u8, raw_hi_literal: []const u8, expect_eq_raw: bool, out: []u8) LowerError!u32 {
+    // welcome: raw fits in u64; unwelcome: raw is 2^64 (literal as u128).
+    if (expect_eq_raw) {
+        const written = std.fmt.bufPrint(out,
+            \\const std = @import("std");
+            \\
+            \\/// Lowered from Glow `^-  {s}` — checked cast at the boundary.
+            \\pub fn main(_: std.process.Init) !u8 {{
+            \\    const raw: u128 = {d};
+            \\    const casted: u64 = std.math.cast(u64, raw) orelse return 1;
+            \\    return if (@as(u128, casted) == raw) 0 else 1;
+            \\}}
+            \\
+        , .{ mold, cast_welcome_raw }) catch return error.Overflow;
+        return @intCast(written.len);
+    }
+    const written = std.fmt.bufPrint(out,
+        \\const std = @import("std");
+        \\
+        \\/// Lowered from Glow `^-  {s}` — checked cast at the boundary.
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const raw: u128 = {s};
+        \\    const casted: u64 = std.math.cast(u64, raw) orelse return 1;
+        \\    return if (@as(u128, casted) == raw) 0 else 1;
+        \\}}
+        \\
+    , .{ mold, raw_hi_literal }) catch return error.Overflow;
+    return @intCast(written.len);
+}
+
+fn emit_for(mold: []const u8, zig_ty: []const u8, welcome: bool, out: []u8) LowerError!u32 {
+    if (std.mem.eql(u8, zig_ty, "u64")) {
+        if (welcome) return emit_u64_from_u128(mold, "", true, out);
+        return emit_u64_from_u128(mold, "18446744073709551616", false, out); // 2^64
+    }
+    if (welcome) return emit_from_u64(mold, zig_ty, cast_welcome_raw, out);
+    const raw = try unwelcome_raw_u64(zig_ty);
+    return emit_from_u64(mold, zig_ty, raw, out);
+}
+
+/// Parse one Glow cast line and emit a welcome-path program (value fits).
+pub fn lower_line_welcome(line: []const u8, out: []u8) LowerError!u32 {
+    const trimmed = std.mem.trim(u8, line, " \t\r\n");
+    if (trimmed.len == 0) return error.EmptySource;
+    const spec = try rc.parse(trimmed);
+    const mold = rc.mold_slice(&spec);
+    const zig_ty = try zig_type_for_mold(mold);
+    return emit_for(mold, zig_ty, true, out);
+}
+
+/// Parse one Glow cast line and emit an unwelcome-path program (value overflows).
+pub fn lower_line_unwelcome(line: []const u8, out: []u8) LowerError!u32 {
+    const trimmed = std.mem.trim(u8, line, " \t\r\n");
+    if (trimmed.len == 0) return error.EmptySource;
+    const spec = try rc.parse(trimmed);
+    const mold = rc.mold_slice(&spec);
+    const zig_ty = try zig_type_for_mold(mold);
+    return emit_for(mold, zig_ty, false, out);
+}
+
+/// Emit a program whose sample is one decimal `@u32` from process argv (G3).
+/// Cast path -- not bartis; bartis argv lives in `lower_shop_gate` (STOA101).
+fn emit_from_argv_u32(mold: []const u8, out: []u8) LowerError!u32 {
+    const written = std.fmt.bufPrint(out,
+        \\const std = @import("std");
+        \\
+        \\/// Lowered from Glow `^-  {s}` — sample from process argv (G3).
+        \\pub fn main(init: std.process.Init) !u8 {{
+        \\    const alloc = init.arena.allocator();
+        \\    const argv = try init.minimal.args.toSlice(alloc);
+        \\    if (argv.len < 2) return 2;
+        \\    const sample = std.fmt.parseInt(u32, argv[1], 10) catch return 2;
+        \\    const raw: u64 = sample;
+        \\    const casted: u32 = std.math.cast(u32, raw) orelse return 1;
+        \\    return if (@as(u64, casted) == raw) 0 else 1;
+        \\}}
+        \\
+    , .{mold}) catch return error.Overflow;
+    return @intCast(written.len);
+}
+
+/// Parse one Glow cast line and emit an argv-sample program (`@u32` only).
+pub fn lower_line_argv_sample(line: []const u8, out: []u8) LowerError!u32 {
+    const trimmed = std.mem.trim(u8, line, " \t\r\n");
+    if (trimmed.len == 0) return error.EmptySource;
+    const spec = try rc.parse(trimmed);
+    const mold = rc.mold_slice(&spec);
+    if (!std.mem.eql(u8, mold, "@u32")) return error.ArgvSampleAuraNotYetLowered;
+    _ = try zig_type_for_mold(mold); // refuse unknown auras with the cast error first
+    return emit_from_argv_u32(mold, out);
+}

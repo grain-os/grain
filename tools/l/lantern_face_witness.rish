@@ -1,0 +1,93 @@
+# tools/l/lantern_face_witness.rish -- the first Lantern face, proven with its Glow wall.
+#
+#   rishi/bin/rishi run tools/l/lantern_face_witness.rish
+#
+# The asking voice gets a face: pond/apps/lantern_face.rye paints one bounded exchange
+# (question, answer, settledness marker) onto the 40x8 proof grid, and its law is the
+# voice's contract made structural -- an unknown that carries an answer refuses, a
+# width refuses by name rather than clipping. The face's 38-byte text budget also
+# speaks in Glow at src/gate/gate-lantern-face-text-u32.glow, and this witness holds
+# the two spellings to one number so neither drifts alone.
+
+say "lantern-face: Language EN -- the asking voice's first face, on the proof grid."
+say "lantern-face: Style Gauge, Meter -- each leg names its exchange and its answer."
+say "lantern-face: Lens TAME -- refusals before mutation; the uncertainty law proven both ways."
+
+let zig = "vendor/zig-toolchain/zig"
+
+say "lantern-face: building and running the face's own legs..."
+let build = run ["sh" "-c" "mkdir -p pond/bin && env RYE_ZIG=${zig} rye/bin/rye build pond/apps/lantern_face.rye -femit-bin=pond/bin/lantern-face"]
+assert build.ok else "lantern-face: the face failed to build -- read the compiler's own words"
+let face = run ["sh" "-c" "pond/bin/lantern-face 2>&1"]
+assert face.ok else "lantern-face: the face's legs went red -- read its own GREEN lines"
+assert face.out contains "the honest i-don't-know is a first-class answer" else "lantern-face: the unknown leg is missing"
+assert face.out contains "an unknown carrying an answer refuses" else "lantern-face: the voice's law leg is missing"
+assert face.out contains "the marker wears its kind" else "lantern-face: the styled marker leg is missing"
+assert face.out contains "proposed, never settled" else "lantern-face: the real-completion feed leg is missing"
+assert face.out contains "no stop reason earns settled" else "lantern-face: the settled-is-earned leg is missing"
+assert face.out contains "GREEN: lantern-face" else "lantern-face: the closing GREEN is missing"
+
+say "lantern-face: the .brush-themed variant -- the cascade recolors one settledness..."
+let tbuild = run ["sh" "-c" "mkdir -p pond/bin && env RYE_ZIG=${zig} rye/bin/rye build pond/apps/lantern_face_theme.rye -femit-bin=pond/bin/lantern-face-theme"]
+assert tbuild.ok else "lantern-face: the themed variant failed to build"
+let theme = run ["sh" "-c" "pond/bin/lantern-face-theme 2>&1"]
+assert theme.ok else "lantern-face: the themed legs went red -- read its own GREEN lines"
+assert theme.out contains "unknown wears the authored stone edge" else "lantern-face: the themed unknown leg is missing"
+assert theme.out contains "a theme naming no marker key refuses" else "lantern-face: the markerless refusal leg is missing"
+assert theme.out contains "GREEN: lantern-face-theme" else "lantern-face: the themed closing GREEN is missing"
+
+say "lantern-face: the Glow wall -- 38 lawful, 39 past the budget..."
+let g38 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-face-text-u32.glow" "38"]
+assert g38.ok else "lantern-face: gate(38) failed to run"
+assert g38.out contains "EXIT:0" else "lantern-face: gate(38) did not exit 0"
+assert g38.out contains "1" else "lantern-face: gate(38) -- the exact budget is lawful"
+let g39 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-face-text-u32.glow" "39"]
+assert g39.ok else "lantern-face: gate(39) failed to run"
+assert g39.out contains "0" else "lantern-face: gate(39) -- one past the budget refuses"
+
+say "lantern-face: the uncertainty law in Glow -- the language's first composed condition..."
+let u1 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-unknown-law-u32.glow" "2" "5"]
+assert u1.ok else "lantern-face: unknown-law(2,5) failed to run"
+assert u1.out contains "EXIT:0" else "lantern-face: unknown-law(2,5) did not exit 0"
+assert u1.out contains "0" else "lantern-face: unknown-law(2,5) -- an unknown carrying an answer refuses"
+let u2 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-unknown-law-u32.glow" "2" "0"]
+assert u2.ok else "lantern-face: unknown-law(2,0) failed to run"
+assert u2.out contains "1" else "lantern-face: unknown-law(2,0) -- the honest unknown is lawful"
+let u3 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-unknown-law-u32.glow" "0" "5"]
+assert u3.ok else "lantern-face: unknown-law(0,5) failed to run"
+assert u3.out contains "1" else "lantern-face: unknown-law(0,5) -- a settled answer is lawful"
+
+say "lantern-face: the feed's kind law in Glow -- the language's first or-composition..."
+let f1 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-feed-unknown-u32.glow" "2" "5"]
+assert f1.ok else "lantern-face: feed-law(2,5) failed to run"
+assert f1.out contains "2" else "lantern-face: feed-law(2,5) -- an error stop answers unknown"
+let f2 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-feed-unknown-u32.glow" "0" "0"]
+assert f2.ok else "lantern-face: feed-law(0,0) failed to run"
+assert f2.out contains "2" else "lantern-face: feed-law(0,0) -- an empty completion answers unknown"
+let f3 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-feed-unknown-u32.glow" "0" "5"]
+assert f3.ok else "lantern-face: feed-law(0,5) failed to run"
+assert f3.out contains "1" else "lantern-face: feed-law(0,5) -- a finished answer arrives proposed"
+
+say "lantern-face: alias-sameness on metal -- the rune twin answers as the word twin..."
+let r1 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-unknown-law-rune-u32.glow" "2" "5"]
+assert r1.ok else "lantern-face: rune-twin(2,5) failed to run"
+assert r1.out contains "0" else "lantern-face: rune-twin(2,5) must answer as the word twin"
+let r2 = run ["env" "RYE_ZIG=${zig}" "sh" "tools/g/glow_run_worker.sh" "src/gate/gate-lantern-unknown-law-rune-u32.glow" "2" "0"]
+assert r2.ok else "lantern-face: rune-twin(2,0) failed to run"
+assert r2.out contains "1" else "lantern-face: rune-twin(2,0) must answer as the word twin"
+
+say "lantern-face: parity anchors -- one number, two languages..."
+let rye_wall = run ["grep" "-c" "pub const max_face_text: u32 = 38;" "pond/apps/lantern_face.rye"]
+assert rye_wall.ok else "lantern-face: the Rye budget moved or renamed -- re-anchor both spellings together"
+let glow_wall = run ["grep" "-c" "(gth sample 38)" "src/gate/gate-lantern-face-text-u32.glow"]
+assert glow_wall.ok else "lantern-face: the Glow budget moved -- re-anchor both spellings together"
+let kind_order = run ["grep" "-c" "pub const FaceKind = enum { settled, proposed, unknown };" "pond/apps/lantern_face.rye"]
+assert kind_order.ok else "lantern-face: the FaceKind order moved -- the unknown-law desk's kind 2 must move with it"
+let rye_law = run ["grep" "-c" "AnswerWithUnknown" "pond/apps/lantern_face.rye"]
+assert rye_law.ok else "lantern-face: the Rye uncertainty refusal moved or renamed -- re-anchor both spellings together"
+let stop_order = run ["grep" "-c" "eos," "lantern/lantern_core.rye"]
+assert stop_order.ok else "lantern-face: the StoppedReason order moved -- the feed desk's reason 2 must move with it"
+let feed_fn = run ["grep" "-c" "pub fn face_kind_for" "pond/apps/lantern_face.rye"]
+assert feed_fn.ok else "lantern-face: face_kind_for moved or renamed -- the feed desk speaks its law"
+
+say "GREEN: lantern-face -- the asking voice has a face, its law refuses invented certainty, and both languages speak one wall."
