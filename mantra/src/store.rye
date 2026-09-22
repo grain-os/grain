@@ -1,0 +1,204 @@
+//! mantra/src/store.rye -- the content-addressed blob store.
+//!
+//! A blob's identity is its SHA3-256 digest, hex-encoded (64 characters). The
+//! store lives under `.mantra/blobs/` relative to the repository root. Blobs
+//! are write-once: if the name exists, the content is already there.
+//!
+//! HEAD holds the blob name of the current weave state -- a single line of 64
+//! hex characters plus a newline. An absent HEAD means the repository is not
+//! yet initialized.
+//!
+//! A NAME IS A PROOF, AND THIS STORE SPENDS IT. The digest is computed at
+//! write time, and until `20260908` no read path recomputed it -- so the whole
+//! content-addressing claim rested on the bytes on disk never changing. Beside
+//! that, `Dir.readFile` fills its buffer and calls that the answer: its
+//! `readSliceShort` returns `buffer.len` the moment the buffer is full, so a
+//! blob past the read ceiling came back as its own first megabyte with no
+//! error raised. Either alone is survivable; together they are silent
+//! corruption, because a truncated `mantra-weave-v1` record is a VALID PREFIX
+//! -- positions still rise, generations still stand at one or above -- so it
+//! lifts as a shorter weave and the next commit writes it back under its own
+//! honest digest. Read `../../external-research/20260908-170154_a-name-is-a-proof-computed-once.md`
+//! for the whole finding.
+//!
+//! Both halves are closed here. `read_blob` refuses a blob past
+//! `max_blob_bytes` by name rather than truncating it, and then recomputes the
+//! digest of the bytes it read and refuses a name that disagrees. A verified
+//! read can never return a prefix, so the second check subsumes the first --
+//! the first is kept because a ceiling read at the edge refuses before an
+//! allocation grows, where a digest refuses after.
+//!
+//! Public surface:
+//!   max_blob_bytes                        the one ceiling, over one directory
+//!   StoreError                            what this module refuses, by name
+//!   Store.open(io, root_dir)              !Store
+//!   store.write_blob(allocator, io, data) ![]const u8  (returns the name)
+//!   store.read_blob(allocator, io, name)  ![]u8        (returns the content)
+//!   store.read_head(allocator, io)        !?[]u8       (null if absent)
+//!   store.write_head(io, name)            !void
+
+const std  = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const Dir  = std.Io.Dir;
+const Sha3 = std.crypto.hash.sha3.Sha3_256;
+
+/// A hex encoding of a SHA3-256 digest -- the name of every blob.
+pub const BlobName = [Sha3.digest_length * 2]u8;
+
+/// The largest blob this store will write or read, in bytes.
+///
+/// Stated in bytes because bytes are what the machine actually has, and named
+/// once because two heights over one directory is how a blob written by one
+/// hand becomes a prefix read by another. `mantra/src/main.rye` allocated
+/// 4 MiB here and this module allocated 1 MiB, over the same `.mantra/blobs/`.
+///
+/// The number is derived from what a blob holds. A `mantra-weave-v1` record is
+/// one row per line -- a generation, a position, and the text -- so a weave at
+/// `weave.max_weave_lines` (1,048,576) rows fits inside 128 MiB when a row
+/// averages 128 bytes. This tree's own Rye averages 50.3 bytes a line
+/// (37,790,676 bytes over 751,407 lines, `git ls-files '*.rye' | xargs wc -lc`,
+/// measured `20260908`), and a v1 row adds two tabs and two small integers, so
+/// 128 bytes a row stands at roughly twice what this tree's own text costs. It
+/// is also 32 times the elder CLI's own 4 MiB, so naming one ceiling raises the
+/// shipped capacity rather than lowering it -- which is the reason the port was
+/// declined once already (`20260908.143034`).
+pub const max_blob_bytes: u64 = 1 << 27;
+
+/// What this module refuses, by name.
+pub const StoreError = error{
+    /// The blob is larger than `max_blob_bytes` -- on the way in, before it is
+    /// written under a name nothing could read back whole; or on the way out,
+    /// rather than returning the prefix that fitted.
+    BlobTooLarge,
+    /// The bytes read hash to a digest other than the name they were asked
+    /// for under. The name is the proof this store paid for at write time, and
+    /// this is where it is spent: a truncated, altered, or misfiled blob
+    /// refuses here rather than travelling on as a shorter honest weave.
+    BlobNameMismatch,
+};
+
+/// The blob store: a handle to the `.mantra/` directory tree.
+pub const Store = struct {
+    root:  Dir,  // the repository root (cwd at init time)
+    mantra_dir: Dir, // `.mantra/`
+    blobs_dir:  Dir, // `.mantra/blobs/`
+
+    /// Open (or create) the `.mantra/` tree under `root_dir`.
+    /// Idempotent: safe to call on an already-initialized repository.
+    pub fn open(io: std.Io, root_dir: Dir) !Store {
+        // Create .mantra/ and .mantra/blobs/ if they do not exist.
+        root_dir.createDir(io, ".mantra", .default_dir) catch |err| {
+            if (err != error.PathAlreadyExists) return err;
+        };
+        const mantra = try root_dir.openDir(io, ".mantra", .{});
+        mantra.createDir(io, "blobs", .default_dir) catch |err| {
+            if (err != error.PathAlreadyExists) return err;
+        };
+        const blobs = try mantra.openDir(io, "blobs", .{});
+        return .{ .root = root_dir, .mantra_dir = mantra, .blobs_dir = blobs };
+    }
+
+    /// Write `data` as a blob. Returns the blob name (64-char hex string,
+    /// allocated from `allocator`). If the blob already exists, a write is
+    /// skipped -- content-addressing guarantees the existing content matches.
+    pub fn write_blob(self: *const Store, allocator: std.mem.Allocator, io: std.Io, data: []const u8) ![]const u8 {
+        // invariant: an empty blob would be written under the digest of nothing, which every
+        // empty write would then share
+        assert(data.len > 0);
+
+        // The ceiling is read at the edge, before a byte is written: a blob
+        // past it could be stored and never read back whole, which is the one
+        // shape a content-addressed store must not be able to reach.
+        if (data.len > max_blob_bytes) return StoreError.BlobTooLarge;
+
+        // invariant: the write below stands inside the ceiling both sides share
+        assert(data.len <= max_blob_bytes);
+
+        // Compute the SHA3-256 digest and hex-encode it as the name.
+        var digest: [Sha3.digest_length]u8 = undefined;
+        Sha3.hash(data, &digest, .{});
+        const name = try hex_encode(allocator, &digest);
+
+        // Write the blob only if the name is new (content-addressing guarantee).
+        self.blobs_dir.writeFile(io, .{ .sub_path = name, .data = data }) catch |err| {
+            if (err != error.PathAlreadyExists) return err;
+            // Already exists -- content is identical by the hash guarantee.
+        };
+
+        return name;
+    }
+
+    /// Read a blob by its name. Returns the content, allocated from `allocator`.
+    pub fn read_blob(self: *const Store, allocator: std.mem.Allocator, io: std.Io, name: []const u8) ![]u8 {
+        // invariant: a store name is the hex of a digest, exactly two characters per byte, so
+        // any other length would address a blob that was never written
+        assert(name.len == Sha3.digest_length * 2);
+        // `readFileAlloc` refuses at a limit rather than filling a buffer and
+        // calling that the answer, which is what `readFile` does. The limit is
+        // one past the ceiling because it refuses on REACHING it, so a blob
+        // standing exactly at `max_blob_bytes` still reads whole.
+        const limit = std.Io.Limit.limited64(max_blob_bytes + 1);
+        const content = self.blobs_dir.readFileAlloc(io, name, allocator, limit) catch |err| {
+            if (err == error.StreamTooLong) return StoreError.BlobTooLarge;
+            return err;
+        };
+
+        // invariant: a read that returned stands inside the ceiling, so the
+        // digest below is taken over the whole blob rather than over a prefix
+        assert(content.len <= max_blob_bytes);
+
+        // Spend the proof. The name was computed from these bytes at write
+        // time; recomputing it here is what makes a blob that changed under us
+        // refuse rather than travel on.
+        var digest: [Sha3.digest_length]u8 = undefined;
+        Sha3.hash(content, &digest, .{});
+        const recomputed = try hex_encode(allocator, &digest);
+        defer allocator.free(recomputed);
+
+        // postcondition: the bytes returned hash to the name they were asked for
+        if (!std.mem.eql(u8, recomputed, name)) return StoreError.BlobNameMismatch;
+
+        return content;
+    }
+
+    /// Read HEAD. Returns null if HEAD does not exist (uninitialised repo).
+    /// Returns the 64-char blob name, allocated from `allocator`, if present.
+    pub fn read_head(self: *const Store, allocator: std.mem.Allocator, io: std.Io) !?[]u8 {
+        var buf: [65]u8 = undefined; // 64 hex chars + optional newline
+        const content = self.mantra_dir.readFile(io, "HEAD", &buf) catch |err| {
+            if (err == error.FileNotFound) return null;
+            return err;
+        };
+        // Strip trailing newline if present.
+        const name = std.mem.trimEnd(u8, content, "\n");
+        if (name.len != Sha3.digest_length * 2) return null; // corrupt HEAD
+        return try allocator.dupe(u8, name);
+    }
+
+    /// Write a new HEAD, pointing to `name` (a 64-char hex blob name).
+    pub fn write_head(self: *const Store, io: std.Io, name: []const u8) !void {
+        // invariant: a store name is the hex of a digest, exactly two characters per byte, so
+        // any other length would address a blob that was never written
+        assert(name.len == Sha3.digest_length * 2);
+        // Write "name\n" as HEAD.
+        var buf: [65]u8 = undefined;
+        const head_content = std.fmt.bufPrint(&buf, "{s}\n", .{name}) catch unreachable;
+        try self.mantra_dir.writeFile(io, .{ .sub_path = "HEAD", .data = head_content });
+    }
+};
+
+/// Hex-encode `bytes` into a freshly allocated string.
+fn hex_encode(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    // invariant: input is non-empty -- hashing nothing is a caller error
+    assert(bytes.len > 0);
+    const out = try allocator.alloc(u8, bytes.len * 2);
+    // postcondition: output is exactly twice the input length
+    assert(out.len == bytes.len * 2);
+    const hex = "0123456789abcdef";
+    for (bytes, 0..) |b, i| {
+        out[i * 2]     = hex[b >> 4];
+        out[i * 2 + 1] = hex[b & 0x0f];
+    }
+    return out;
+}

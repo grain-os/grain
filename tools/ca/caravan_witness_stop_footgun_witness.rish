@@ -1,0 +1,33 @@
+# caravan_witness_stop_footgun_witness.rish -- refuse witness-stop-after-N outside witness mode.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/ca/caravan_witness_stop_footgun_witness.rish
+
+let zig = "vendor/zig-toolchain/zig"
+let delivery = "mantra/bin/recall-subscribe-poll-delivery"
+let service = "caravan/bin/subscribe-poll-service"
+# THE PEN IS UNIQUE PER RUN, and the elder name leaves with it. `/tmp/acme-owner*` was a
+# CONSTANT shared by six files, so two of them running at once -- or one witness on each of eight
+# ships -- collide on one stop sentinel: one run's prep `rm -f` deletes the stop signal another
+# run just wrote to halt its service, and a service that never stops hangs a witness or, worse,
+# stops early and inverts its result. Each file is self-contained, so a per-run pen breaks no
+# contract (%618/%601). The elder repository name is breached to `grain` here and kept in history
+# and in dated testimony, which is where a superseded name belongs (`20260908.180000`).
+let mk = run ["sh" "-c" "mktemp -d /tmp/grain_poll.XXXXXX"]
+assert mk.ok else "poll pen: the pen could not be opened"
+let pen = trim mk.out
+let sentinel = "${pen}/poll-stop"
+
+let build = run ["sh" "-c" "mkdir -p mantra/bin caravan/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh mantra/recall_subscribe_poll_delivery.rye -lc -femit-bin=${delivery} && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh caravan/subscribe_poll_service.rye -lc -femit-bin=${service}"]
+assert build.ok else "witness stop footgun build failed -- ${build.err_brief}"
+
+let refuse = run ["sh" "-c" "rm -f ${sentinel} && ${service} ${delivery} ${sentinel} 2 2>&1; echo exit:$?"]
+assert refuse.out contains "witness-stop-after-N is test-only" else "missing refusal message"
+assert refuse.out contains "CARAVAN_WITNESS_MODE=1" else "missing witness mode hint"
+assert refuse.out contains "exit:2" else "footgun should exit 2"
+
+let ok = run ["sh" "-c" "rm -f ${sentinel} && CARAVAN_WITNESS_MODE=1 ${service} ${delivery} ${sentinel} 2 2>&1"]
+assert ok.ok else "witness mode supervisor exited non-zero"
+assert ok.out contains "GREEN" else "witness mode supervisor not GREEN"
+
+say "GREEN: Caravan witness-stop-after footgun witness passed."

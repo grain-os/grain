@@ -1,0 +1,96 @@
+# amphora_roster_witness.rish -- every authored Amphora module answers to a rostered guard.
+#
+# TWO CLAIMS, in the order that makes the second worth believing. The control runs first: 68 planted
+# behaviors on throwaway rooms, each refusal shown from the failing side and then lifted, the
+# reported reading proven to leave the verdict alone, and the pen proven innocent against a scan
+# patched to always answer ok. The real room follows, once the instrument has shown it can red. A
+# guard proven able to refuse is a guard whose green carries weight, so the order earns its place.
+#
+# WHY IT EXISTS (`20260907.223214`). The Sound lane has held this reading for `tally/` since
+# `20260826` -- *every tally module answers to a witness, or is counted*. The vessel room answered
+# the same question in prose: the roster's own block carried a module and line figure a hand
+# corrected by typing, and `amphora/README.md` read *twelve standing witnesses run every lap* while
+# fifteen rows stood under `tools/am/`, thirteen of them on the lap clock. A scan reports on every
+# run where prose keeps whatever it was given, so the count reads off an instrument from here
+# forward. That is REDS `%360`'s family, repaired the way the family asks.
+#
+# AND THE FIRST REPAIR REACHED THE COUNT WITHOUT REACHING THE LIST (`20260908`). Both sentences
+# above were written into the scan and this header as a present-tense diagnosis, and both drifted
+# with the roster they described -- 15 rows became 16 while the words stood still. The page's own
+# guard list drifted the same way, naming 11 of 16. `readme_unnamed` is why neither can do it
+# again; these two paragraphs are kept in the past tense they belong to.
+#
+# AND THE SECOND REPAIR REACHED THE LIST WITHOUT REACHING THE NUMBERS IN THE PROSE (`20260908`).
+# One sentence on that page still spelled a line count: *`purchase_delivery.rye`,
+# `vessel_fetch_wire.rye` and `vessel_fetch_delivery.rye` are 1,160 lines*. It was true at
+# `0ee5c8171` and was written into `05c87d3d0`, the commit that grew `vessel_fetch_delivery.rye` by
+# 109 changed lines -- so it shipped 77 short inside the commit that made it short, and stood 161
+# short two days on. A hand that measures and then keeps working writes a number already false when
+# it lands, which no care prevents and one reading does. `own_lines` and the `detail_lines` listing
+# weigh the room on every run, and `readme_spelled_lines` holds the door at zero.
+#
+# WHAT IS GATED, and what is counted beside it. `uncovered`, `orphan_rows`, `readme_unnamed` and
+# `readme_spelled_lines` stand at zero, each for a plain reason: a module every rostered guard passes
+# over would ship a break green, a roster row earns its place by naming a file that stands, the room's
+# front door is where a reader looks for the guard list before ever opening the roster, and a count
+# spelled there is stale before its own commit lands. `singly_covered` is REPORTED, because a module
+# born today is named by exactly one guard on the day it lands -- a ceiling there would refuse the
+# most ordinary work in the room, and a wall like that is one somebody turns off. `own_lines` is
+# REPORTED for the same shape one step further along: a module grows every lap, so the number the
+# door needs is a reading rather than a ceiling.
+#
+# WHY THE LAST TWO GATES HAVE TEETH WHERE `singly_covered` DOES NOT. Seating a guard is a roster row
+# a hand writes; naming it at the room's door is the same hand, the same lap, one line. Writing a
+# line count at the door is a hand's own choice too, and the alternative -- naming this scan -- is
+# the same sentence and stays true. So neither wall refuses anything anyone does on purpose, and
+# both were arrived at by repair rather than by decree: the two guard names missing on `20260908`
+# were written the lap that reading landed, and the one spelled count was replaced the lap this one
+# did. The door is asserted BY PATH below, so the room cannot answer either reading by deleting the
+# page it reads.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/am/amphora_roster_witness.rish
+
+let control = "tools/fixtures/am/amphora_roster_control.sh"
+let scan = "tools/fixtures/am/amphora_roster_scan.sh"
+
+say "amphora roster: the control, so a green reading below can be believed..."
+let c = run ["sh" control]
+assert c.ok else "amphora_roster: control FAILED -- the scan cannot be trusted to red"
+assert c.out contains "verdict=ok" else "amphora_roster: control did not answer ok"
+assert c.out contains "behaviors=103" else "amphora_roster: control ran a different number of behaviors"
+assert c.out contains "failed=0" else "amphora_roster: control reported a failed behavior"
+assert c.out contains "innocence patch landed" else "amphora_roster: the innocence patch planted nothing"
+
+say "amphora roster: the real room..."
+let s = run ["sh" scan]
+assert s.ok else "amphora_roster: the room and the roster disagree"
+assert s.out contains "verdict=ok" else "amphora_roster: scan did not answer ok"
+assert s.out contains "uncovered=0" else "amphora_roster: a module no rostered guard names"
+assert s.out contains "orphan_rows=0" else "amphora_roster: a roster row naming an absent guard"
+assert s.out contains "readme=amphora/README.md" else "amphora_roster: the room's front door went absent -- an absent door reads `absent` and gates nothing, so its path is asserted here"
+assert s.out contains "readme_unnamed=0" else "amphora_roster: a rostered guard the room's README never names -- run `sh tools/fixtures/am/amphora_roster_scan.sh` and read `detail_readme_unnamed`"
+assert s.out contains "readme_spelled_lines=0" else "amphora_roster: a line count spelled at the room's front door -- run `sh tools/fixtures/am/amphora_roster_scan.sh` and read `detail_spelled_line`; the door names `own_lines` rather than spelling it"
+assert s.out contains "own_lines=" else "amphora_roster: the room's weight went unread, so the door has nothing to name in place of a number"
+# REPORTED rather than gated, so what is asserted is that the reading HAPPENED. A door that stops
+# answering here would look exactly like a door with nothing to report, and those are two different
+# facts. `%638` closed by saying a number spelled as a word cannot go stale in silence; this room's
+# own door read `Those eight build three modules` while nine of sixteen rostered guards built all
+# three, so the letter form is read beside the digit form and left to a hand to judge.
+assert s.out contains "readme_spelled_words=" else "amphora_roster: the letter form of a count went unread at the front door -- run `sh tools/fixtures/am/amphora_roster_scan.sh` and read `detail_spelled_word`"
+# THE OTHER DIRECTION, seated `20260911.083000`. Every assertion above walks the ROSTER and asks the
+# door; this one walks the DOOR and asks the roster. `readme_named` could never answer it -- it is
+# `guards` minus `readme_unnamed`, a number describing this page derived wholly from the roster --
+# so a guard this door promises and no row seats was invisible here. `amphora_device_wire` was
+# standing in exactly that gap, which is REDS `%646`: an unrostable witness runs nowhere, so its
+# honest exit-1 refusal reached no reader on any bench.
+assert s.out contains "readme_unrostered=1" else "amphora_roster: a guard named at the room's front door that no roster row seats -- run `sh tools/fixtures/am/amphora_roster_scan.sh` and read `detail_readme_unrostered`; the ceiling only falls, so seat the row or lower `README_UNROSTERED_CEILING` in the same commit"
+assert s.out contains "readme_claims=" else "amphora_roster: the door's own claim count went unread, so nothing counts what this page promises rather than deriving it from the roster"
+# REPORTED rather than gated, for the reason `readme_spelled_words` above is: a door name with no
+# file under the guard room is a real promise of a witness nobody wrote OR a plain noun starting
+# with the room's name, and a hand tells those apart where a pattern cannot. Asserted so that the
+# reading HAPPENED -- an unprinted blind spot reads exactly like an empty one.
+assert s.out contains "readme_claims_fileless=" else "amphora_roster: the door-claim blind spot went unread -- run `sh tools/fixtures/am/amphora_roster_scan.sh` and read `detail_readme_fileless`"
+assert s.out contains "readme_namespace=amphora" else "amphora_roster: the room's own namespace stopped deriving from its rostered guard names, so the blind-spot half reads `unread` rather than a population"
+
+say "GREEN: amphora roster -- 103 planted behaviors, every authored module has a rostered guard, the room's front door names every one and claims none the roster leaves unseated, it spells no line count in digits, and the letter form and the door-claim blind spot are read beside it."

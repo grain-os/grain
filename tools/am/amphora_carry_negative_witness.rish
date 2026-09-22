@@ -1,0 +1,95 @@
+# tools/am/amphora_carry_negative_witness.rish -- Q27: crossing plants must refuse.
+#
+# Uses the trust-dock witness seam (AMPHORA_CARRY_TRUST_DOCK) so tampered
+# chunks reach the assembly walls instead of being healed by a fresh cut:
+#   missing chunk   -> chunk torn
+#   empty chunk     -> chunk torn
+#   reordered pair  -> crossing unequal
+#   forged bytes    -> crossing unequal
+# and after every refusal, no far vessel stands; a plain carry then heals.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/am/amphora_carry_negative_witness.rish
+
+let season = "tools/fixtures/cellar_ring1_tree"
+
+# THE PEN CARRIES A UNIQUE NAME (REDS %512's class, held by tools/s/shared_pen_witness.rish).
+# Eight ships run this roster from eight checkouts and share one /tmp, so a pen named by a
+# constant is ONE directory on all eight: a peer's `rm -rf` lands mid-run and the reading becomes
+# a fact about the pen wearing the costume of a fact about Amphora. The runtime composes the
+# suffix, so no two runs can agree by accident, and the directory it hands back is already empty
+# -- which is why the wipe-then-mkdir this replaced is gone rather than moved.
+# Full argument and the seated exemplar: tools/am/amphora_restore_negative_witness.rish.
+# The pen comes from the runtime rather than from `mktemp -d`, so a refusal releases it too.
+# The elder sweep stood on the straight-line success path below every assert, where a refusal
+# never reached it (REDS %745).
+let home = make-pen "amphora_cneg"
+let vessel = "${home}/v.kyri"
+let dock = "${home}/dock"
+let far = "${home}/dock/vessel.kyri"
+
+# The witness builds the binaries it runs, rather than assuming a previous lap left them
+# behind. amphora/bin/ is gitignored (.gitignore:336), so a clone carries none of them and
+# this witness died on a missing file rather than on an Amphora fact (REDS %334).
+# All three, whatever this file names in run position: amphora/src/main.rye:138 and :176
+# resolve vessel-seal and vessel-core as SIBLING SUBPROCESSES, so `pour` needs them present.
+# The mkdir comes first because rye build refuses an absent -femit-bin directory (REDS %337).
+# Each build's reason rides in its own refusal message rather than on a `say` line above the
+# assert: a line that speaks only when `.ok` is false is the same promise, and `shim_reason`
+# can read an interpolation where it cannot read a say inside a conditional -- so the elder
+# spelling counted as a binding asserted on and never reported (`20260911.003300`).
+let zig = "vendor/zig-toolchain/zig"
+let build_amphora = run ["sh" "-c" "mkdir -p ${home}/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/src/main.rye -femit-bin=${home}/bin/amphora"]
+assert build_amphora.ok else "amphora_carry_neg: amphora build failed --\n${build_amphora.err_brief}"
+let build_core = run ["sh" "-c" "env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/vessel_core.rye -femit-bin=${home}/bin/vessel-core"]
+assert build_core.ok else "amphora_carry_neg: vessel-core build failed --\n${build_core.err_brief}"
+let build_seal = run ["sh" "-c" "env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/vessel_seal.rye -femit-bin=${home}/bin/vessel-seal"]
+assert build_seal.ok else "amphora_carry_neg: vessel-seal build failed --\n${build_seal.err_brief}"
+
+let pour = run ["${home}/bin/amphora" "pour" season vessel]
+assert pour.ok else "carry_neg: pour must pass"
+let seed = run ["${home}/bin/amphora" "carry" vessel dock]
+assert seed.ok else "carry_neg: seed carry must pass"
+
+let torn_prep = run ["sh" "-c" "rm ${far} ${dock}/chunk-0002.kyri"]
+assert torn_prep.ok else "carry_neg: torn plant must prepare"
+let torn = run ["env" "AMPHORA_CARRY_TRUST_DOCK=1" "${home}/bin/amphora" "carry" vessel dock]
+assert (torn.ok == false) else "carry_neg: missing chunk must refuse"
+assert torn.err contains "chunk torn" else "carry_neg: torn names its fault"
+let torn_far = run ["sh" "-c" "test ! -e ${far}"]
+assert torn_far.ok else "carry_neg: refusal must leave no far vessel"
+say "plant_missing=refused"
+
+let heal1 = run ["${home}/bin/amphora" "carry" vessel dock]
+assert heal1.ok else "carry_neg: heal after torn must pass"
+let empty_prep = run ["sh" "-c" "rm ${far}; : > ${dock}/chunk-0001.kyri"]
+assert empty_prep.ok else "carry_neg: empty plant must prepare"
+let empty = run ["env" "AMPHORA_CARRY_TRUST_DOCK=1" "${home}/bin/amphora" "carry" vessel dock]
+assert (empty.ok == false) else "carry_neg: empty chunk must refuse"
+assert empty.err contains "chunk torn" else "carry_neg: empty names torn"
+say "plant_empty=refused"
+
+let heal2 = run ["${home}/bin/amphora" "carry" vessel dock]
+assert heal2.ok else "carry_neg: heal after empty must pass"
+let swap_prep = run ["sh" "-c" "rm ${far}; mv ${dock}/chunk-0001.kyri ${dock}/t; mv ${dock}/chunk-0002.kyri ${dock}/chunk-0001.kyri; mv ${dock}/t ${dock}/chunk-0002.kyri"]
+assert swap_prep.ok else "carry_neg: reorder plant must prepare"
+let swapped = run ["env" "AMPHORA_CARRY_TRUST_DOCK=1" "${home}/bin/amphora" "carry" vessel dock]
+assert (swapped.ok == false) else "carry_neg: reordered chunks must refuse"
+assert swapped.err contains "crossing unequal" else "carry_neg: reorder names unequal"
+say "plant_reorder=refused"
+
+let heal3 = run ["${home}/bin/amphora" "carry" vessel dock]
+assert heal3.ok else "carry_neg: heal after reorder must pass"
+let forge_prep = run ["sh" "-c" "rm ${far}; n=$(wc -c < ${dock}/chunk-0003.kyri); head -c $n /dev/zero | tr '\\0' 'z' > ${dock}/chunk-0003.kyri"]
+assert forge_prep.ok else "carry_neg: forge plant must prepare"
+let forged = run ["env" "AMPHORA_CARRY_TRUST_DOCK=1" "${home}/bin/amphora" "carry" vessel dock]
+assert (forged.ok == false) else "carry_neg: forged chunk must refuse"
+assert forged.err contains "crossing unequal" else "carry_neg: forge names unequal"
+say "plant_forge=refused"
+
+let heal4 = run ["${home}/bin/amphora" "carry" vessel dock]
+assert heal4.ok else "carry_neg: final heal must pass"
+let equal = run ["cmp" "-s" vessel far]
+assert equal.ok else "carry_neg: healed dock must equal the source"
+
+say "GREEN: amphora_carry_negative -- missing - empty - reordered - forged all refuse; the dock heals."

@@ -1,0 +1,1811 @@
+#!/bin/sh
+# tools/fixtures/s/standing_equipment_run.sh -- run the rostered guards of a tier, and record when each ran.
+#
+# WHY. construction/standing-equipment.kyri names what stands. This runs it, and writes one line per
+# guard into the run card, so the question "when did this last run?" has an answer on disk
+# rather than in a memory of a round. REDS %149 taught the sentence this exists to make
+# checkable: a bound is only a bound on the laps someone runs it.
+#
+# WHY A TIER. Guards cost wildly different amounts of time, and one roster naming all of them made
+# one choice for every one. A choir -- a witness that sings a whole family of rungs in one
+# invocation -- takes minutes: tools/ca/caravan_suite_witness.rish runs 111 rungs in 8m31s and
+# tools/cr/crypto_suite_witness.rish runs 74 in 9m06s, both measured on this pier on 20260825, and
+# the whole roster measured 20m20s with one of them seated. A lap reads the roster twice, cold at
+# the open and hot after `git add`, so a guard names its own cadence and the runner honors it:
+#
+#   tier lap       every roster run. What a record naming no tier means, so the roster's existing
+#                  rows keep their meaning without being edited.
+#   tier cadence   the slower clock -- sung whole by `--all` or `--tier cadence`, and turned one
+#                  guard at a time by `--cadence-slice N` on an ordinary lap pass.
+#
+# THE CADENCE LAP WAS A ROUND NOBODY COUNTED. This header said "the fifth round" for its whole life,
+# and no tool in this tree counts rounds, so no pass was ever the fifth: measured `20260910.221225`,
+# `cadence_never_run_here` read **74 of 74** on this pier -- every guard on the slower clock had
+# never run here even once, which is REDS %219's fault exactly, wearing the vocabulary that was
+# written to forbid it. `--cadence-slice N` turns the clock off the run card instead: the N cadence
+# guards that have waited longest ride an ordinary lap pass, and running them is what moves them to
+# the back of the queue. No counter, no round number, and nothing to remember.
+#
+# A tier is a CADENCE rather than an exemption. REDS %219 was a choir standing off the roster
+# entirely, which is a refusal nobody receives; a cadence guard is still heard, on a slower clock,
+# and construction/standing-equipment-runs.kyri records the clock that heard it. A tier word the
+# runner does not know is refused by tools/fixtures/s/standing_equipment_scan.sh rather than run past,
+# because a guard on such a tier would run on no lap at all, in silence.
+#
+# WHAT IT WRITES. construction/standing-equipment-runs.kyri, one
+# `ran <name> <stamp> <verdict> <tier> <seconds> <cpu_ms>`
+# line per guard, the last field CPU-milliseconds and the one before it wall-seconds.
+#
+# THE VERDICT WORDS, AND WHY THERE ARE FIVE. `green` and `red` are the guard's own answer. `gated`
+# says the guard answered red and its roster row parks that red at a custody gate the living card
+# names (REDS %374). `absent` says the rostered path is gone. `unrun` says this runner could not
+# KEEP the guard's answer, so it claims neither a finding nor a clean run (REDS %747) -- the word
+# exists because a guard that could not be recorded and a guard that found something wore one word,
+# and a pass dying on a full disk published four reds under it, two of them guards that had run
+# green in that same tree minutes earlier, each citing an evidence file the refused write never
+# made.
+# Lines for guards this pass left alone are KEPT, so a default run preserves the
+# cadence tier's own history rather than erasing it. The card is untracked by design -- it measures
+# THIS pier's history, and a fresh clone that has run nothing should say so.
+#
+# WHAT EACH GUARD READS, and why it is not the file above (REDS %483). A guard running mid-pass used
+# to read the working-tree card, which this runner writes ONCE, at the close -- so it read the
+# PREVIOUS pass's verdict for every peer, including reds the same pass had already repaired. The
+# guard that counts recorded reds is itself rostered, so that phantom set `withheld_guard_red`, and
+# `--scoped` refuses without a receipt, and the next lap paid a full pass for a fault nobody had.
+# Each guard is handed a PEN-LOCAL live view through `STANDING_CARD` instead, rewritten after every
+# guard answers, and this runner's own guard is deferred to the end of the todo list so that view is
+# complete when it reads. The working-tree card is still written once, at the close, for the reason
+# the evidence room is: a file written into the tree DURING the run moves the tree under this
+# runner's own `tree_moved` reading.
+#
+# WHAT IT REFUSES BEFORE IT RUNS. `staged_uncommitted`, the count of paths staged and not yet
+# committed, and a full-roster pass that opens on a dirty index REFUSES under
+# `run_verdict=lap_unclosed` before a single guard starts. That is the signature of REDS %188: a lap
+# that ended at `git add` left this tree's generated pages stale, and the next lap pays the repair.
+#
+# WHY A REFUSAL RATHER THAN THE READING IT REPLACES. The row fired three times -- 20260824.082144,
+# 20260825.092953, and 20260825.132121, the last one leaving `readme_metrics`, `geode_libraries`,
+# and `nib_honesty` red on the next cold open. %188 concluded no guard could ENFORCE the close,
+# which still holds: such a guard would have to run after a lap ends. %220 answered with a reading
+# on line one, and the class fired again eleven hours later, because a reading persuades and a
+# refusal decides. The ladder a recurring red climbs is rule, then reading, then refusal, and this
+# is the third rung (REDS %223).
+#
+# THE ONE PLACE THE READING IS UNAMBIGUOUS is exactly here. A full-roster pass is how a lap opens,
+# so staged paths at that moment belong to whoever ran last. `--hot` is how a round says the staged
+# paths are its own -- the after-`git add` pass REDS %174 asks for. A guard asked for by name is no
+# lap open at all and passes free. One flag and one structural distinction, rather than a roster of
+# exemptions: a second exemption would be the hiding place this refusal exists to close.
+#
+# WHAT IT REPORTS AT THE OPEN. `head_behind_anointed`, beside the anointed ref's own head and its
+# newest commit stamp -- how far behind `xy/main` this pass began, read from the last fetch's ref
+# and therefore free of network. It gates nothing and can only under-report. It is here because a
+# pass costs forty minutes against a fleet landing six commits an hour, so a lap that opens the
+# roster instead of `tools/f/fleet_round_open.sh` measures a tree the fleet has already left. The
+# clause beside the reading itself carries the measurement.
+#
+# WHAT IT REPORTS WHEN IT FINISHES. `tree_at_open`, `tree_at_close`, and `tree_moved` -- a twelve-
+# character digest of the tree's SHAPE and its CONTENT, taken before the first guard and again
+# after the last. The shape is `git rev-parse HEAD` plus `git status --porcelain`; the content is
+# `git diff HEAD` plus a hash of every untracked file, because a status letter reads the same
+# however often a dirty file's bytes change and the elder digest was blind to exactly that
+# (REDS %380). The whole reading and its cost sit beside the function itself.
+# The roster takes twenty minutes and a lap that begins editing
+# while it runs gets verdicts describing neither the tree it started on nor the tree it ended on.
+# REDS %221: this round did exactly that, and the round before it had already learned the lesson by
+# hand -- it stopped a pass at guard fifty for the same reason and wrote down why. A lantern that
+# fires twice becomes a loom, so the runner measures it now instead of a reader remembering to.
+# `tree_moved=yes` exits 1 under `run_verdict=tree_moved`, with every guard line still printed
+# above it, because a run whose verdicts describe no single tree has not answered what it was
+# asked -- and nothing it did learn is thrown away. A pen outside a repository reads `nogit` for
+# both, which never moves, so a control can drive this runner without standing inside git.
+#
+# IT ALSO REFUSES A SECOND PASS IN THE SAME TREE. Before it measures anything, a pass takes a
+# directory lock at ZERO wait, and one that finds it held refuses under `run_verdict=run_in_flight`
+# naming the pid that holds it. Two cold endurance runs stood in one tree for fifty minutes with nothing in
+# either to say so (REDS %359), and the said-why for zero wait rather than a queue sits beside the
+# acquisition below. The lock path is relative to the repository root, so the six-body fleet's
+# other trees are lawful concurrency and only a second pass in THIS tree refuses.
+#
+# USAGE
+#   sh tools/fixtures/s/standing_equipment_run.sh                 # cold open -- tier lap, dirty index refuses
+#   sh tools/fixtures/s/standing_equipment_run.sh --hot           # after `git add` -- the staged paths are mine
+#   sh tools/fixtures/s/standing_equipment_run.sh --all           # every tier, choirs included
+#   sh tools/fixtures/s/standing_equipment_run.sh --scoped        # only what moved since the full receipt
+#   sh tools/fixtures/s/standing_equipment_run.sh --tier cadence  # one tier
+#   sh tools/fixtures/s/standing_equipment_run.sh --cadence-slice 1  # a lap pass, plus the longest-waiting cadence guard
+#   sh tools/fixtures/s/standing_equipment_run.sh banner_room     # one guard by name, whatever its tier
+#   sh tools/fixtures/s/standing_equipment_run.sh --detach        # launch it detached; the path is printed, never invented
+#
+# The flags compose: `--hot --all` is the cadence lap's own after-`git add` pass.
+#
+# Run from the repository root. Slow by nature -- it runs a roster.
+
+set -eu
+
+# The lock this runner takes lives in shell_portable.sh beside the tree's other dialect repairs,
+# because `flock(1)` is util-linux and macOS ships none at all (REDS %279). Sourced by the script's
+# own directory rather than by a path from the root, so a pen-driven run finds it wherever it stands.
+_run_here=$(CDPATH= cd "$(dirname "$0")" && pwd)
+. "$_run_here/shell_portable.sh"
+# The scope-map matcher, sourced for the same reason and from the same place. It used to stand
+# inline below; tools/fixtures/s/standing_equipment_scope_rank.sh now prices what each map row
+# saves, and a price computed by a second matcher is a price for a skip this runner never takes.
+. "$_run_here/scope_match.sh"
+
+roster="${STANDING_ROSTER:-construction/standing-equipment.kyri}"
+card="${STANDING_CARD:-construction/standing-equipment-runs.kyri}"
+# THIS RUNNER'S OWN GUARD, NAMED HERE because two things below turn on it: it is deferred to the
+# end of the todo list, and it is the one guard whose reading of the card is a reading of this
+# pass. The scan spells the same name at its own `self_guard`, for the sibling reason (REDS %475).
+self_guard=standing_equipment
+# The hit-rate meter's two untracked shelves (the fusion build, design 20260825-173153): the
+# receipt is the last fully green close's digest, the ledger is every open's match-or-miss row.
+# Measurement only -- nothing consults these to skip a guard; that ruling stays the maintainer's.
+receipt="${STANDING_RECEIPT:-construction/standing-equipment-receipt.kyri}"
+hitledger="${STANDING_HITRATE:-construction/standing-equipment-hitrate.kyri}"
+
+want_tier=lap
+only=""
+hot=no
+probe=no
+scoped=no
+
+# THE CADENCE SLICE -- how many cadence guards this lap sings beside its lap tier. A tier is a
+# cadence rather than an exemption, and on this pier it had become the second: measured
+# `20260910.221225`, `cadence_never_run_here` read **74 of 74**, so the whole slower clock had never
+# turned once here. The runner's own header promised "the fifth round", and nothing in the tree
+# counts rounds, so no lap was ever the fifth. Rotation needs no counter: the run card already
+# records when each guard last answered, so the least-recently-run cadence guards ARE the ones whose
+# turn it is, and a never-run guard sorts first because it has waited longest of all.
+cadence_slice="${CADENCE_SLICE:-0}"
+
+detach=no
+# `--detach` is stripped BEFORE the parse loop rather than handled inside it, because the loop's
+# `--*` arm refuses an unknown option and the relaunch below re-runs this same script with the flag
+# gone. A `for` fixes its word list before the first iteration, so rebuilding `$@` inside one is
+# safe; an explicit `if` rather than `test && x`, because a false test as a loop body's last command
+# exits the script under `set -e`.
+# The lock name is read by TWO callers now -- this parent, before it truncates a transcript, and
+# the pass itself, where the lock is taken -- so it is spelled once, above both. A second spelling
+# of one path is how two readings of one intent begin.
+lock="${STANDING_LOCK:-construction/standing-equipment-run.lock.d}"
+
+# WHOSE TRANSCRIPT A REFUSAL NAMES (REDS `%666`). A refused launch printed the path THIS invocation
+# would have written, and a reader takes a printed `transcript=` for the live pass's own name -- so
+# a cold launch refused by a `--scoped` owner was handed `standing-equipment-cold.txt`, an ELDER
+# file from some earlier pass, and read yesterday's tree as today's. That is `%620` one door over: a
+# name arrived at by derivation rather than by asking. Only the live owner knows its own path, so it
+# writes that path into the lock it holds and every refusal reads it back.
+#
+# A FOREGROUND PASS WRITES NONE, because it has none -- its output is on the terminal that started
+# it -- and saying so is honest where naming a derived path is not. The same answer covers the one
+# window this reading can be thin in: `lock_acquire` creates the directory and writes `pid`, and the
+# owner writes `transcript` a few lines later, so a refusal landing between the two reads `none` for
+# a pass that does have a transcript. That understates and never misnames, which is the direction
+# this repair exists to choose.
+owner_transcript() {
+  if [ -s "$1/transcript" ]; then
+    printf 'owner_transcript=%s\n' "$(cat "$1/transcript")"
+  else
+    printf 'owner_transcript=none -- that pass writes no transcript; read the terminal that started it\n'
+  fi
+}
+
+# WHETHER THE LAP THAT TOOK THIS LOCK IS STILL HERE -- ASKED ONCE, FOR BOTH REFUSALS
+# (`20260909.234718`). Two sites refuse a launch because another pass holds the lock: the
+# `--detach` parent below, before it forks, and the pass itself where the lock is taken. Every
+# reading here lived inside the second, so the form THE BATON NAMES was told to *read that
+# transcript* and never told whether a reader was left. The lock path is spelled once above both
+# for exactly this reason, one screen up -- a second spelling of one intent is how two readings of
+# it begin -- and the refusal itself had been written twice.
+#
+# AND THE ANCESTRY READINGS CANNOT SEE THE LAUNCH FORM THE FLEET NOW USES. `--detach` runs
+# `nohup sh "$0" "$@" &` from a parent that exits at once, so a detached pass is reparented to init
+# WITHIN MILLISECONDS OF LAUNCH, by construction, while the lap that launched it waits on the
+# transcript. `parent=gone` and `group_leader=gone` are then facts about the FLAG rather than about
+# the lap. Measured on this pier `20260909.234718`: a two-minute-old pass this very lap had
+# launched read `lap=gone` with the advice to kill it, and every one of the 7 trees then holding a
+# run lock held it with `ppid` 1 and a transcript beside it -- 7 of 7, each a `--detach` launch.
+# The lock is only ever held by a pass, and every pass is now launched detached, so this is the
+# reading effectively every holder gets. The note below states the direction of error as *it never accuses a live lap of being
+# gone*; that held when it was written and stopped holding when `--detach` was seated
+# (`20260908.113404`). A reading does not have to change to go wrong -- the world it reads can.
+#
+# THIS IS THE FOURTH FIRING OF ONE FAMILY, and the first to invert. `%387` read the parent, `%528`
+# added the group leader, `%548` added the leader's parent; each asked *is my immediate answer
+# alive* and the fleet kept moving which process that was. A loom chasing generations cannot
+# survive a launcher that severs the link at birth, because there is no further generation to add.
+#
+# SO THE ANSWERABLE QUESTION IS ASKED INSTEAD, off a fact the lock ALREADY carries. The owner
+# writes `$lock/transcript` only when `STANDING_TRANSCRIPT` is set, and one line in this file sets
+# it, so the file's PRESENCE is the launch form and no new marker is needed. For such a pass what a
+# hand needs is not who started it but whether its verdict can still be spent -- its own
+# `launch_head` against HEAD now, which named pid 3653764 void this lap (`513d283` against
+# `4a1d75aa`) where ancestry called a live pass abandoned. Right in both directions, where the
+# process table is now right in neither.
+#
+  # WHOSE LAP IS THAT PASS STILL RUNNING FOR? The refusal above tells a hand to read the holder's
+  # output instead, and that advice quietly assumes somebody is left to read it. Twice in two laps
+  # on 20260831 nobody was: a lap died with its pass still running, the pass reparented to init,
+  # and the NEXT round's opening stash (%321) moved the tree the orphan had digested at its open,
+  # so its verdict was already fixed at `tree_moved` while it went on holding this lock for
+  # another forty minutes. Both mechanisms are right alone. Together they lock the new lap out of
+  # the instrument its own card tells it to open with, and the refusal's advice points at a reader
+  # who has gone.
+  #
+  # SO THE READING IS TAKEN AND REPORTED, AND NOTHING IS REAPED. `lock_acquire` already reaps an
+  # owner that has EXITED; an orphan has not exited, and it is still a live writer appending to
+  # the one run card, so killing it from here would be one pass ending another's -- exactly the
+  # cross-hand act REDS %291 asks a body never to take. This line names the condition and the
+  # repair; a hand acts.
+  #
+  # `ps -o ppid=` rather than /proc, because macOS ships no /proc and this reading is worth
+  # nothing on the one platform it cannot run. WHAT IT MEASURES IS THE PARENT, and the honest
+  # sentence is *the process that started it has exited* rather than *it is abandoned*: a pass
+  # launched deliberately by init would read the same, and a host running a subreaper reparents
+  # an orphan to the reaper rather than to 1, which reads `alive`. The reading therefore
+  # UNDER-reports -- it never accuses a live lap of being gone, and that is the direction to be
+  # wrong in.
+  # AND THE PARENT READING MISSES THE SHAPE THIS FLEET ACTUALLY MAKES, which is why a second
+  # reading stands beside it. A lap that launches its hot endurance run detached -- `( sh runner --hot
+  # > out 2>&1; echo EXIT=$? >> out ) &` -- forks a subshell to carry that compound command, and
+  # the runner's parent is that subshell rather than the lap. When the lap ends, the SUBSHELL is
+  # what reparents to init; the runner's own ppid still names it and it is still alive, so the
+  # reading above answers `alive` for a lap that has gone. The orphaning happened one generation
+  # further up than the check can see. No subreaper is needed for this -- the lap's own `&` is
+  # enough -- and it is how this pass came to hold the lock at `20260906.231137` while the seat
+  # that opened next was refused with no repair named at all.
+  #
+  # SO THE SECOND READING ASKS FOR THE LAUNCHER RATHER THAN THE PARENT: does the process group
+  # leader still exist? A process group is the lap's whole spawned family, and its leader is
+  # whoever started that family -- measured on this pier, `sh tools/f/fleet-loop.sh <seat>` for a
+  # live pass, and a pid that no longer exists for the orphan above. `&` in a non-interactive
+  # shell starts no new group, so a detached pass keeps its lap's group and the leader's absence
+  # is the lap's absence.
+  #
+  # NEITHER READING CONTAINS THE OTHER, so both are taken and either one answers. A direct
+  # orphan -- parent exits, child adopted by init -- keeps a live group leader and is caught by
+  # the parent reading alone. A detached pass keeps a live parent and is caught by the group
+  # reading alone. Reporting both keeps each visible where it fires, and `lap` is the one word
+  # the advice below turns on.
+  #
+  # AND A GROUP LEADER CAN BE ALIVE AND ORPHANED AT ONCE, which is the shape neither reading
+  # above reaches. A lap that launches its pass through the harness's own detached form --
+  # `sh -c '... runner --hot --scoped > /tmp/hot.txt ...'` started in the background -- gets a
+  # NEW SESSION for that command, so the `sh -c` becomes the leader of its own group rather than
+  # sharing the lap's. While the lap runs, that leader's parent is the lap's shell; when the lap
+  # ends, the LEADER is what reparents to init and goes on running. The owner's parent is then
+  # the leader (alive, not 1) and the leader itself exists, so `parent=alive`, `group_leader=alive`,
+  # `lap=alive` -- for a lap that has been gone for minutes. Measured on this tree
+  # `20260907.065148`: owner 3457737, parent and group leader both 3457725, whose own ppid was 1.
+  #
+  # SO THE THIRD READING ASKS THE LEADER THE FIRST QUESTION: has the process that started the
+  # family exited? The leader is the root of the pass's own family by construction, so a leader
+  # adopted by init means nobody is waiting on this pass and its output reaches nobody -- the
+  # same sentence the two readings above already turn on, asked one generation further up. It is
+  # one extra `ps`, never a walk: the ancestry above the leader belongs to the lap, not the pass.
+  #
+  # WHY THIS CANNOT CALL A LIVE PASS GONE, measured rather than assumed. A pass launched in the
+  # foreground from a lap's own shell has that shell as its group leader -- the shell takes its
+  # own group -- and the shell's parent is the agent process, alive. Only a detached pass makes
+  # the `sh -c` the leader, and only a dead lap makes that leader's parent init. Both halves have
+  # to hold before this reading fires.
+  #
+  # THE DIRECTION OF ERROR IS UNCHANGED. All three readings only ever ADD a reason to say `gone`,
+  # each sound on its own, and each fails silent when `ps` cannot answer. Being wrong here still
+  # costs one advisory sentence: nothing is reaped, an orphan is a live writer, and one pass
+  # ending another's is the cross-hand act REDS %291 asks a body never to take.
+owner_lap_read() {
+  # $1 the owner's pid, $2 the lock directory it holds. It SETS rather than prints, because the
+  # two callers interleave their own verdict, transcript and `refused:` lines between the reading
+  # and its detail -- and only the detach parent can honestly promise it truncated nothing.
+  owner=$1
+  detached=no
+  # An explicit `if` rather than a trailing `[ ... ] && detached=yes`: this file runs under
+  # `set -eu`, and an AND-OR list whose test fails is the one shape whose -e exemption reads
+  # differently between shells. The runner behaves the same in every one it is launched from.
+  if [ -s "$2/transcript" ]; then detached=yes; fi
+  parent=unknown
+  group_leader=unknown
+  leader_parent=unknown
+  case "$owner" in
+    ''|*[!0-9]*) : ;;
+    *)
+      owner_parent=$(ps -o ppid= -p "$owner" 2>/dev/null | tr -d ' ')
+      case "$owner_parent" in
+        '') : ;;
+        1) parent=gone ;;
+        *) parent=alive ;;
+      esac
+      # `ps -o pgid=` rather than /proc, for the same reason the parent reading gives, and `ps`
+      # rather than `kill -0` to test the leader: `kill -0` on another user's process answers
+      # EPERM rather than ESRCH and would read a stranger's live leader as gone.
+      owner_group=$(ps -o pgid= -p "$owner" 2>/dev/null | tr -d ' ')
+      case "$owner_group" in
+        ''|*[!0-9]*) : ;;
+        *)
+          if [ -n "$(ps -o pid= -p "$owner_group" 2>/dev/null | tr -d ' ')" ]; then
+            group_leader=alive
+            # The third reading, and it only means anything while the leader is alive -- a leader
+            # that has gone is already answered above.
+            leader_ppid=$(ps -o ppid= -p "$owner_group" 2>/dev/null | tr -d ' ')
+            case "$leader_ppid" in
+              '') : ;;
+              1) leader_parent=gone ;;
+              *) leader_parent=alive ;;
+            esac
+          else
+            group_leader=gone
+          fi
+          ;;
+      esac
+      ;;
+  esac
+  # One word for the advice to turn on, so a third reading joins here rather than at every site.
+  # A DETACHED PASS IS NAMED RATHER THAN ACCUSED. `--detach` reparents its child to init at launch,
+  # so the three readings above describe the flag rather than the lap and must not reach the word.
+  if [ "$detached" = yes ]; then
+    lap=detached
+  elif [ "$parent" = gone ] || [ "$group_leader" = gone ] || [ "$leader_parent" = gone ]; then
+    lap=gone
+  elif [ "$parent" = alive ] || [ "$group_leader" = alive ]; then
+    lap=alive
+  else
+    lap=unknown
+  fi
+}
+
+stop_line() {
+  # $1 the owner's pid. THE ONE PLACE this runner says how to stop a peer pass, because the
+  # sentence stood at two sites and a rule written twice is a rule two sites may come to
+  # disagree about.
+  #
+  # THE LATENCY IS NAMED because leaving it out steers a reader into the very move the second
+  # clause warns against. `trap 'exit 143' TERM` runs the handler when the shell next regains
+  # control, and a runner mid-pass is blocked in a foreground guard -- so the lock is released
+  # when THAT GUARD RETURNS, never at the signal. Measured in a pen with this exact trap shape:
+  # a TERM sent one second into an eight-second child released the lock seven seconds later.
+  # On this roster one guard has read 455s, so a lock still standing minutes after a TERM is the
+  # ordinary case rather than a failed signal -- and a reader who reads it as failure reaches for
+  # SIGKILL, which the next clause tells them leaves the lock behind.
+  echo "detail: stop it with \`kill -TERM $1\`, which runs this runner's own EXIT trap and releases the lock; SIGKILL bypasses the trap and leaves the lock behind for the next pass to reap." >&2
+  echo "detail: that TERM lands when the guard in flight returns, never at the signal, so the lock can stand for one guard's full run afterward -- minutes on this roster. A lock still held is not a failed signal; re-read it rather than reaching for SIGKILL." >&2
+}
+
+owner_lap_detail() {
+  # $1 the owner's pid, $2 its lock directory. Printed after the caller's own `refused:` line.
+  if [ "$detached" = yes ]; then
+    echo "detail: that pass was launched with --detach, whose parent exits at once, so the process table cannot say whether its lap is still here." >&2
+    lap_head=$(sed -n 's/^launch_head //p' "$(cat "$2/transcript" 2>/dev/null)" 2>/dev/null | head -n 1 || true)
+    head_now=$(git rev-parse --short=10 HEAD 2>/dev/null || echo nogit)
+    if [ -z "$lap_head" ]; then
+      echo "detail: its transcript names no launch_head, so read that file before assuming either way." >&2
+    elif [ "$lap_head" = "$head_now" ]; then
+      echo "detail: its launch_head $lap_head is still HEAD, so it is measuring this tree -- wait for its run_verdict line rather than opening a second." >&2
+    else
+      echo "detail: its launch_head $lap_head is no longer HEAD ($head_now), so its verdict is already fixed at tree_moved and more of this machine spent on it buys nothing." >&2
+      stop_line "$1"
+    fi
+    return 0
+  fi
+  if [ "$lap" = gone ]; then
+    if [ "$parent" = gone ]; then
+      echo "detail: that pass's parent has exited, so its output reaches nobody and its lock outlives the lap that took it." >&2
+    elif [ "$group_leader" = gone ]; then
+      echo "detail: that pass's process group leader has exited -- the lap launched it detached, so its own parent is a subshell that is still alive while the lap is gone. Its output reaches nobody and its lock outlives the lap that took it." >&2
+    else
+      echo "detail: that pass's process group leader is running and has itself been adopted by init -- the lap launched it into its own session, so parent and leader both read alive while the lap that started the family is gone. Its output reaches nobody and its lock outlives the lap that took it." >&2
+    fi
+    stop_line "$1"
+  fi
+}
+
+
+for a in "$@"; do
+  if [ "$a" = --detach ]; then detach=yes; fi
+done
+if [ "$detach" = yes ]; then
+  rebuilt=no
+  for a in "$@"; do
+    if [ "$a" = --detach ]; then continue; fi
+    if [ "$rebuilt" = no ]; then set -- "$a"; rebuilt=yes; else set -- "$@" "$a"; fi
+  done
+  if [ "$rebuilt" = no ]; then set --; fi
+fi
+
+# A loop rather than a single case, so `--hot` composes with `--all` and with `--tier`. A bare word
+# is a guard name and selects every tier, which is what asking for one guard has always meant.
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --hot)  hot=yes ;;
+    --scoped) scoped=yes ;;
+    --receipt-probe) probe=yes ;;
+    --all)  want_tier=all ;;
+    --tier) shift
+            want_tier="${1:-}"
+            [ -n "$want_tier" ] || { echo "refused: --tier wants a tier name" >&2; exit 1; } ;;
+    --cadence-slice) shift
+            cadence_slice="${1:-}"
+            # A whole number, checked here rather than at the arithmetic below, because `set -e` and
+            # `$(( ))` turn a word into a shell error naming no flag.
+            case "$cadence_slice" in
+              ''|*[!0-9]*) echo "refused: --cadence-slice wants a whole number" >&2; exit 1 ;;
+            esac ;;
+    --*)    echo "refused: unknown option $1" >&2; exit 1 ;;
+    *)      only="$1"; want_tier=all ;;
+  esac
+  shift
+done
+
+[ -f "$roster" ] || { echo "refused: no roster at $roster" >&2; exit 1; }
+
+# THE SCOPED PASS (the fusion build's Move 2+3 synthesis, granted -- the skip word given
+# 20260828; design active-designing/date/20260825/20260825-173153_reprove-only-what-moved.md). A scoped run
+# proves the DELTA since the last full green receipt: guards whose derived watch-set intersects
+# the changed files run, guards the map calls DISCOVERY always run, and everything else is
+# skipped BY NAME against a named basis. Three walls hold it honest: it composes with nothing
+# that changes what "the roster" means (--all is the cadence's full choir, a bare guard name is
+# already a hand's own scope); it refuses outright without a full-run receipt carrying a head to
+# diff from; and a scoped close NEVER writes the receipt -- receipts chain only from full greens,
+# so a skip can never become the basis of the next skip.
+if [ "$scoped" = yes ] && [ -n "$only" ]; then
+  echo "refused: --scoped with a guard name -- a by-name run is already a hand's own scope" >&2
+  exit 1
+fi
+if [ "$scoped" = yes ] && [ "$want_tier" != lap ]; then
+  echo "refused: --scoped serves the lap tier only; the cadence sings the full choir" >&2
+  exit 1
+fi
+
+# THE SLICE RIDES AN ORDINARY LAP PASS AND NOTHING ELSE, and each refusal below is spoken rather
+# than quietly ignored -- a flag that silently does nothing is the exemption this whole mechanism
+# exists to end. `--all` and `--tier cadence` already sing the full choir, so a slice of it is a
+# smaller number pretending to be a larger one; a guard asked for by name is already a hand's own
+# scope; and a `--scoped` pass proves a delta against a receipt, which a rotation cannot be part of.
+if [ "$cadence_slice" -gt 0 ]; then
+  if [ -n "$only" ]; then
+    echo "refused: --cadence-slice with a guard name -- a by-name run already crosses every tier" >&2
+    exit 1
+  fi
+  if [ "$want_tier" != lap ]; then
+    echo "refused: --cadence-slice serves the lap tier; --all and --tier cadence sing the whole choir" >&2
+    exit 1
+  fi
+  if [ "$scoped" = yes ]; then
+    echo "refused: --cadence-slice with --scoped -- a receipt proves a delta, never a rotation" >&2
+    exit 1
+  fi
+fi
+
+# THE DETACHED LAUNCH (REDS row `20260908.113404`). A full pass runs for twenty minutes, so a lap
+# that wants to keep working launches it detached and reads the transcript later -- and NAMING that
+# transcript has now been the root of three reds in one family. `%541` signaled the pass by command
+# line and reached the whole pier; `%549` redirected it to a constant name under a shared `/tmp`;
+# `%620` gave it a unique name and then found it again by globbing, which returned the same pid's
+# file from the day before. One shape under all three: THE REDIRECT AND THE NAMING RAN IN DIFFERENT
+# SHELLS, so nothing could hold them to one answer.
+#
+# `--detach` puts both in one shell -- this one. It derives the path from the flags it was handed,
+# truncates it, writes a header naming this launch, starts the pass appending to exactly that path,
+# and prints the path and the child's pid. A lap types no name and globs nothing, because the only
+# name is the one it was just handed.
+#
+# WHY UNDER `session-output/`, AND CONSTANT PER MODE. The room is gitignored and sits inside THIS
+# tree, so no peer ship can reach it (the FLEET stanza of tools/f/fleet_baton.txt), and `tree_digest`
+# above passes over ignored paths, so a transcript written mid-pass leaves `tree_moved` still. The
+# name carries the MODE rather than a stamp or a pid because a second pass in one tree already
+# refuses under `run_verdict=run_in_flight` -- there is never a second live pass of one mode to
+# collide with, and a re-verify after a rebase supersedes the reading it overwrites. A stamped or
+# pid-stamped name is the very thing that made `%620` unreadable: a room of near-identical names
+# ordered by a rule nobody wrote down. Measured `20260908.113404` across the pier's eight trees,
+# `session-output/` held 165 files carrying at least eleven hand-invented spellings of this one
+# transcript, and in `grain-copal` a glob-and-tail over them returned 07:17's pass rather than
+# 08:56's -- `%620` standing again, inside the room its own repair moved the file to.
+#
+# HOW A READER KNOWS IT IS THIS PASS. The header is written at launch, before the child starts, so
+# the file can never hold an elder pass's bytes. The pass FINISHED when the transcript carries a
+# `run_verdict=` line, which every exit path emits -- a predicate on content rather than on an mtime
+# or a process table, neither of which survives being read from the wrong shell.
+#
+# WHY NOT TEE EVERY PASS. A foreground pass is read on the terminal as it runs and needs no name at
+# all, so teeing would touch every invocation by every ship to answer a question only the detached
+# case asks.
+if [ "$detach" = yes ]; then
+  # The child's arguments are rendered from the PARSED flags rather than from the words this script
+  # was handed, so one reader of the flags serves both the relaunch and the label -- a second reader
+  # is how two spellings of one intent begin. A guard name already implies every tier, which is what
+  # asking for one guard has always meant.
+  label=cold
+  set --
+  if [ "$hot" = yes ]; then set -- "$@" --hot; label=hot; fi
+  if [ "$scoped" = yes ]; then set -- "$@" --scoped; label="$label-scoped"; fi
+  if [ "$probe" = yes ]; then set -- "$@" --receipt-probe; label="$label-probe"; fi
+  # Rendered into the child's arguments and deliberately NOT into the label: the transcript name is
+  # what `%620` fixed in place so a reader finds today's pass, and a rotation size is not a different
+  # KIND of pass. `--detach` with a slice writes `standing-equipment-cold.txt`, as a cold open should.
+  if [ "$cadence_slice" -gt 0 ]; then set -- "$@" --cadence-slice "$cadence_slice"; fi
+  if [ -n "$only" ]; then
+    set -- "$@" "$only"; label="$label-$only"
+  elif [ "$want_tier" = all ]; then
+    set -- "$@" --all; label="$label-all"
+  elif [ "$want_tier" != lap ]; then
+    set -- "$@" --tier "$want_tier"; label="$label-$want_tier"
+  fi
+  # The label reaches a filename, so it carries only what a filename may carry. A tier word the
+  # roster would refuse is still a word this script must never open a path with.
+  label=$(printf '%s' "$label" | tr -c 'a-z0-9_-' '-')
+  transcript="session-output/standing-equipment-$label.txt"
+  # A REFUSED LAUNCH MUST NOT EMPTY A LIVE PASS'S TRANSCRIPT. The header write below opens the file
+  # with `>`, which is `%620`'s own cure and stays: an elder pass's bytes can never be read as
+  # today's. Yet the child this parent launches discovers the run lock only AFTER the parent has
+  # already truncated, so a `--detach` typed while a pass is in flight destroys the running pass's
+  # record and then refuses. Measured on this tree `20260908.152208`: twenty-three lines went, one
+  # of them the only line naming a red, and the pass closed reporting `guards_red=3` above a
+  # transcript showing two. Truncating an ELDER file and truncating a LIVE one are two different
+  # acts that one `>` was performing, and only the first was ever wanted.
+  #
+  # ONLY A LIVE OWNER REFUSES. A stale lock is left exactly as it stands, for `lock_acquire` to
+  # reap the way it always has -- refusing on a dead owner would lock a later lap out of the
+  # instrument its own card opens with, which is the fault this check exists to avoid one door
+  # over. The liveness test is `kill -0`, the same one `lock_acquire` uses, so the two readings
+  # cannot disagree.
+  if [ -s "$lock/pid" ]; then
+    detach_owner=$(cat "$lock/pid" 2>/dev/null || printf '')
+    case "$detach_owner" in
+      ''|*[!0-9]*) : ;;
+      *)
+        if kill -0 "$detach_owner" 2>/dev/null; then
+          owner_lap_read "$detach_owner" "$lock"
+          echo "run_lock=in_flight pid=$owner parent=$parent group_leader=$group_leader leader_parent=$leader_parent lap=$lap"
+          echo "run_verdict=run_in_flight"
+          owner_transcript "$lock"
+          echo "refused: another roster pass holds $lock (pid $detach_owner) -- its transcript is untouched; read that rather than opening a second." >&2
+          owner_lap_detail "$detach_owner" "$lock"
+          exit 1
+        fi
+        ;;
+    esac
+  fi
+  mkdir -p "$(dirname "$transcript")"
+  {
+    echo "launch_stamp $(TZ=America/New_York date +%Y%m%d.%H%M%S)"
+    echo "launch_tree $(pwd)"
+    echo "launch_head $(git rev-parse --short=10 HEAD 2>/dev/null || echo nogit)"
+    echo "launch_args $*"
+  } > "$transcript"
+  # THE EXECUTION BOUNDARY IS STRONGER THAN A HANGUP ON THIS PIER. The Codex command runner
+  # closes the process group when the command returns, so `nohup ... &` can write the launch
+  # header and then disappear before its first line. `setsid` gives the pass its own session on
+  # hosts that carry it; the POSIX nohup form remains the portable fallback. The distinction is
+  # about process custody only -- both branches run this same script with these same arguments.
+  if command -v setsid >/dev/null 2>&1; then
+    STANDING_TRANSCRIPT="$transcript" setsid sh "$0" "$@" >> "$transcript" 2>&1 < /dev/null &
+  else
+    STANDING_TRANSCRIPT="$transcript" nohup sh "$0" "$@" >> "$transcript" 2>&1 < /dev/null &
+  fi
+  echo "transcript=$transcript"
+  echo "pid=$!"
+  echo "finished_when=the transcript carries a run_verdict line"
+  exit 0
+fi
+
+stamp=$(TZ=America/New_York date +%Y%m%d.%H%M%S)
+
+pen=$(mktemp -d)
+receipt_tmp="$pen/receipt.kyri"
+trap 'rm -rf "$pen"' EXIT
+
+# The staged reading, before a single guard runs. A pen outside a repository answers 0 rather than
+# refusing, so a control can drive this runner without standing inside git.
+staged=0
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  staged=$(git diff --cached --name-only 2>/dev/null | grep -c . || true)
+fi
+echo "staged_uncommitted=$staged"
+
+# THE DEAD-LETTER BOX, read on the same line-one pass as the index. `tools/f/fleet_round_open.sh`
+# runs `git stash push` on a dirty tree at every round-open, and its own header names the doctrine:
+# "Stashes are the fleet's dead-letter box; a hand or the lap itself re-derives them." The doctrine
+# is sound, so this reading NEVER gates -- a stash is a legitimate parking place, and a guard that
+# reds on ordinary work is a guard someone turns off. What it refuses to be is silent.
+#
+# WHY IT IS HERE RATHER THAN IN A GUARD OF ITS OWN. REDS %321 found a finished lap -- 557 lines of
+# Rye, a scan, a witness, two fixtures and its own log -- sitting in the box for fourteen hours
+# under a fully green roster, because every meter this tree owns reads the working tree or the
+# index and a stash is neither. It closed on a written habit: a lap opens with `git stash list`.
+# Three hours later the box held a second finished lap by the same route. A habit is the first rung
+# of the ladder this runner's own header names -- rule, then reading, then refusal -- and a reading
+# on line one of the pass every lap already opens with is the second, because the lap that needs it
+# most is precisely the lap that did not remember to look.
+#
+# max_stash_entries bounds the enumeration. Two stood on this pier on 20260828; sixteen leaves room
+# for a body per seat on the six-body constellation to park twice over, and refuses an unbounded
+# walk inside a reading that runs twice a lap. A count past the cap says so on its own line rather
+# than being quietly dropped.
+max_stash_entries=16
+stashed=0
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  stashed=$(git stash list 2>/dev/null | grep -c . || true)
+fi
+echo "stashed_entries=$stashed"
+i=0
+while [ "$i" -lt "$stashed" ] && [ "$i" -lt "$max_stash_entries" ]; do
+  # The subject and the file count together, because a number alone is what %321 already had:
+  # the reading has to be a line an operator can open, not a figure they can pass over.
+  subject=$(git stash list --format='%gs' 2>/dev/null | sed -n "$((i + 1))p")
+  # --include-untracked, and the reason is the fault this reading exists for. `git stash show`
+  # omits untracked files by default, while `fleet_round_open.sh` stashes with `-u`, so a lap whose
+  # leavings are all NEW files -- a fresh scan, a fresh witness, fresh fixtures, which is exactly
+  # what REDS %321 lost -- reads as `0 files` and looks like an empty envelope. Proven in a pen on
+  # git 2.54.0: two untracked files read 0 without the flag and 2 with it.
+  files=$(git stash show --include-untracked --name-only "stash@{$i}" 2>/dev/null | grep -c . || true)
+  echo "detail: stash@{$i} $files files -- $subject"
+  i=$((i + 1))
+done
+if [ "$stashed" -gt "$max_stash_entries" ]; then
+  echo "detail: $((stashed - max_stash_entries)) further entries unenumerated (max_stash_entries=$max_stash_entries)"
+fi
+
+# ONE PASS AT A TIME, and it comes before every refusal that asks a hand to change the tree. This
+# runner held no lock at all, so a second pass started beside a first and both ran to completion:
+# two cold endurance runs stood in ~/grain-hush from 20260830.091545 to 20260830.093000, fifty minutes,
+# with nothing in the output of either to say so (REDS %359). The contention is not merely slow.
+# tools/ca/caravan_suite_witness.rish clears caravan/bin/ before it sings -- REDS %92's own repair
+# for cold-start self-sufficiency -- so one pass deletes the binaries the other pass's rungs are
+# partway through using, and both passes append to the one run card, interleaving the record of
+# which pass proved what.
+#
+# ZERO WAIT, AND A NAMED REFUSAL RATHER THAN A QUEUE. A pass that silently waits half an hour is a
+# pass whose reading nobody can date: the stamp it writes names the moment it started waiting, and
+# the tree it measures is whatever the first pass left. So the second pass refuses under
+# `run_verdict=run_in_flight`, naming the pid that holds the lock, and whoever ran it reads the
+# first pass's output instead.
+#
+# WHY HERE, ahead of the unclosed-lap refusal. That refusal tells a hand to commit, and a hand
+# committing while another pass measures moves the tree under it -- which is the very reading
+# `tree_moved` exists to catch. A pass that cannot run says the runner is busy first.
+if [ -d "$(dirname "$lock")" ]; then
+  if lock_acquire "$lock" 0; then
+    # The release is armed ONLY on the side that acquired. A refusing pass that released would
+    # free the holder's lock and walk a third pass straight in.
+    #
+    # THE SIGNAL TRAPS ONLY EXIT, and the EXIT trap does the cleanup exactly once, however this
+    # pass ends. Written `EXIT INT TERM` on one line, as this tree wrote it 142 other times at `15f99e1fe0`, a
+    # handler that cleans up WITHOUT exiting does not stop the script: POSIX runs the handler and
+    # RESUMES execution where the signal landed. The pass then carries on against the pen its own
+    # handler just removed, and `set -eu` above ends it at the next `>> "$pen/fresh"` -- so a
+    # signalled pass prints a list of green guards and NO `run_verdict` line at all, which reads
+    # like a short healthy run. Measured 20260906: this pass died that way after 34 guards.
+    # REDS %487; proven both directions in tools/fixtures/s/signal_trap_control.sh.
+    trap 'rm -rf "$pen"; lock_release "$lock"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    echo "run_lock=held"
+    # The owner's own name for its output, written where a later refusal can read it (REDS `%666`).
+    # `STANDING_TRANSCRIPT` is set by the `--detach` parent above and by nobody else, so a
+    # foreground pass leaves the file absent and `owner_transcript` says so rather than deriving one.
+    if [ -n "${STANDING_TRANSCRIPT:-}" ]; then
+      printf '%s\n' "$STANDING_TRANSCRIPT" > "$lock/transcript"
+      # READ BACK RATHER THAN ECHOED. The line below prints what the FILE now holds, so a transcript
+      # carrying it is evidence the write landed -- where echoing the variable would prove only that
+      # the variable arrived. That distinction is what lets a control prove this half without racing
+      # a pass that closes in under a second.
+      echo "run_transcript=$(cat "$lock/transcript")"
+    fi
+  else
+    owner=$(cat "$lock/pid" 2>/dev/null || true)
+    [ -n "$owner" ] || owner=unknown
+    owner_lap_read "$owner" "$lock"
+    echo "run_lock=in_flight pid=$owner parent=$parent group_leader=$group_leader leader_parent=$leader_parent lap=$lap"
+    echo "run_verdict=run_in_flight"
+    owner_transcript "$lock"
+    echo "refused: another roster pass holds $lock (pid $owner) -- read its output rather than opening a second." >&2
+    owner_lap_detail "$owner" "$lock"
+    exit 1
+  fi
+else
+  # Same room, same reason as the hit ledger and the receipt below: a pen has no construction/ to
+  # lock inside. The skip SAYS SO, because a silent one is how this reading would go quietly false
+  # on the day that room moved.
+  echo "run_lock=skipped_no_room"
+fi
+
+# A full-roster pass opening on a dirty index is a lap that ended at `git add` (REDS %188, %220,
+# %223). It refuses here, ahead of the tree digest and ahead of the first guard, because nothing
+# measured across that tree would answer the question the lap actually has.
+if [ "$staged" -gt 0 ] && [ "$hot" = no ] && [ -z "$only" ]; then
+  echo "run_verdict=lap_unclosed"
+  echo "refused: $staged paths staged and never committed -- a lap ended at 'git add'." >&2
+  echo "         commit them, or pass --hot when they are this round's own work." >&2
+  exit 1
+fi
+
+# The tree this run is about to measure, in twelve characters. `git status --porcelain` covers
+# staged, unstaged, and untracked alike, so an untracked file written mid-run moves the digest --
+# which is the case that actually happened (REDS %221). What porcelain prints is a status letter
+# and a path and nothing else, which is the case that happened next: a file already carrying `M`
+# reads `M path` however often its bytes change, and so do `??`, `MM`, and a staged `M ` re-staged.
+# A forty-minute pass could therefore close `tree_moved=no` over a tree it had rewritten entirely,
+# and `--hot` -- the pass that runs over a round's own staged paths -- reads worst of all, since
+# re-staging an edit is the ordinary motion of a round (REDS %380).
+#
+# So the CONTENT rides beside the shape, in two readings. `git diff HEAD --binary` carries every
+# tracked difference from HEAD, staged and unstaged in one reading, with a binary edit emitted as a
+# patch rather than as the one-line summary a plain diff gives; before a first commit there is no
+# HEAD to diff from, so the index's own blob hashes stand in, which is content under another name.
+# Untracked files go through `git hash-object --stdin-paths`, since git holds no content for a path
+# it has never been told about. ONE process for the whole list rather than one per file, and the
+# difference is not a nicety: measured in a pen at 2,003 untracked files, git's own hasher took
+# 45ms where a `sha256sum` per file took 10,393ms -- 231 times the cost, growing with a count this
+# runner does not control. Ignored paths stay outside both readings, which is what keeps this
+# runner's own card, receipt, hit ledger, and evidence room from moving the digest they sit beside.
+#
+# Porcelain stays, so the reading is a refinement rather than a replacement: it still names a
+# deletion and a rename compactly. Measured on this tree `20260830` at 15,165 tracked files and a
+# clean working directory, the whole function costs 261ms per call against the elder reading's 148ms
+# -- 113ms more, twice, across a pass that runs for forty minutes. One consequence is named rather
+# than left to be discovered: a receipt written by the elder digest cannot match this one, so the
+# first pass after this change reads `roster_receipt=miss` once and re-chains at its next full
+# green close. A miss runs every guard, which is the safe direction for a reading to fail in.
+tree_digest() {
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    {
+      git rev-parse HEAD 2>/dev/null || echo no_head
+      git status --porcelain 2>/dev/null
+      if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+        git diff HEAD --binary 2>/dev/null
+      else
+        git ls-files -s 2>/dev/null
+      fi
+      git ls-files --others --exclude-standard 2>/dev/null \
+        | git hash-object --stdin-paths 2>/dev/null
+    } | sha256sum | cut -c1-12
+  else
+    echo nogit
+  fi
+}
+# THE DIGEST ANSWERS *WHETHER*; THIS ANSWERS *WHICH* (`20260912.043553`). Twelve characters cannot
+# be diffed from, which the receipt's own comment below already says out loud -- so a pass that
+# ran for forty minutes could report `tree_moved=yes` and name no path at all, and a hand reading
+# the transcript learned what the refusal COST and nothing about its CAUSE. This lap paid that
+# bill: 272 guards green, 3,232 guard-seconds, lost to one edit of `construction/fleet-claims.kyri`
+# made because `tools/f/fleet_baton.txt` tells every ship to open a claim before it builds. Copal
+# reported the same shape one lap earlier from its own door, so it is a loom rather than a lantern.
+#
+# The listing is keyed by PATH rather than by content alone, which is the one thing the digest's
+# own inputs cannot give: `git hash-object --stdin-paths` prints hashes and no names, so an
+# untracked file's content change leaves no path in the digest's stream. Here the path list is
+# built first and the hashes are pasted beside it, so every line reads `<hash> <path>` and a plain
+# `comm` over two sorted listings names what appeared, vanished, or changed.
+#
+# ONE `hash-object` PROCESS for the whole list, for the reason the digest gives above: measured in
+# a pen at 2,003 untracked files, one process took 45ms where a call per file took 10,393ms. A
+# deleted path carries the literal `deleted` in the hash column, since `hash-object` refuses a path
+# that is gone and a refusal per file would cost that same 231-fold.
+#
+# It writes into the runner's own `mktemp` pen, which stands outside the tree entirely, so taking
+# this reading can never be one of the things it measures.
+tree_paths() {
+  git rev-parse --git-dir >/dev/null 2>&1 || return 0
+  {
+    git diff HEAD --name-only 2>/dev/null
+    git diff --cached --name-only 2>/dev/null
+    git ls-files --others --exclude-standard 2>/dev/null
+  } | sort -u > "$pen/paths.list"
+  # A path git names and the filesystem lacks is a deletion; hash-object would refuse it and take
+  # the whole batch down with it, so the two populations are hashed and labelled apart.
+  : > "$pen/paths.present"
+  : > "$pen/paths.gone"
+  while IFS= read -r _p; do
+    [ -n "$_p" ] || continue
+    if [ -f "$_p" ]; then printf '%s\n' "$_p" >> "$pen/paths.present"
+    else printf 'deleted %s\n' "$_p" >> "$pen/paths.gone"; fi
+  done < "$pen/paths.list"
+  if [ -s "$pen/paths.present" ]; then
+    git hash-object --stdin-paths < "$pen/paths.present" 2>/dev/null > "$pen/paths.hashes"
+    paste -d' ' "$pen/paths.hashes" "$pen/paths.present"
+  fi
+  cat "$pen/paths.gone"
+  # HEAD rides in the listing under a name no working path can wear, so a pass whose HEAD moved --
+  # a peer landing a commit in this checkout -- is named rather than left to be inferred from the
+  # dozens of paths that move with it.
+  printf '%s HEAD\n' "$(git rev-parse HEAD 2>/dev/null || echo no_head)"
+}
+
+tree_open=$(tree_digest)
+echo "tree_at_open=$tree_open"
+tree_paths | sort > "$pen/paths.open"
+
+# HOW FAR BEHIND THE ANOINTED ORDER THIS PASS OPENED (`20260910.060000`). A cold endurance run costs about
+# forty minutes -- 2,251 guard-seconds measured `20260910.051007` -- and the fleet lands five to
+# seven commits an hour, so a lap that opens the roster instead of `tools/f/fleet_round_open.sh`
+# is reading a tree the fleet has already left, and is further behind at its close than at its
+# open. That is not a hypothetical: the pass of `20260910.051007` opened three commits behind, and
+# one of those three carried the very repair the lap that followed then spent itself rebuilding.
+#
+# The reading is REPORTED and gates nothing, for two reasons. A ship may work behind the anointed
+# order on purpose, and a gate on ordinary work is a gate somebody turns off. And this reading
+# costs no network: it compares HEAD against the remote-tracking ref the last fetch left, so it
+# can only UNDER-report -- a lap that never fetched sees a stale ref and a small number, never an
+# invented one. Because zero therefore means either *current* or *nobody has fetched*, the
+# anointed ref's own newest commit stamp is printed beside the distance. A stamp hours old on a
+# fleet committing six an hour is what tells those two apart, and it is read through git rather
+# than through `date -r`, which is not POSIX.
+anointed_behind=unknown
+anointed_ref_head=unknown
+anointed_ref_committed=unknown
+if git rev-parse --verify --quiet xy/main >/dev/null 2>&1; then
+  anointed_behind=$(git rev-list --count HEAD..xy/main 2>/dev/null || echo unknown)
+  anointed_ref_head=$(git rev-parse --short=10 xy/main 2>/dev/null || echo unknown)
+  anointed_ref_committed=$(git log -1 --format=%cd --date=format:%Y%m%d.%H%M%S xy/main 2>/dev/null || echo unknown)
+fi
+echo "head_behind_anointed=$anointed_behind anointed_ref_head=$anointed_ref_head anointed_ref_committed=$anointed_ref_committed"
+
+# THE HIT-RATE METER (the fusion build's Move 2 gate, measurement only -- design
+# active-designing/date/20260825/20260825-173153_reprove-only-what-moved.md; the FAST/COLD ruling stays
+# the maintainer's). At a fully green close the runner records the digest it proved; this compare says
+# whether that record would have answered the present open -- and every guard still runs,
+# because a skip that consults a cache is a ruling this tree has not made. The rolling ledger
+# is where the week's hit rate is read from, one row per open. `--receipt-probe` stops here,
+# runs zero guards, and says so in its own verdict -- a probe never wears the roster's green.
+receipt_state=none
+receipt_head=""
+receipt_scope=""
+if [ -f "$receipt" ]; then
+  rec=$(sed -n 's/^digest //p' "$receipt" | head -1)
+  receipt_head=$(sed -n 's/^head //p' "$receipt" | head -1)
+  receipt_scope=$(sed -n 's/^scope //p' "$receipt" | head -1)
+  if [ "$rec" = "$tree_open" ]; then receipt_state=match; else receipt_state=miss; fi
+fi
+echo "roster_receipt=$receipt_state"
+# The ledger and the receipt both live under `construction/`, which every clone of this tree owns
+# and no throwaway pen does. A bare `>>` cannot create a parent directory, so the append DIED here
+# in a pen -- taking the runner with it before a single guard ran, and taking with it every one of
+# the control's runner-driven cases. Creating the directory instead would be worse: an untracked
+# `construction/` written into a pen moves the very tree digest three of those cases exist to read.
+# So the write is skipped where its room is absent, and the skip SAYS SO, because a silent skip is
+# how this reading would go quietly false on the day `construction/` moved.
+#
+# AND THE ROW IS WRITTEN AT THE CLOSE, never here. This append used to run between the two digests,
+# which made the runner one of the things its own `tree_moved` reading measures: the row grows the
+# ledger by one line while the guards run, and a digest that reads CONTENT sees that growth. In
+# this repository the shelf is gitignored and so invisible either way; in the control's own pen it
+# is not, and the moment the digest learned to read bytes the pen answered `tree_moved=yes` on
+# every pass whose earlier case had created `construction/`. The run card and the evidence room
+# already keep this discipline and say why beside themselves -- the digest describes the tree the
+# GUARDS saw, rather than the tree plus this runner's bookkeeping. The ledger simply predated it
+# (REDS %380). The row still records the OPEN's own reading, since that is what it is computed
+# from; only the writing waits.
+hitledger_write() {
+  if [ -d "$(dirname "$hitledger")" ]; then
+    printf 'open %s digest %s receipt %s\n' "$stamp" "$tree_open" "$receipt_state" >> "$hitledger"
+  else
+    echo "hitrate_ledger=skipped_no_room"
+  fi
+}
+if [ "$probe" = yes ]; then
+  # A probe runs no guard and takes no close digest, so nothing can move between its open reading
+  # and this line -- it writes its own row here and leaves.
+  hitledger_write
+  echo "run_verdict=receipt_probe"
+  exit 0
+fi
+
+# Pass one: which guards does this pass run, and what tier does each carry. A guard record is open
+# from its `guard` line until the next one, so the tier is read wherever it sits inside the record.
+#
+# A row may also carry `host macos` or `host linux` (REDS %295, seated on the maintainer's word 20260828):
+# a three-star constellation writes into one tree from three hosts, and a witness whose last leg
+# is `xcrun swift test` is a promise only the Mac benches can keep. A host row is a TIER FOR
+# PLACE the way tier is a tier for time -- never an exemption: the row stays on the one roster,
+# every host SEES it, and a pass on the wrong host reports it skipped by name rather than
+# silently thin. An explicit by-name run (`only`) still runs it wherever the hand asks, so the
+# refusal that follows names the real absence instead of this filter. The host word itself is
+# validated by standing_equipment_scan.sh; here an unmatched word simply does not match.
+case "$(uname -s)" in
+  Darwin) this_host=macos ;;
+  Linux)  this_host=linux ;;
+  *)      this_host=other ;;
+esac
+
+# A row may also carry `capability ipv6` (seated 20260829): where `host` is a tier for PLACE and
+# `tier` is a tier for TIME, this is a tier for what a host CAN DO. The two are different questions
+# and the roster's own note under `comlink_r1_dual_stack` says why: a Linux bench routing IPv6 keeps
+# a promise a Linux bench without it breaks, so `host linux` would encode something untrue. That
+# note asked for this word and declined to guess at it; this is the guess made and proven.
+#
+# THREE ANSWERS, NOT TWO, and the third is the whole safety of the field. A probe returns `present`,
+# `absent`, or `unknown` -- and an UNKNOWN RUNS THE GUARD. Skipping on an unknown is exactly how a
+# capability tier stops being a cadence and becomes an exemption: the probe's own tools go missing
+# on some future bench, every capability reads unknown, and a roster quietly thins to nothing while
+# every meter stays green. TAME settles the direction -- a guard that runs and reds honestly costs
+# one lap, and a guard silently skipped costs the promise. So absence is the only answer that skips,
+# and it must be positively read.
+#
+# ONLY WHAT THE ROSTER ASKS FOR IS PROBED, rather than a list kept here beside the scan's own. Two
+# copies of one list is the drift this tree keeps paying for, so the runner reads the words off the
+# roster and the scan alone refuses one no runner knows. A word this function does not know reads
+# `unknown` and therefore RUNS -- the scan refuses that roster, and if a hand runs it anyway the
+# guard still runs rather than vanishing.
+capability_state() {
+  case "$1" in
+    ipv6)
+      # The same interface table the elder probe reads, and named as such rather than dressed up:
+      # Linux spells the loopback `lo` under iproute2, Darwin spells it `lo0` and ships no `ip`.
+      # This asks the host a host question. It does NOT prove the tree can bind a socket, and no
+      # capability probe should be read as proving anything the guard it gates exists to prove.
+      _lo=$( { ip -o addr show lo 2>/dev/null || ifconfig lo0 2>/dev/null; } || true )
+      [ -n "$_lo" ] || { echo unknown; return 0; }
+      case "$_lo" in
+        *"::1"*) echo present ;;
+        *)       echo absent ;;
+      esac
+      ;;
+    jail_nesting)
+      # Can a jail be launched from where this pass is standing? `bwrap` refuses to nest, so a ship
+      # that is itself jailed cannot run the enclosure legs of `agent_jail` -- not because the
+      # launcher is broken but because the kernel says no to the second wrapper. ATTEMPTED rather
+      # than inferred: no flag, no /proc reading, no "am I in a container" heuristic, just the
+      # cheapest real bwrap this tree can spell, whose failure is the same failure the guard's own
+      # legs would hit. A probe that performs the act cannot be wrong about the bench it stands on,
+      # which is the difference between this and the `host` field REDS %422 declined -- yet it can
+      # still be wrong about WHICH act it performed, and that is the whole of REDS %516.
+      #
+      # THE PAYLOAD RUNS OUTSIDE THE WRAPPER FIRST, and the DIFFERENCE between the two runs is the
+      # reading. The elder spelling handed bwrap `/bin/true` and read any non-zero exit as a refused
+      # namespace. NixOS ships one entry in `/bin` -- `sh` -- so bwrap built the namespace perfectly
+      # and then failed to exec, printing `bwrap: execvp /bin/true: No such file or directory` and
+      # exiting 1. Read as absence, that skipped `agent_jail_enclosure` on the one bench where its
+      # four legs actually pass, which is the bench the guard's own head promises will run them. So
+      # the payload is `/bin/sh -c :`, which POSIX guarantees at that path, and it is proven outside
+      # the wrapper before the wrapper is blamed: a payload that cannot run here answers `unknown`,
+      # and unknown RUNS.
+      #
+      # THE RESIDUE, named rather than papered over: a bwrap failing for some third reason -- an
+      # unsupported flag, a broken install -- still reads `absent` and still skips. Telling that
+      # from a real refusal wants the stderr wording, and the two refusals this pier has actually
+      # printed differ (`setting up uid map: Read-only file system` nested here, `Failed to make /
+      # slave: Operation not permitted` in %446's record), so a wording table would red every jailed
+      # ship whose kernel phrases it a third way. Structure carries further than a table of words.
+      command -v bwrap >/dev/null 2>&1 || { echo unknown; return 0; }
+      /bin/sh -c : >/dev/null 2>&1 || { echo unknown; return 0; }
+      if bwrap --ro-bind / / --dev /dev /bin/sh -c : >/dev/null 2>&1; then echo present; else echo absent; fi
+      ;;
+    trace_instrument)
+      # Can this host observe a program's read set? tools/fixtures/s/scope_trace.sh runs a guard
+      # under `strace -f -y -e trace=openat`, which is Linux-only -- macOS ships `dtruss` behind
+      # System Integrity Protection and no `strace` at all. Without it the scan refuses by name
+      # (`verdict=no_instrument`), and an unconditional row would turn one bench's kernel into every
+      # body's red lap. This is CAPABILITY rather than PLACE: a Linux bench with strace keeps the
+      # promise a Linux bench without it breaks, so `host linux` would encode something untrue.
+      #
+      # THERE IS NO UNKNOWN HERE. `command -v` has no tool of its own to go missing, so the question
+      # is always answerable -- present or absent, never a third state. A probe that ran a real
+      # trace would be answering the guard's own question rather than the host's, which is how a
+      # capability stops being a cadence and becomes an exemption.
+      if command -v strace >/dev/null 2>&1; then echo present; else echo absent; fi
+      ;;
+    qemu_riscv)
+      # Can this host spawn a RISC-V guest? Fifteen wire labs under tools/co/ orchestrate
+      # `qemu-system-riscv64 -machine virt`, and the witnesses that reach them refuse at that leg
+      # on any bench without it. Measured 20260910: 26 witnesses in this tree reach a wire lab and
+      # 0 of 26 stand on this roster, which is REDS %646's class -- a guard whose red nobody hears,
+      # because a leg that cannot run here made the whole row unrostable everywhere.
+      #
+      # This is CAPABILITY rather than PLACE, the same reading `trace_instrument` takes one arm up:
+      # a Linux bench carrying qemu keeps a promise a Linux bench without it breaks, so `host linux`
+      # would encode something untrue about every bench that lacks the emulator.
+      #
+      # THERE IS NO UNKNOWN HERE, for the reason the strace arm gives: `command -v` carries no tool
+      # of its own to go missing, so the question stays answerable -- present or absent, and never a
+      # third state. The probe asks for the binary alone. Spawning a guest to prove one boots would
+      # be answering the guard's own question rather than the host's, which is how a capability
+      # stops being a cadence and becomes an exemption.
+      #
+      # AND THE ROSTER HOLDS BOTH HALVES SEPARATELY. A wire witness's hosted legs belong in their
+      # own row, rostered `tier lap` and heard on every bench, with this word gating the device leg
+      # alone -- the happy zone and the thin edge drawn as two rows
+      # (foundations/20260826-194850_the-happy-zone-and-the-thin-edge.md). Gating a welded witness
+      # would keep this word honest and leave 71 hosted asserts read by nobody.
+      if command -v qemu-system-riscv64 >/dev/null 2>&1; then echo present; else echo absent; fi
+      ;;
+    seed_projection)
+      # Does a seed projection THE GUARD CAN READ stand in this checkout? `seed/` is gitignored and
+      # built by `tools/s/sow.rish`, so a fresh clone has none -- and `sow_allow_reach`, which reads
+      # the shipped side, cannot run without one. Its scan refuses rather than reporting clean, which
+      # is correct (REDS %170) and made the guard red on every tree in the fleet that had not
+      # projected (REDS %492). This is the same reading the operator card already gives an empty
+      # `vendor/`: an ENVIRONMENT fact rather than a tree red.
+      #
+      # THE PROBE ASKS THE GUARD'S OWN QUESTION, reading `SOW_SEED` and `SOW_MANIFEST` exactly as the
+      # scan does, so the two can never disagree about where the projection is or what it covers.
+      # Answering a different question than the guard would is how a capability becomes an exemption.
+      #
+      # AND IT ASKS ALL FOUR OF THEM, from `20260909.215500`. The elder arm was `test -d` alone,
+      # while `tools/fixtures/s/sow_allow_reach_scan.sh` refuses four ways: no directory, no receipt
+      # at `$SEED/.sow-projection.log`, a receipt naming no inputs, and a receipt whose coverage
+      # inputs have MOVED. Three were invisible here, and the fourth is the one that fires. The
+      # receipt hashes `template-manifest.kyri` together with `git ls-files` over every `allow` room,
+      # so any commit that adds, deletes, or renames a tracked path under one of those rooms staled
+      # every ship's receipt at once -- measured `20260909`, **12 of the last 40 commits** did, and
+      # `tools/` is an allowed room, so a lap that lands one tool file stales the fleet. The guard
+      # then read `red` on an eight-ship pier for a fact that was never a tree fault, the receipt was
+      # withheld, and every ship paid a full cold endurance run. That is precisely the `day_shelf` arm's own
+      # lesson two arms below -- *the scan refuses twice, and a probe answering only the first would
+      # read `present` ... which is a probe and its guard disagreeing* -- written there and left
+      # unapplied here.
+      #
+      # UNKNOWN IS REAL HERE, unlike the elder `test -d`: the coverage reading calls `git`, which is
+      # a tool that can go missing, and an unknown answer RUNS the guard rather than hiding it.
+      _seed=${SOW_SEED:-seed}
+      _manifest=${SOW_MANIFEST:-template-manifest.kyri}
+      [ -d "$_seed" ] || { echo absent; return 0; }
+      [ -f "$_seed/.sow-projection.log" ] || { echo absent; return 0; }
+      _recorded=$(cat "$_seed/.sow-projection.log" 2>/dev/null || true)
+      [ -n "$_recorded" ] || { echo absent; return 0; }
+      [ -f "$_manifest" ] || { echo absent; return 0; }
+      # invariant: the coverage reading is the scan's own function, sourced rather than restated, so
+      # the two can never drift apart -- a lantern that fires twice becomes a loom.
+      . "$_run_here/sow_reach_inputs.sh" 2>/dev/null || { echo unknown; return 0; }
+      _current=$(sow_reach_inputs "$_manifest" 2>/dev/null) || { echo unknown; return 0; }
+      if [ "$_recorded" = "$_current" ]; then echo present; else echo absent; fi
+      ;;
+    day_shelf)
+      # Does the day this pass stands in have a shelf with tracked logs in it? `rota_declared`
+      # counts how many of TODAY's session logs declare the row they read, and before the day's
+      # first log lands there is nothing to count -- so its scan refuses (REDS %170: a scan that
+      # cannot measure refuses rather than reporting clean) and the guard reds. That is the state
+      # of every day between midnight and its first landing, on every ship, so the elder rostering
+      # made an ordinary daily state read as a fault: measured 20260907.003211, a cold endurance run at
+      # 00:12 answered `guards_red=2` -- this guard, and `standing_equipment` reading its own
+      # roster's red -- and the receipt was withheld, which is what makes `--scoped` refuse and
+      # every ship pay a FULL cold endurance run. Same reading the operator card gives an empty `vendor/`,
+      # and the same one `seed_projection` gives a fresh clone one arm above.
+      #
+      # THE PROBE ASKS THE GUARD'S OWN QUESTION, in both of its halves, reading `ROTA_DAY` and the
+      # one clock exactly as `tools/fixtures/r/rota_declared_scan.sh` does and then asking git the
+      # same `ls-files` it asks. The scan refuses twice -- once for a missing shelf and once for a
+      # shelf holding no TRACKED log -- and a probe answering only the first would read `present`
+      # on a shelf whose only log is still untracked, which is a probe and its guard disagreeing.
+      #
+      # UNKNOWN IS REAL HERE, unlike `seed_projection`'s `test -d`: `git` is a tool that can go
+      # missing, and reading its absence as `absent` would SKIP the guard on a bench where nobody
+      # had positively read anything. Unknown runs, which is the safety direction the header above
+      # names.
+      command -v git >/dev/null 2>&1 || { echo unknown; return 0; }
+      _day=${ROTA_DAY:-$(TZ=America/New_York date +%Y%m%d)}
+      _shelf="session-logs/date/$_day"
+      [ -d "$_shelf" ] || { echo absent; return 0; }
+      if [ -n "$(git ls-files "$_shelf/*.kyri" 2>/dev/null | head -1)" ]; then
+        echo present
+      else
+        echo absent
+      fi
+      ;;
+    sed_sandbox)
+      # Ask the liveness scan for its exact sed capability, so the roster and
+      # the scan choose the same tool. An unreadable probe remains unknown.
+      _sed_cap=$(sh tools/fixtures/p/plant_liveness_scan.sh --capability 2>/dev/null) || {
+        echo unknown; return 0;
+      }
+      case "$_sed_cap" in present|absent) echo "$_sed_cap" ;; *) echo unknown ;; esac
+      ;;
+    tigerbeetle_clone)
+      # Does the held TigerBeetle clone stand in this checkout? `gratitude/tigerbeetle` is a
+      # gitlink into a READING LIBRARY -- the gratitude-licenses rule says we study those and never
+      # copy them -- so a correct clone may hold it empty forever, and all eight gratitude gitlinks
+      # are empty on this pier today. Twenty-two census witnesses read that clone's `src/` and red
+      # beneath it, which is why every one of them stood unrostered: an unconditional row would
+      # turn a study nobody is obliged to fetch into every body's red lap. That is the same reading
+      # the operator card gives an empty `vendor/`, and the same one `seed_projection` gives a
+      # fresh clone two arms above -- an ENVIRONMENT fact rather than a tree red.
+      #
+      # THE PROBE ASKS THE GUARD'S OWN QUESTION, spelling `test -d gratitude/tigerbeetle/src`
+      # because that is the line all twenty-two of them spell, character for character, in the
+      # assert that gates their work. Answering a different question than the guard would -- asking
+      # git about the gitlink, or reading `.gitmodules` -- is how a capability becomes an exemption:
+      # a submodule declared and never added carries no gitlink, and a gitlink whose directory is
+      # empty is exactly what the witnesses find.
+      #
+      # THERE IS NO UNKNOWN HERE, and that is honest rather than a gap: `test -d` has no tool of its
+      # own to go missing, so the question is always answerable. The skip is announced by name on
+      # every pass (`skipped_capability <guard> wants=tigerbeetle_clone here=absent`), which is what
+      # keeps it a cadence rather than a quiet hole.
+      if [ -d gratitude/tigerbeetle/src ]; then echo present; else echo absent; fi
+      ;;
+    *) echo unknown ;;
+  esac
+}
+
+caps_absent=" "
+for _cap in $(awk '$1 == "capability" { print $2 }' "$roster" 2>/dev/null | sort -u); do
+  if [ "$(capability_state "$_cap")" = absent ]; then
+    caps_absent="$caps_absent$_cap "
+  fi
+done
+# ONE SELECTOR, READ TWICE. The cadence slice below asks this same roster the same question for a
+# different tier, and a second copy of these seven rules is how two readings of one roster begin --
+# the `host` and `capability` skips especially, which a slice must honor exactly as a lap pass does.
+select_rows() {
+  awk -v want="$1" -v only="$2" -v here="$this_host" -v capsabsent="$caps_absent" '
+  function reset() { name = ""; path = ""; tier = ""; host = ""; cap = ""; gate = "" }
+  function flush(   t) {
+    if (name == "") return
+    t = (tier == "" ? "lap" : tier)
+    if (only != "" && name != only)                { reset(); return }
+    if (only == "" && want != "all" && t != want)  { reset(); return }
+    if (only == "" && host != "" && host != here)  { print "SKIPHOST", name, host; reset(); return }
+    if (only == "" && cap != "" && index(capsabsent, " " cap " ") > 0) { print "SKIPCAP", name, cap; reset(); return }
+    print name, (path == "" ? "-" : path), t, (gate == "" ? "-" : gate)
+    reset()
+  }
+  $1 == "guard"      { flush(); name = $2; next }
+  $1 == "path"       { if (name != "") path = $2; next }
+  $1 == "tier"       { if (name != "") tier = $2; next }
+  $1 == "host"       { if (name != "") host = $2; next }
+  $1 == "capability" { if (name != "") cap = $2; next }
+  $1 == "gate"       { if (name != "") gate = $2; next }
+  END { flush() }
+' "$roster"
+}
+select_rows "$want_tier" "$only" > "$pen/selected"
+grep '^SKIPHOST ' "$pen/selected" > "$pen/skiphost" || true
+grep '^SKIPCAP ' "$pen/selected" > "$pen/skipcap" || true
+grep -vE '^(SKIPHOST|SKIPCAP) ' "$pen/selected" > "$pen/todo" || true
+skipped_host=$(grep -c '' "$pen/skiphost" || true)
+skipped_capability=$(grep -c '' "$pen/skipcap" || true)
+while read -r _ skipname skiphost; do
+  [ -n "$skipname" ] || continue
+  echo "skipped_host $skipname wants=$skiphost here=$this_host"
+done < "$pen/skiphost"
+# Named, never merely counted. A guard skipped for a capability this host lacks is still ON the one
+# roster and still SEEN by every pass; what changes is that this pass says out loud which promise it
+# could not ask for and why, so a thinning roster reads as a thinning roster rather than as a green.
+while read -r _ skipname skipcap; do
+  [ -n "$skipname" ] || continue
+  echo "skipped_capability $skipname wants=$skipcap here=absent"
+done < "$pen/skipcap"
+
+# The scoped filter, after every other selection has spoken. The basis must be a FULL green
+# receipt carrying a head this repository holds; the changed set is that head to HEAD plus every
+# porcelain path (staged, unstaged, untracked alike -- the same breadth the tree digest reads);
+# the map comes from its own fixture, one line per guard, DISCOVERY or a watch-set. A guard whose
+# map row is missing runs -- absence is the answer that runs, exactly as the capability tier holds.
+skipped_scope=0
+if [ "$scoped" = yes ]; then
+  scope_map="${STANDING_SCOPE_MAP:-tools/fixtures/s/standing_equipment_scope_map.sh}"
+  if [ "$receipt_scope" != full ] || [ -z "$receipt_head" ] \
+    || ! git rev-parse --verify --quiet "$receipt_head^{commit}" >/dev/null 2>&1; then
+    # WHICH OF THE TWO REMEDIES IS THEIRS. A missing receipt has two causes that want opposite
+    # answers, and the elder sentence gave one answer to both. Either no full pass has closed here
+    # yet, and running the roster earns the basis; or every full pass here closes red, a receipt is
+    # written only from a fully green close, and running it again changes nothing at all. On a tree
+    # whose reds sit at a custody gate the living card names, the second is permanent (REDS %374).
+    # The run card is the only evidence standing at this point, since this refusal comes before a
+    # guard runs, and it holds the last verdict of each guard ON THIS PIER. Eight names are printed
+    # and the rest counted, because a refusal that prints a roster is a refusal nobody reads.
+    blocked=$(awk '$1 == "ran" && $4 == "red" {
+        n++
+        if (n <= 8) { printf "%s%s", sep, $2; sep = "," }
+      } END { if (n > 8) printf ",+%d more", n - 8 }' "$card" 2>/dev/null || true)
+    [ -n "$blocked" ] || blocked=none
+    echo "scoped_basis_blocked=$blocked"
+    echo "run_verdict=scoped_no_basis"
+    if [ "$blocked" = none ]; then
+      echo "refused: --scoped wants a FULL green receipt with a head to diff from -- run the full roster once" >&2
+    else
+      echo "refused: --scoped wants a FULL GREEN receipt; the last full pass here closed red at $blocked, and a receipt is written only from a fully green close" >&2
+    fi
+    exit 1
+  fi
+  [ -f "$scope_map" ] || { echo "refused: no scope map at $scope_map" >&2; exit 1; }
+  { git diff --name-only "$receipt_head" HEAD 2>/dev/null
+    git status --porcelain 2>/dev/null | awk '{ $1=""; sub(/^ /,""); print }' \
+      | sed 's/^"\(.*\)"$/\1/' | awk -F' -> ' '{ print $NF }'
+  } | sort -u > "$pen/changed"
+  changed_n=$(grep -c . "$pen/changed" || true)
+  echo "scoped_basis=$receipt_head"
+  echo "scoped_changed=$changed_n"
+  sh "$scope_map" > "$pen/scopemap" || { echo "refused: the scope map fixture failed" >&2; exit 1; }
+  : > "$pen/todo.scoped"
+  while read -r name path tier_word gate_word; do
+    [ -n "$name" ] || continue
+    maprow=$(awk -v g="$name" '$1 == g { $1=""; sub(/^ /,""); print; exit }' "$pen/scopemap")
+    keep=no
+    if [ -z "$maprow" ] || [ "$maprow" = DISCOVERY ]; then
+      # Absence runs, exactly as the capability tier holds: a guard the map does not know is
+      # never skipped, so a newborn guard is safe before anyone maps it.
+      keep=yes
+    elif scope_match_any "$maprow" "$pen/changed"; then
+      # Watch words are shell patterns; a word ending in / watches its whole room, and `case` gives
+      # those glob semantics natively. The two rules are spelled once in scope_match.sh, which the
+      # ranking scan reads too, so a skip taken here and a saving priced there are one rule.
+      keep=yes
+    fi
+    if [ "$keep" = yes ]; then
+      printf '%s %s %s %s\n' "$name" "$path" "$tier_word" "$gate_word" >> "$pen/todo.scoped"
+    else
+      skipped_scope=$((skipped_scope + 1))
+      echo "skipped_scope $name basis=$receipt_head"
+    fi
+  done < "$pen/todo"
+  cat "$pen/todo.scoped" > "$pen/todo"
+fi
+echo "skipped_scope=$skipped_scope"
+
+# THE CADENCE CLOCK, TURNED BY THE CARD RATHER THAN BY A COUNTER. A cadence guard was promised "the
+# fifth round"; nothing in this tree counts rounds, so the fifth never arrived and the whole tier
+# stood unheard -- 74 of 74 on this pier, measured `20260910.221225`. The run card already answers
+# the only question a rotation needs: when did this guard last speak here. So the slice takes the
+# guards that have waited longest, a never-run guard first of all, and running them writes the very
+# stamps that put a different set at the front of the queue next lap.
+#
+# BOUNDED, because the cadence tier is where the choirs live: `caravan_suite` sang 111 rungs in
+# 8m31s and `crypto_suite` 74 in 9m06s on this pier. One guard a lap adds a bounded, named cost to a
+# pass that already runs 250, and 74 guards sing through in 74 laps -- under a day at this fleet's
+# pace -- where the elder clock needed forever.
+#
+# THE SKIPS ARE THE LAP TIER'S OWN, taken by the one selector above: a cadence guard this host
+# cannot run is skipped by `host` or `capability` exactly as any other guard is, and is never
+# spent as a turn of the rotation.
+cadence_slice_run=0
+echo "cadence_slice=$cadence_slice"
+if [ "$cadence_slice" -gt 0 ]; then
+  select_rows cadence "" | grep -vE '^(SKIPHOST|SKIPCAP) ' > "$pen/cadence.pool" || true
+  : > "$pen/cadence.ranked"
+  while read -r cname cpath ctier cgate; do
+    [ -n "$cname" ] || continue
+    cstamp=""
+    if [ -f "$card" ]; then
+      cstamp=$(awk -v n="$cname" '$1 == "ran" && $2 == n { s = $3 } END { print s }' "$card")
+    fi
+    # A never-run guard sorts ahead of every dated one because it has waited longest of all, and a
+    # stamp of zeroes says that in the same field rather than in a second one a sort would ignore.
+    printf '%s %s %s %s %s\n' "${cstamp:-00000000.000000}" "$cname" "$cpath" "$ctier" "$cgate" \
+      >> "$pen/cadence.ranked"
+  done < "$pen/cadence.pool"
+  # A STABLE SORT ON THE STAMP ALONE, so the roster's own order breaks a tie among the never-run
+  # rather than the alphabet breaking it -- a rotation that reordered itself each lap would leave
+  # the same guards at the back forever.
+  sort -s -k1,1 "$pen/cadence.ranked" | head -n "$cadence_slice" > "$pen/cadence.turn"
+  while read -r cstamp cname cpath ctier cgate; do
+    [ -n "$cname" ] || continue
+    printf '%s %s %s %s\n' "$cname" "$cpath" "$ctier" "$cgate" >> "$pen/todo"
+    cadence_slice_run=$((cadence_slice_run + 1))
+    # Named, never merely counted -- the same courtesy the host and capability skips take. A reader
+    # of a cold open should be able to say which cadence guard this lap heard, and when it last spoke.
+    case "$cstamp" in
+      00000000.000000) echo "cadence_slice_named $cname last=never" ;;
+      *) echo "cadence_slice_named $cname last=$cstamp" ;;
+    esac
+  done < "$pen/cadence.turn"
+fi
+echo "cadence_slice_run=$cadence_slice_run"
+
+# THE GUARD THAT READS THE CARD RUNS WHEN THE CARD IS COMPLETE (REDS %483, second half). This
+# runner's own guard, `standing_equipment`, stands at roster position 188 of 196 -- so eight guards
+# stood after it, and their rows in the live view below could only be last pass's. Deferring it to
+# the end of the todo list by NAME rather than by roster position closes that residue and keeps it
+# closed: a hand adding a guard alphabetically after it cannot silently reopen the gap. It changes
+# no verdict, since guards are independent of one another and nothing in this pass reads another
+# guard's result.
+if grep -q "^$self_guard " "$pen/todo"; then
+  awk -v n="$self_guard" '$1 != n' "$pen/todo" > "$pen/todo.deferred"
+  awk -v n="$self_guard" '$1 == n' "$pen/todo" >> "$pen/todo.deferred"
+  cat "$pen/todo.deferred" > "$pen/todo"
+fi
+
+awk '{print $1}' "$pen/todo" | sort -u > "$pen/running"
+
+# A GUARD THIS HOST CANNOT RUN LOSES ITS ELDER CARD ROW (REDS %493, second half). The carry-forward
+# below exists so a `tier cadence` guard keeps its own history between its runs, and that is right.
+# It is NOT right for a guard skipped by `host` or `capability`: that guard is not merely waiting its
+# turn, it cannot run here at all, so its last verdict was recorded in a different world and nothing
+# will ever overwrite it. `sow_allow_reach` is the case that taught it -- red on the cold endurance run for a
+# missing `seed/`, given `capability seed_projection` in the same lap, and its red then stood on the
+# card permanently while `standing_equipment` counted it every pass. The skip is announced by name on
+# every pass (`skipped_capability <name> wants=<cap> here=absent`), so dropping the row loses no
+# reading; keeping it would be inheriting a verdict from a machine this one is not.
+#
+# `skipped_scope` is deliberately NOT here: a `--scoped` pass skips a guard that DOES apply to this
+# host and whose receipt is the whole point of the mechanism.
+cat "$pen/skiphost" "$pen/skipcap" 2>/dev/null | awk '{print $2}' | sort -u > "$pen/unrunnable"
+
+# THE RECORD A GUARD READS MUST DESCRIBE THIS PASS, NOT THE LAST ONE (REDS %483). The card in the
+# working tree is written once, at the close far below, so every guard reading it mid-pass read the
+# PREVIOUS pass's verdict for every peer -- including reds this same pass had already repaired.
+# Measured `20260906.113000`: a cold endurance run read `index_row_bound red`, the shelf was repaired, and
+# the hot endurance run read `index_row_bound green` at line 60 and `standing_equipment red` at line 151 --
+# the same scan run by hand two minutes later read `runs_red=0 verdict=ok`. That phantom red is
+# counted, so it costs the receipt at `withheld_guard_red` below, `--scoped` refuses without one,
+# and the NEXT lap pays a full cold endurance run. On this pier that is 798 seconds of guard time alone, and
+# six ships share eight cores, so the bill is a full pass under whatever contention the pier carries.
+#
+# THE REPAIR KEEPS THE CARD OUT OF THE WORKING TREE. Writing the tree's card incrementally would
+# move the tree under this runner's own `tree_moved` reading in any clone where the card is not yet
+# gitignored, and in every control pen -- the same reason the evidence room lands after the close
+# digest. So the live view is written inside the PEN and handed to each guard through
+# `STANDING_CARD`, which `rishi run` passes on to the scan (proven on metal `20260906`). Nothing
+# enters the working tree before the close, and a guard reads the truest record available: this
+# pass's verdict for every peer that has already answered, and the last recorded one for every peer
+# that has not -- which is exactly what a peer that has not re-run honestly has.
+: > "$pen/live.rows"
+if [ -f "$card" ]; then
+  # The live view drops an unrunnable guard's elder row for the same reason the close does
+  # (REDS %493, second half): a guard skipped by `host` or `capability` cannot run here, so its last
+  # recorded verdict came from a different machine and no pass will ever replace it. Filtering only
+  # at the close would leave every guard reading this view mid-pass the very phantom red the two
+  # repairs exist to end.
+  grep '^ran ' "$card" \
+    | while IFS= read -r _row; do
+        _rname=$(printf '%s' "$_row" | awk '{print $2}')
+        grep -qx "$_rname" "$pen/unrunnable" || printf '%s\n' "$_row"
+      done > "$pen/live.rows" || :
+fi
+live_card="$pen/card.live"
+live_write() {
+  {
+    echo "# Pen-local live view of the run card, handed to each guard through STANDING_CARD."
+    echo "# Written by tools/fixtures/s/standing_equipment_run.sh; it never enters the working tree."
+    echo "format standing-equipment-runs-v1"
+    sort "$pen/live.rows"
+  } > "$live_card"
+}
+live_write
+export STANDING_CARD="$live_card"
+
+# Keep every card line whose guard this pass leaves alone, so a slower tier keeps its own history.
+: > "$pen/fresh"
+if [ -f "$card" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      ran\ *)
+        name=$(printf '%s' "$line" | awk '{print $2}')
+        if ! grep -qx "$name" "$pen/running" && ! grep -qx "$name" "$pen/unrunnable"; then
+          printf '%s\n' "$line" >> "$pen/fresh"
+        fi
+        ;;
+      *) ;;
+    esac
+  done < "$card"
+fi
+
+ran=0
+green=0
+red=0
+gated=0
+# THE THIRD VERDICT (REDS %747). A guard the runner could not RECORD is counted here rather
+# than under `red`, because a guard that cannot answer and a guard that found something are two
+# facts wanting two repairs, and the elder branch gave them one word.
+unrun=0
+unrun_names=""
+gate_names=""
+seconds=0
+cpu_ms=0
+cpu_ms_absent=0
+
+# A RED THAT KEEPS NO WORDS CANNOT BE ROOTED. This loop discarded every guard's output, so a red
+# printed one word -- the guard's name -- and whoever read it later had to reproduce the failure to
+# learn anything. On `20260826.114500` `caravan_suite` read red here and GREEN when run alone
+# minutes afterward, on a tree that had not moved, and the run's own record held nothing to tell
+# those two cases apart (REDS %266). So a red keeps its guard's stdout and stderr beside the run
+# card, in a room this file's sibling gitignores, and the printed line names the file.
+#
+# BOUNDED, because an unbounded log is the next thing to fill a tmpfs: the last 200 lines of each
+# red, which is the tail a witness fails in, and only reds are kept -- a green that wrote a
+# thousand lines is a green nobody needs to read.
+# EVIDENCE IS GATHERED IN THE PEN AND LANDS AFTER THE CLOSE DIGEST, for the same reason the run
+# card does: a file written into the working tree DURING the run moves the tree under the runner's
+# own `tree_moved` reading. In this repository the room is gitignored and so invisible to
+# `git status --porcelain` either way; in a clone where it is not yet ignored -- or a pen a control
+# drives -- writing it mid-run would turn every red into a `tree_moved` refusal as well.
+red_room="construction/standing-equipment-reds"
+
+# WHAT A GUARD COST, recorded beside what it answered (REDS %388). This loop wrote a verdict and
+# no elapsed time, so the run card held a hundred verdicts and not one cost -- and a lap deciding
+# whether a pass fits its own clock had nothing to read but a window it had watched. On
+# `20260831.023122` a lap watched 15 guards for 30 minutes, took 2 min/guard as a rate, projected a
+# 106-guard close at three and a half hours, and shipped without a full roster. Measured here the
+# next hour over 28 guards: a **median of 2.5 seconds against a mean of 31**, `sow` at 280 and
+# `living_card_ascii` at 189, three guards holding 65% of 865 seconds. A mean fifteen times its own
+# median is not a rate, and no window of a distribution that skewed predicts the rest of it.
+#
+# TWO `date` FORKS PER GUARD, against guards measured in seconds -- a cost worth paying to stop
+# guessing. Seconds rather than anything finer, because this reading exists to size a PASS: a guard
+# that finishes inside a second is one no lap ever needs to think about, and it reads 0 honestly.
+# CPU-MILLISECONDS BESIDE WALL-SECONDS, so a tier reads the same on every host. `times` is a POSIX
+# special builtin: line one is this shell's own user and system time, line two its children's
+# cumulative user and system time, and it forks nothing. It must be REDIRECTED rather than captured
+# -- `$(times)` forks a subshell whose own children account is empty and reads 0m0.000s however much
+# work has been done, proven on metal `20260908.223000`. Descendants count too: two levels of `sh -c`
+# around one loop moved the children line by 1.413 user seconds, which matters because a guard is
+# `rishi run <path>` and rishi's own subprocesses are where the time goes.
+#
+# WHY THE SECOND CLOCK. Wall seconds measure this pier's contention as much as the guard: eight ships
+# against eight cores, load average 7.66/10.72/13.70 read `20260908.223542`. Re-run under `times`,
+# `shared_pen` read 53 wall seconds against 43.8 CPU-seconds and `module_room_reach` 8 against 6.7.
+# CPU-seconds also ADD across guards, ships and days, where wall seconds double-count two ships
+# running at once. Milliseconds rather than seconds, because a guard finishing inside a second is
+# most of the roster and 0 would be the only reading it could ever earn.
+cpu_children_ms() {
+  awk 'FNR == 2 {
+    total = 0
+    for (i = 1; i <= 2; i++) {
+      f = $i
+      sub(/s$/, "", f)
+      p = index(f, "m")
+      if (p == 0) { exit 1 }
+      total += substr(f, 1, p - 1) * 60 + substr(f, p + 1) + 0
+    }
+    printf "%d\n", total * 1000 + 0.5
+    exit 0
+  }' "$1" 2>/dev/null
+}
+
+# A reading that cannot be taken says so rather than saying zero: an unreadable `times`, an empty
+# file, or a counter that went backwards each answer `-`, which every reader treats as absent. Zero
+# is a real cost a stub guard honestly earns, so it may never stand in for a missing instrument.
+cpu_delta_ms() {
+  _a=$(cpu_children_ms "$1")
+  _b=$(cpu_children_ms "$2")
+  case "$_a" in ''|*[!0-9]*) echo '-'; return ;; esac
+  case "$_b" in ''|*[!0-9]*) echo '-'; return ;; esac
+  if [ "$_b" -lt "$_a" ]; then echo '-'; else echo $((_b - _a)); fi
+}
+
+while read -r name path tier gate; do
+  [ -n "$name" ] || continue
+  guard_open=$(date +%s)
+  times > "$pen/cpu.before"
+  if [ "$path" != "-" ] && [ -f "$path" ]; then
+    if rishi/bin/rishi run "$path" > "$pen/out.$$" 2>&1; then
+      verdict=green
+      green=$((green + 1))
+    else
+      # A RED AT A CUSTODY GATE IS A PARKED READING, NOT A BROKEN ONE (REDS %374, the maintainer's word
+      # `20260904`). The counter below used to book both under one name, and this pier's gates are
+      # permanent by design -- pond at %5, the drifted rule pairs at %7, the untracked publisher at
+      # %1 -- so no pass here could ever close fully green and the fusion build's cheaper pass was
+      # unreachable BY CONSTRUCTION rather than by delay. Splitting the counter is the whole repair:
+      # `red` keeps its meaning of *this guard broke*, `gated` says *this guard is parked at a gate
+      # the card names*, and only the first refuses. The evidence is kept either way, because a
+      # parked reading a hand cannot read is a parked reading nobody can retire.
+      # A REFUSAL THE RUNNER COULD NOT RECORD IS NOT A REFUSAL THE RUNNER MAY REPORT (REDS %747).
+      # This write is the whole discriminator, and until `20260917` its exit status was discarded
+      # and the line below announced its path either way. On `20260915.215400` a hot pass died at
+      # guard 27 of 376 with `times: write error: No space left on device`, reported FOUR red on
+      # the way down, and named `exec_bit.txt` and `living_card_ascii.txt` beside two of them --
+      # neither file existed, and both guards had run GREEN in this same tree minutes earlier. So
+      # the pass published a red with a citation to nothing, and a reader meeting that transcript
+      # tomorrow sees four reds and a healthy disk.
+      #
+      # WHY THE STATUS AND NOT THE EXIT CODE OF THE GUARD. Measured on metal `20260917.145018`: a
+      # failed capture redirect and a guard that ran and refused BOTH leave this branch at exit 1,
+      # so the status of the guard cannot tell them apart and never could. The artifact can. When
+      # this write refuses, the runner holds no evidence, and what it does not hold it may not
+      # describe.
+      #
+      # A BARE TAIL DROPS THE HEADER A LONG ANSWER OPENS WITH (`20260917.194613`).
+      # `rye_compiled_reach` reads over_ceiling against 791 bodies, and a plain `tail -n 200` kept the tail of that list
+      # plus the verdict line while silently dropping the three header lines naming paths, bodies,
+      # and ceiling -- the numbers that give the list its scale. `capture_evidence` keeps the same
+      # ~200-line bound and the guard's own opening lines both, at no cost to any guard whose full
+      # answer already fits inside it.
+      if capture_evidence "$pen/out.$$" "$pen/evidence.$name.txt" 200; then
+        echo "  evidence $red_room/$name.txt"
+        evidence_kept=yes
+      else
+        # Said out loud rather than left as a missing line, because a silence here reads exactly
+        # like a guard that earned no evidence room -- the two states the row above separates.
+        rm -f "$pen/evidence.$name.txt"
+        echo "  evidence could not be kept -- this guard's answer is lost, not read"
+        evidence_kept=no
+      fi
+      if [ "$evidence_kept" = no ]; then
+        # A GATE CANNOT PARK A READING NOBODY TOOK. An unrun guard is counted apart from `gated`
+        # for the reason absence is: a gate says a hand has read this red and parked it, and no
+        # hand read this one.
+        verdict=unrun
+        unrun=$((unrun + 1))
+        unrun_names="$unrun_names$name "
+      elif [ "$gate" != "-" ]; then
+        verdict=gated
+        gated=$((gated + 1))
+        gate_names="$gate_names$name($gate) "
+      else
+        verdict=red
+        red=$((red + 1))
+      fi
+    fi
+    rm -f "$pen/out.$$"
+  else
+    # An absent path is never gated: a guard whose file is gone proves nothing, whatever a
+    # roster row claims about it, and letting a gate excuse absence would turn the field into
+    # the exemption the tier vocabulary refuses to be.
+    verdict=absent
+    red=$((red + 1))
+  fi
+  times > "$pen/cpu.after"
+  guard_cpu=$(cpu_delta_ms "$pen/cpu.before" "$pen/cpu.after")
+  guard_seconds=$(( $(date +%s) - guard_open ))
+  seconds=$((seconds + guard_seconds))
+  case "$guard_cpu" in
+    ''|*[!0-9]*) cpu_ms_absent=$((cpu_ms_absent + 1)) ;;
+    *) cpu_ms=$((cpu_ms + guard_cpu)) ;;
+  esac
+  echo "ran $name $stamp $verdict $tier $guard_seconds $guard_cpu" >> "$pen/fresh"
+  # The live view moves with the pass: this guard's elder row leaves and the one it just earned
+  # lands, so every guard after it reads what actually happened rather than what happened last time.
+  awk -v n="$name" '!($1 == "ran" && $2 == n)' "$pen/live.rows" > "$pen/live.next"
+  echo "ran $name $stamp $verdict $tier $guard_seconds $guard_cpu" >> "$pen/live.next"
+  cat "$pen/live.next" > "$pen/live.rows"
+  live_write
+  echo "$name $verdict ${guard_seconds}s ${guard_cpu}ms"
+  ran=$((ran + 1))
+done < "$pen/todo"
+
+# Taken before the runner writes its own card, so the digest describes the tree the GUARDS saw
+# rather than the tree plus this runner's bookkeeping. The card is gitignored here and so invisible
+# to `git status --porcelain` either way; ordering it this way means a clone where it is not yet
+# ignored still reads honestly.
+tree_close=$(tree_digest)
+tree_paths | sort > "$pen/paths.close"
+
+# The open's hit-ledger row lands here, beside the card and the evidence and for the same
+# reason: nothing this runner writes belongs between its own two digests.
+hitledger_write
+
+# The scope word, computed here rather than beside the receipt below, because a pass that refuses
+# has to name what the refusal COST as well as what it found -- and because the evidence clear
+# immediately below turns on it.
+run_scope=full
+[ "$scoped" = yes ] && run_scope=scoped
+[ -n "$only" ] && run_scope=named
+
+# The evidence lands now, after the digest and beside the card, for the reason written above the
+# room's name. The old evidence is cleared first so a stale file can never be read as this run's
+# verdict, and a run with no reds leaves no room at all.
+#
+# A PASS CLEARS WHAT IT ANSWERED, AND NOTHING ELSE (REDS `20260907.093000`). The clear was
+# `rm -rf "$red_room"` on every pass, and REDS %266 built this room for one purpose: to root a
+# guard that reads red under the roster and GREEN alone. The motion that confirms exactly that --
+# see `standing_equipment red` in the pass, then run `standing_equipment_run.sh standing_equipment`
+# to check it alone -- therefore DELETED the words it was opened to read, and left nothing, because
+# the alone-run is green. Six firings of the flake family across `caravan_suite`, `fleet_watch` and
+# this runner's own guard have gone unrooted, and %549 recovered one file only because a clobber
+# elsewhere sent a hand to the room before anyone re-ran the guard.
+#
+# THE FAMILY HAS A RATE, MEASURED `20260908.011935` OUT OF THE JOURNAL ITSELF. Six firings counts
+# what a hand happened to root; `tools/l/loom_trend.sh red --summary` scoped to the roster family
+# reads **192 recorded passes, a mean of 2.49 reds per pass, rising from 0 to 5**, with the last
+# seven passes at 3, 3, 10, 2, 6, 3, 5. Green rose 22 -> 172 over the same journal, so the guard
+# count grew about eightfold while the red count grew from nothing to a standing floor.
+#
+# WHAT IS NOT MEASURED, said plainly: the RATIO of flake to defect inside that floor. On `20260907`
+# one seat re-ran its pass reds one at a time and found both kinds -- `shared_pen`,
+# `fold_shelf_link` and `rota_grid` were real and were repaired, while others read GREEN alone with
+# nothing changed between. Nobody has counted which dominates, and the floor deserves a number
+# rather than an impression: a roster whose ordinary reading is two-to-five reds teaches every ship
+# that a red is weather.
+#
+# So the rule is the one the pass can honestly keep. A FULL pass answered for every rostered guard,
+# so it owns the room and sweeps it whole -- which also retires the file of a guard that has left
+# the roster, the one thing a per-guard clear would leave behind forever. A `--scoped` or by-name
+# pass answered for a named few, so it clears exactly those and leaves every other guard's words
+# standing. Nothing here changes what a full pass leaves, which is what the control's
+# `green_leaves_no_evidence` case reads.
+if [ "$run_scope" = full ]; then
+  rm -rf "$red_room"
+else
+  while read -r _rn; do
+    [ -n "$_rn" ] || continue
+    rm -f "$red_room/$_rn.txt"
+  done < "$pen/running"
+  # An emptied room leaves, so a partial pass that cleared the last red reads the same as a green
+  # full one. `rmdir` refuses a room still holding a peer's words, which is the reading wanted.
+  rmdir "$red_room" 2>/dev/null || true
+fi
+for _ev in "$pen"/evidence.*.txt; do
+  [ -f "$_ev" ] || continue
+  mkdir -p "$red_room"
+  _nm=${_ev##*/evidence.}
+  cat "$_ev" > "$red_room/$_nm"
+done
+
+{
+  echo "# construction/standing-equipment-runs.kyri -- when each standing guard last ran on THIS pier."
+  echo "# Written by tools/fixtures/s/standing_equipment_run.sh; untracked on purpose, so a fresh"
+  echo "# clone reads 'never run here' rather than inheriting another machine's memory."
+  echo "format standing-equipment-runs-v1"
+  sort "$pen/fresh"
+} > "$card"
+
+moved=no
+[ "$tree_open" = "$tree_close" ] || moved=yes
+
+# WHAT MOVED, NAMED (`20260912.043553`). The two path-keyed listings taken beside the two digests
+# are compared here, and only here -- a reading nobody needs when the tree held still costs nothing
+# when it did.
+#
+# THE LISTING HOLDS WHAT DIFFERS FROM HEAD, NEVER THE WHOLE TREE, and the verbs are read against
+# that fact rather than against the listing's own shape. A first draft called every path entering
+# the close listing `appeared`, and the pen caught it at once: a committed file rewritten under the
+# run had CHANGED, and it stood in no open listing at all because it was clean when the pass began.
+# A verb read off set membership describes the instrument; these three describe the tree.
+#
+#   vanished  the path is gone from disk at the close -- a `deleted` hash, or no close line at all
+#   appeared  the path is UNTRACKED and stood in no open listing; every untracked file is listed,
+#             so its absence from the open reading means it did not exist then
+#   changed   everything else, which is the tracked file that was clean at the open and differs now
+#
+# BOUNDED AT SIXTEEN, with the remainder counted rather than dropped. A rebase mid-pass moves
+# hundreds of paths and a transcript that prints them all buys a scroll where a hand wanted a
+# sentence; one that prints some and says how many it withheld keeps both.
+moved_named=0
+moved_unnamed=0
+if [ "$moved" = yes ]; then
+  [ -f "$pen/paths.open" ] || : > "$pen/paths.open"
+  [ -f "$pen/paths.close" ] || : > "$pen/paths.close"
+  cut -d' ' -f2- "$pen/paths.open" | sort -u > "$pen/names.open"
+  cut -d' ' -f2- "$pen/paths.close" | sort -u > "$pen/names.close"
+  # Every path either listing names, once, minus HEAD's own row -- a moved HEAD is named by the
+  # commits that moved with it and by its own line below, so it is classified apart.
+  sort -u "$pen/names.open" "$pen/names.close" | grep -v '^HEAD$' > "$pen/names.all"
+  git ls-files 2>/dev/null | sort -u > "$pen/names.tracked" || : > "$pen/names.tracked"
+  # ONE awk over the three listings rather than a grep per path, and the reason is the same one
+  # the digest gives for its single `hash-object`: a per-path process is a cost that grows with a
+  # count this runner does not control, and a rebase mid-pass can move hundreds. A path is the
+  # whole rest of the line, so a name carrying a space is read whole.
+  awk '
+    FILENAME == o_file { h = $1; sub(/^[^ ]+ /, ""); open[$0] = h; next }
+    FILENAME == c_file { h = $1; sub(/^[^ ]+ /, ""); close_[$0] = h; next }
+    { tracked[$0] = 1 }
+    END {
+      for (n in open) all[n] = 1
+      for (n in close_) all[n] = 1
+      for (n in all) {
+        if (n == "HEAD") continue
+        if ((n in open) && (n in close_) && open[n] == close_[n]) continue
+        if (!(n in close_) || close_[n] == "deleted") v = "vanished"
+        else if (!(n in open) && !(n in tracked)) v = "appeared"
+        else v = "changed"
+        print v " " n
+      }
+    }
+  ' o_file="$pen/paths.open" c_file="$pen/paths.close" \
+    "$pen/paths.open" "$pen/paths.close" "$pen/names.tracked" | sort -k2 > "$pen/moved.rows"
+  # HEAD moving is a peer landing a commit in this checkout, which is a different fact from a file
+  # being edited and is said in its own words.
+  _ho=$(grep ' HEAD$' "$pen/paths.open" | head -1)
+  _hc=$(grep ' HEAD$' "$pen/paths.close" | head -1)
+  [ "$_ho" = "$_hc" ] || printf 'changed HEAD\n' >> "$pen/moved.rows"
+  moved_named=$(grep -c . "$pen/moved.rows" 2>/dev/null || echo 0)
+fi
+if [ "$moved" = yes ]; then
+  echo "tree_moved_paths=$moved_named"
+  if [ "$moved_named" -gt 16 ]; then
+    moved_unnamed=$((moved_named - 16))
+    head -16 "$pen/moved.rows" | sed 's/^/detail: moved /'
+    echo "tree_moved_unnamed=$moved_unnamed"
+  elif [ "$moved_named" -gt 0 ]; then
+    sed 's/^/detail: moved /' "$pen/moved.rows"
+    echo "tree_moved_unnamed=0"
+  else
+    # HONEST RATHER THAN SILENT. The digest reads the porcelain's SHAPE beside the content, so a
+    # rename or a staging move can change it while every path keeps its bytes. Saying so is the
+    # difference between an instrument with a known reach and one that quietly missed.
+    echo "tree_moved_unnamed=0"
+    echo "detail: the digest moved and no path-keyed line did -- a rename, or a path moving between the index and the working tree." >&2
+  fi
+fi
+
+echo "tier_run=$want_tier"
+echo "guards_run=$ran"
+# The pass's own cost, so a hand reads what it just spent without opening the card (REDS %388).
+echo "guards_seconds=$seconds"
+# The same pass in the unit that adds across guards, ships and days. A guard whose
+# reading could not be taken is counted apart rather than folded in as a zero, because
+# zero is a cost a fast guard honestly earns.
+echo "guards_cpu_ms=$cpu_ms"
+echo "guards_cpu_absent=$cpu_ms_absent"
+echo "guards_green=$green"
+echo "guards_red=$red"
+# Disclosed on every pass, empty or full, for the reason the enforced rooms are reported at every
+# count: a gate that vanishes from a meter is a gate nobody witnessed being retired.
+echo "guards_gated=$gated"
+[ -n "$gate_names" ] && echo "gated_at=${gate_names% }"
+# Disclosed on every pass, empty or full, for the reason the gates are: a class that vanishes from
+# a meter when it is empty is a class nobody can tell from one nothing measures.
+echo "guards_unrun=$unrun"
+[ -n "$unrun_names" ] && echo "unrun_at=${unrun_names% }"
+echo "host=$this_host"
+echo "skipped_host=$skipped_host"
+echo "skipped_capability=$skipped_capability"
+echo "tree_at_close=$tree_close"
+echo "tree_moved=$moved"
+
+if [ "$red" -ne 0 ]; then
+  # A RED COSTS THE RECEIPT, AND THAT IS SAID HERE RATHER THAN LEFT TO BE INFERRED. The receipt is
+  # written below, past this exit, so a full pass carrying any red writes none -- and `--scoped`
+  # reads that receipt for its basis. A GATED READING IS NOT A RED, and that is what makes the
+  # receipt reachable on this pier: the branch 140 lines above books a custody-gated refusal to
+  # `gated` and only a genuine break to `red`, so the permanent gates the living card names --
+  # rule_twin at %7, the two pond_enclosure rows at %5 -- no longer withhold it (REDS %374,
+  # the maintainer's word `20260904`). The sentence standing here until `20260908.072554` still read that
+  # the cheaper pass could never be earned, four days after its own repair landed in this file and
+  # while `construction/standing-equipment-receipt.kyri` stood written `20260908.052552` at
+  # `scope full`, `guards 186`, `gated 3`. A comment describing a constraint its own file has
+  # already lifted teaches the next reader not to look.
+  [ "$run_scope" = full ] && echo "roster_receipt_write=withheld_guard_red"
+  echo "run_verdict=guard_red"
+  echo "refused: a rostered guard answered red -- read its own line" >&2
+  exit 1
+fi
+
+# AN UNRUN GUARD WITHHOLDS THE RECEIPT TOO, and this block is why the verdict earns a place beside
+# `red` rather than beside `gated` (REDS %747). The receipt below is written from a fully green
+# close and `--scoped` reads it for its basis, so a pass that lost one guard's answer and fell
+# through here would publish a receipt claiming coverage it never had -- the same lie the verdict
+# exists to end, one layer up. It sits UNDER the red block because a guard that broke is the louder
+# finding, and OVER `tree_moved` because a lost answer is a fault in this pass rather than a
+# question about which tree it describes.
+if [ "$unrun" -ne 0 ]; then
+  [ "$run_scope" = full ] && echo "roster_receipt_write=withheld_guard_unrun"
+  echo "run_verdict=guard_unrun"
+  echo "refused: a guard's answer could not be kept -- the runner cannot tell a finding from a machine fault, so it claims neither" >&2
+  exit 1
+fi
+
+# A guard red is the louder finding, so it keeps the verdict when both are true. A moved tree comes
+# second and still refuses, since verdicts spread across two trees answer no question about either.
+if [ "$moved" = yes ]; then
+  echo "run_verdict=tree_moved"
+  echo "refused: the tree changed while this ran -- these verdicts describe neither one" >&2
+  exit 1
+fi
+
+# The record a future open compares against, written at an unmoved close of a FULL pass carrying
+# no BROKEN guard -- so the receipt can never speak a green the roster did not prove on this exact
+# tree, and never one a scoped or by-name pass merely inherited. A guard parked at a custody gate
+# the card names no longer costs the receipt (REDS %374, the maintainer's word `20260904`); it is disclosed
+# inside it instead, since the honest reading is *nothing here broke* rather than *nothing here is
+# parked*, and this pier's gates are permanent by design. A scoped close writing the
+# receipt would let a skip become the basis of the next skip, which is the one road from
+# evidence to rumor this whole design exists to close; a single-guard green overwriting the
+# full roster's record was the same road at a walk (found on the fusion lap, 20260829). The
+# head rides beside the digest because a digest cannot be diffed from and a commit can.
+if [ "$run_scope" = full ]; then
+  {
+    echo "# construction/standing-equipment-receipt.kyri -- the last fully green FULL close on THIS pier."
+    echo "# The fusion build's basis record; written by full passes alone, consulted by --scoped."
+    echo "format standing-equipment-receipt-v2"
+    echo "digest $tree_close"
+    echo "head $(git rev-parse HEAD 2>/dev/null || echo no_head)"
+    echo "scope full"
+    echo "tier $want_tier"
+    echo "guards $ran"
+    # THE RECEIPT DISCLOSES WHAT IT CHAINED PAST (REDS %374, granted `20260904`). A receipt that
+    # simply said `green` after a gated-only close would promise more than the pass proved, and
+    # `--scoped` reads this file for its basis -- so the gates ride in the record itself, and a
+    # reader of the receipt learns what was parked without rerunning anything. Zero gates writes
+    # the line anyway, at zero, so an absent line is a receipt from before this format rather
+    # than a pass that quietly had none.
+    echo "gated $gated"
+    [ -n "$gate_names" ] && echo "gated_at ${gate_names% }"
+    echo "stamp $stamp"
+  } > "$receipt_tmp"
+  # Same room, same reason as the hit ledger above: a pen has no `construction/` to write into.
+  if [ -d "$(dirname "$receipt")" ]; then
+    cat "$receipt_tmp" > "$receipt"
+  else
+    echo "roster_receipt_write=skipped_no_room"
+  fi
+  rm -f "$receipt_tmp"
+else
+  echo "roster_receipt_write=withheld_scope_$run_scope"
+fi
+
+echo "run_verdict=ok"
+exit 0

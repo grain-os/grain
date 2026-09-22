@@ -1,0 +1,131 @@
+//! glow-book: runes.md#g-quad
+//! glow/rune_quad.rye -- parses Glow's `:^` quad-cell rune head.
+//!
+//! Per the sameness rune brief `:` category: `:^` builds a quad. Eleventh
+//! rune head (STOA4). Shape:
+//!   :^  from  amount  note  tag
+//!
+//! Faces only -- nested values stay later. List cell `:~` is STOA5
+//! (`rune_list.rye`).
+
+const std = @import("std");
+const assert = std.debug.assert;
+const tokens = @import("tokens.rye");
+
+/// Ident ceiling -- Glow's one name length, owned by the lexer (`tokens.rye`), which is
+/// what decides where a name ends. Aliased rather than respelled, so this parser can
+/// never accept or refuse a name the lexer would judge differently.
+pub const max_name_len: u32 = tokens.max_name_len;
+
+pub const ParseError = error{
+    NotAQuad,
+    MissingFirst,
+    MissingSecond,
+    MissingThird,
+    MissingFourth,
+    FaceTooLong,
+    MalformedFace,
+    TrailingJunk,
+};
+
+pub const QuadSpec = struct {
+    a: [max_name_len]u8 = [_]u8{0} ** max_name_len,
+    a_len: usize = 0,
+    b: [max_name_len]u8 = [_]u8{0} ** max_name_len,
+    b_len: usize = 0,
+    c: [max_name_len]u8 = [_]u8{0} ** max_name_len,
+    c_len: usize = 0,
+    d: [max_name_len]u8 = [_]u8{0} ** max_name_len,
+    d_len: usize = 0,
+};
+
+pub fn a_slice(spec: *const QuadSpec) []const u8 {
+    // invariant: a returned face never claims more than the ident ceiling
+    // the lexer itself owns, whatever parse() stored.
+    assert(spec.a_len <= max_name_len);
+    return spec.a[0..spec.a_len];
+}
+pub fn b_slice(spec: *const QuadSpec) []const u8 {
+    // invariant: a returned face never claims more than the ident ceiling
+    // the lexer itself owns, whatever parse() stored.
+    assert(spec.b_len <= max_name_len);
+    return spec.b[0..spec.b_len];
+}
+pub fn c_slice(spec: *const QuadSpec) []const u8 {
+    // invariant: a returned face never claims more than the ident ceiling
+    // the lexer itself owns, whatever parse() stored.
+    assert(spec.c_len <= max_name_len);
+    return spec.c[0..spec.c_len];
+}
+pub fn d_slice(spec: *const QuadSpec) []const u8 {
+    // invariant: a returned face never claims more than the ident ceiling
+    // the lexer itself owns, whatever parse() stored.
+    assert(spec.d_len <= max_name_len);
+    return spec.d[0..spec.d_len];
+}
+
+fn is_ident_char(ch: u8) bool {
+    if (ch >= 'a' and ch <= 'z') return true;
+    if (ch >= 'A' and ch <= 'Z') return true;
+    if (ch >= '0' and ch <= '9') return true;
+    return ch == '-' or ch == '_';
+}
+
+fn parse_ident(rest: []const u8) ParseError!struct { ident: []const u8, rest: []const u8 } {
+    var end: usize = 0;
+    while (end < rest.len and is_ident_char(rest[end])) end += 1;
+    if (end == 0) return error.MalformedFace;
+    const ident = rest[0..end];
+    if (ident[0] >= '0' and ident[0] <= '9') return error.MalformedFace;
+    if (ident.len > max_name_len) return error.FaceTooLong;
+    return .{ .ident = ident, .rest = rest[end..] };
+}
+
+fn need_ws(before: []const u8, after_trim: []const u8) ParseError!void {
+    if (after_trim.len == 0) return;
+    if (after_trim.len == before.len) return error.MalformedFace;
+}
+
+/// Parses one line of Glow's `:^` rune. Four bare faces; nothing else yet.
+pub fn parse(line: []const u8) ParseError!QuadSpec {
+    if (line.len < 2 or !std.mem.eql(u8, line[0..2], ":^")) return error.NotAQuad;
+
+    var rest = std.mem.trimStart(u8, line[2..], " \t");
+    if (rest.len == 0) return error.MissingFirst;
+    // invariant: a line accepted past the missing-first check names a real
+    // remainder, never an empty one, once execution reaches here.
+    assert(rest.len > 0);
+    const first = try parse_ident(rest);
+    rest = std.mem.trimStart(u8, first.rest, " \t");
+    if (rest.len == 0) return error.MissingSecond;
+    try need_ws(first.rest, rest);
+    const second = try parse_ident(rest);
+    rest = std.mem.trimStart(u8, second.rest, " \t");
+    if (rest.len == 0) return error.MissingThird;
+    try need_ws(second.rest, rest);
+    const third = try parse_ident(rest);
+    rest = std.mem.trimStart(u8, third.rest, " \t");
+    if (rest.len == 0) return error.MissingFourth;
+    try need_ws(third.rest, rest);
+    const fourth = try parse_ident(rest);
+    rest = std.mem.trimStart(u8, fourth.rest, " \t");
+    if (rest.len != 0) return error.TrailingJunk;
+
+    var spec: QuadSpec = .{
+        .a_len = first.ident.len,
+        .b_len = second.ident.len,
+        .c_len = third.ident.len,
+        .d_len = fourth.ident.len,
+    };
+    @memcpy(spec.a[0..first.ident.len], first.ident);
+    @memcpy(spec.b[0..second.ident.len], second.ident);
+    @memcpy(spec.c[0..third.ident.len], third.ident);
+    @memcpy(spec.d[0..fourth.ident.len], fourth.ident);
+    // invariant: a constructed spec never claims more of any fixed buffer
+    // than the ident ceiling the length checks above already proved fits.
+    assert(spec.a_len <= max_name_len);
+    assert(spec.b_len <= max_name_len);
+    assert(spec.c_len <= max_name_len);
+    assert(spec.d_len <= max_name_len);
+    return spec;
+}

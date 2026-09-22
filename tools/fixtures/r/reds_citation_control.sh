@@ -1,0 +1,343 @@
+#!/bin/sh
+# tools/fixtures/r/reds_citation_control.sh -- plant a citation whose number and path name different
+# rows, and watch the scan bite.
+#
+# Three promise forms are proven here, each from both sides, in every spelling the tree
+# writes: NUMBERED, SHELF, and FOLD -- the recital line the loom writes, whose anchor is a
+# path and whose number stands in the words before it, which 192 of this tree's 282 living
+# shelf links wear and neither elder form could see. The reach itself is proven too: every
+# shelf link is read by one form or counted unread, and the parts sum to the whole.
+#
+# WHY A PEN AND NOT THE FIELD. The gate reads zero on this tree and is meant to, so nothing here
+# could ever show it able to refuse -- and a refusal proven only in the passing direction cannot be
+# told from a bypass. The pen supplies the cases the field does not hold, in real git repositories,
+# every refusal planted and then lifted so the same bytes are shown to read both ways.
+#
+# WHAT EACH CASE IS FOR. The two welcomes are asserted as hard as the refusals, because the reading
+# that cost this round its lap was a false positive: a nearest-preceding-%N window called 32 honest
+# sentences wrong before the form was narrowed to the two that are promises. Cases 6 and 7 are that
+# narrowing, proven -- a `%N` after the link, and a `%N` two lines above it, must BOTH pass.
+#
+# Run from the repository root; it takes no lock and touches nothing outside its own pen:
+#   sh tools/fixtures/r/reds_citation_control.sh
+set -u
+
+ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+_steps=0
+while [ ! -d "$ROOT/rishi/bin" ] || [ ! -d "$ROOT/tools/fixtures" ]; do
+  _steps=$((_steps + 1))
+  if [ "$_steps" -gt 8 ] || [ "$ROOT" = "/" ] || [ -z "$ROOT" ]; then
+    echo "$0: no tree root within 8 steps (needs rishi/bin and tools/fixtures)" >&2
+    exit 2
+  fi
+  ROOT=$(dirname "$ROOT")
+done
+
+scan="$ROOT/tools/fixtures/r/reds_citation_scan.sh"
+[ -f "$scan" ] || { echo "control: no scan at $scan" >&2; exit 2; }
+
+pen=$(mktemp -d)
+trap 'rm -rf "$pen"' EXIT
+
+cases=0
+fails=0
+repos=0
+
+# Build a fresh repository, run the scan over it, and read one key or the verdict.
+new_repo() {
+  repos=$((repos + 1))
+  R="$pen/r$repos"
+  mkdir -p "$R"
+  ( cd "$R" && git init -q . && git config user.email pen@example.invalid && git config user.name pen ) >/dev/null 2>&1
+}
+commit_all() { ( cd "$R" && git add -A && git commit -qm pen --no-gpg-sign ) >/dev/null 2>&1; }
+read_key() { ROOT_DIR="$R" sh "$scan" 2>/dev/null | sed -n "s/^$1=//p"; }
+read_verdict() { ROOT_DIR="$R" sh "$scan" 2>/dev/null | sed -n 's/^verdict=//p'; }
+
+want() {
+  cases=$((cases + 1))
+  name=$1; got=$2; expect=$3
+  if [ "$got" = "$expect" ]; then
+    echo "  ok   $name ($got)"
+  else
+    echo "  FAIL $name -- read '$got', wanted '$expect'"
+    fails=$((fails + 1))
+  fi
+}
+
+# A shelf file the plants can name, so the pen exercises the reading rather than a missing file --
+# existence is `readme_reach`'s question, and this scan asks a different one.
+shelves() {
+  mkdir -p "$R/construction/archive"
+  : > "$R/construction/archive/REDS-a-pen-row-rows-100.md"
+  : > "$R/construction/archive/REDS-a-pen-row-rows-101.md"
+  : > "$R/construction/archive/REDS-a-pen-pair-rows-110-111.md"
+  # A wide span, so the pen can show that a shelf named `rows-100-110` holds the rows BETWEEN its
+  # endpoints -- which the field proved on metal and the elder set-reading denied (REDS %511).
+  : > "$R/construction/archive/REDS-a-pen-span-rows-100-110.md"
+}
+
+echo "reds-citation control: the three forms, from both sides, and the reach counted."
+
+# 1 -- NUMBERED, agreeing.
+new_repo; shelves
+printf 'The row [`%%100`](construction/archive/REDS-a-pen-row-rows-100.md) closed.\n' > "$R/pin.md"
+commit_all
+want numbered_agree_welcomed "$(read_verdict)" ok
+want numbered_agree_counted "$(read_key numbered_links)" 1
+
+# 2 -- NUMBERED, disagreeing: the number says 100, the path says 101, and the path OPENS.
+new_repo; shelves
+printf 'The row [`%%100`](construction/archive/REDS-a-pen-row-rows-101.md) closed.\n' > "$R/pin.md"
+commit_all
+want numbered_disagree_bitten "$(read_verdict)" citation_disagrees
+want numbered_disagree_counted "$(read_key numbered_disagree)" 1
+want numbered_disagree_named \
+  "$(ROOT_DIR="$R" sh "$scan" list 2>/dev/null | sed -n 's/^disagree numbered [^:]*:\([0-9]*\) .*/line\1/p')" line1
+
+# 3 -- the plant lifted: the same file, the path corrected, reads ok. Same bytes both ways.
+printf 'The row [`%%100`](construction/archive/REDS-a-pen-row-rows-100.md) closed.\n' > "$R/pin.md"
+commit_all
+want numbered_disagree_lifted "$(read_verdict)" ok
+
+# 4 -- a path naming several rows: a claim matching EITHER agrees, because the shelf holds both.
+new_repo; shelves
+printf 'Both [`%%111`](construction/archive/REDS-a-pen-pair-rows-110-111.md) rest here.\n' > "$R/pin.md"
+commit_all
+want multi_row_second_number_welcomed "$(read_verdict)" ok
+
+# 5 -- a claim matching NEITHER of a multi-row path still refuses.
+printf 'Both [`%%112`](construction/archive/REDS-a-pen-pair-rows-110-111.md) rest here.\n' > "$R/pin.md"
+commit_all
+want multi_row_outsider_bitten "$(read_verdict)" citation_disagrees
+
+# 6 -- SHELF, agreeing on one line.
+new_repo; shelves
+printf '`%%100` CLOSED, folded to its [shelf](construction/archive/REDS-a-pen-row-rows-100.md).\n' > "$R/pin.md"
+commit_all
+want shelf_agree_welcomed "$(read_verdict)" ok
+want shelf_agree_counted "$(read_key shelf_links)" 1
+
+# 7 -- SHELF, disagreeing ACROSS THE HARD WRAP. This is the break that actually shipped: the number
+# on one line, its link on the next, and a repair that read only the half it was looking at.
+new_repo; shelves
+{ printf '**COPAL -- a wrapper is only transparent** `%%100` CLOSED\n'
+  printf '([shelf](construction/archive/REDS-a-pen-row-rows-101.md)). The rest of the paragraph.\n'
+} > "$R/pin.md"
+commit_all
+want shelf_wrap_disagree_bitten "$(read_verdict)" citation_disagrees
+want shelf_wrap_disagree_counted "$(read_key shelf_disagree)" 1
+
+# 8 -- the same wrap, repaired: the number and the path name one row.
+{ printf '**COPAL -- a wrapper is only transparent** `%%100` CLOSED\n'
+  printf '([shelf](construction/archive/REDS-a-pen-row-rows-100.md)). The rest of the paragraph.\n'
+} > "$R/pin.md"
+commit_all
+want shelf_wrap_lifted "$(read_verdict)" ok
+
+# 9 -- a `%N` AFTER the link is not its claim. A fold recital writes exactly this shape -- *Row 170
+# folded to [link] ... -- REDS %83's own guard* -- and reading the trailing number as the claim is
+# what called 32 honest sentences wrong.
+new_repo; shelves
+printf 'Row 100 folded to its [shelf](construction/archive/REDS-a-pen-row-rows-100.md) -- `%%83` taught it.\n' > "$R/pin.md"
+commit_all
+want claim_after_link_not_read "$(read_verdict)" ok
+
+# 10 -- a `%N` two lines above is out of the window, so the link makes no numeric promise here.
+new_repo; shelves
+{ printf 'A paragraph naming `%%101` and nothing else.\n'
+  printf '\n'
+  printf 'Its [shelf](construction/archive/REDS-a-pen-row-rows-100.md) stands.\n'
+} > "$R/pin.md"
+commit_all
+want lookback_bounded_at_one_line "$(read_verdict)" ok
+want lookback_bounded_counted "$(read_key shelf_unnumbered)" 1
+
+# 11 -- TESTIMONY keeps every word it wrote: a stamped basename holding a wrong citation is read past.
+new_repo; shelves
+mkdir -p "$R/session-logs/date/20260906"
+printf 'The row [`%%100`](construction/archive/REDS-a-pen-row-rows-101.md) closed.\n' \
+  > "$R/session-logs/date/20260906/20260906-120000_a-dated-record.md"
+printf 'A living page citing [`%%100`](construction/archive/REDS-a-pen-row-rows-100.md).\n' > "$R/pin.md"
+commit_all
+want testimony_read_past "$(read_verdict)" ok
+
+# 12 -- and the same wrong citation in a LIVING file refuses, so case 11 is the stamp doing the work
+# rather than the reading failing to see it.
+printf 'A living page citing [`%%100`](construction/archive/REDS-a-pen-row-rows-101.md).\n' > "$R/pin.md"
+commit_all
+want living_twin_of_testimony_bitten "$(read_verdict)" citation_disagrees
+
+# 13 -- an UNTRACKED file is not the tree's word, so it is not read.
+new_repo; shelves
+printf 'A living page citing [`%%100`](construction/archive/REDS-a-pen-row-rows-100.md).\n' > "$R/pin.md"
+commit_all
+printf 'Untracked [`%%100`](construction/archive/REDS-a-pen-row-rows-101.md).\n' > "$R/stray.md"
+want untracked_not_read "$(read_verdict)" ok
+
+# 14 -- no document cites a shelf at all: a confident zero would be worse than a refusal.
+new_repo
+printf 'A page with no ledger citation in it.\n' > "$R/pin.md"
+commit_all
+want empty_corpus_refuses "$(read_verdict)" refused_no_corpus
+
+# 15 -- a document naming a shelf in no readable form. The corpus is real and the reading finds
+# nothing to check, which is a different refusal from an empty corpus.
+new_repo; shelves
+printf 'See construction/archive/REDS-a-pen-row-rows-100.md for the row, unlinked.\n' > "$R/pin.md"
+commit_all
+want unreadable_form_refuses "$(read_verdict)" refused_no_citation
+
+# 18 -- FOLD, agreeing: the recital line the loom writes, where the anchor text is a path and the
+# number stands in the words before it. Neither reading above can see this shape, and 192 of
+# this tree's 282 living shelf links wear it -- 47 of them spelled with a bare number like
+# this case, and 145 with the `%` sigil the ledger's own law seats (cases 24-27).
+printf 'Row 100 folded to [`REDS-a-pen-row-rows-100.md`](construction/archive/REDS-a-pen-row-rows-100.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_agree_welcomed "$(read_verdict)" ok
+want fold_agree_counted "$(read_key fold_links)" 1
+
+# 19 -- FOLD, disagreeing: the recital names one row and folds it onto another row's shelf, which
+# OPENS, so nothing that reads existence can see it.
+printf 'Row 100 folded to [`REDS-a-pen-row-rows-101.md`](construction/archive/REDS-a-pen-row-rows-101.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_disagree_bitten "$(read_verdict)" citation_disagrees
+want fold_disagree_counted "$(read_key fold_disagree)" 1
+
+# 20 -- the plant lifted: the same file, the path corrected, reads ok. Same bytes both ways.
+printf 'Row 101 folded to [`REDS-a-pen-row-rows-101.md`](construction/archive/REDS-a-pen-row-rows-101.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_disagree_lifted "$(read_verdict)" ok
+
+# 21 -- a fold naming a RANGE is checked at both endpoints, since a name promising 110-111 promises
+# nothing about 112.
+new_repo; shelves
+printf 'Rows 110-111 folded to [`x`](construction/archive/REDS-a-pen-pair-rows-110-111.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_range_welcomed "$(read_verdict)" ok
+printf 'Rows 110-112 folded to [`x`](construction/archive/REDS-a-pen-pair-rows-110-111.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_range_endpoint_bitten "$(read_verdict)" citation_disagrees
+
+# 22 -- a word anchor that is not a shelf word makes no numeric promise this reading can check, and
+# it is COUNTED rather than passed over in silence. A guard reporting only what it gates reads as
+# though it covered the room (REDS %451, %469).
+new_repo; shelves
+{ printf 'The row [`%%100`](construction/archive/REDS-a-pen-row-rows-100.md) closed.\n'
+  printf 'And see [the record](construction/archive/REDS-a-pen-row-rows-101.md) beside it.\n'
+} > "$R/pin.md"
+commit_all
+want unread_link_welcomed "$(read_verdict)" ok
+want unread_link_counted "$(read_key unread_links)" 1
+
+# 24 -- FOLD wearing the SIGIL, which is the spelling the recital actually writes and the elder
+# form could not see. `git-signing.md` seats `%` as the sigil for a number this tree assigns
+# itself, so `Row %100 folded to` is the canonical spelling and `Row 100 folded to` the exception
+# (REDS %511).
+new_repo; shelves
+printf 'Row %%100 folded to [`x`](construction/archive/REDS-a-pen-row-rows-100.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_sigil_welcomed "$(read_verdict)" ok
+want fold_sigil_counted "$(read_key fold_links)" 1
+
+# 25 -- and the same sigilled spelling refuses when it disagrees, so case 24 is the form reading it
+# rather than a link nobody looked at.
+printf 'Row %%100 folded to [`x`](construction/archive/REDS-a-pen-row-rows-101.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_sigil_disagree_bitten "$(read_verdict)" citation_disagrees
+
+# 26 -- a fold naming a LIST joined by `and`: 23 citations wear this shape, and every number in the
+# list is a claim.
+new_repo; shelves
+printf 'Rows %%110 and %%111 folded to [`x`](construction/archive/REDS-a-pen-pair-rows-110-111.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_list_and_welcomed "$(read_verdict)" ok
+want fold_list_and_counted "$(read_key fold_links)" 1
+printf 'Rows %%110 and %%112 folded to [`x`](construction/archive/REDS-a-pen-pair-rows-110-111.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_list_second_member_bitten "$(read_verdict)" citation_disagrees
+
+# 27 -- a list joined by commas AND `and`, backticked, which the recital writes once. The middle
+# member is the one a two-endpoint reading would step over.
+new_repo; shelves
+printf 'Rows `%%100`, `%%105` and `%%110` folded to [`x`](construction/archive/REDS-a-pen-span-rows-100-110.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_list_comma_welcomed "$(read_verdict)" ok
+want fold_list_comma_counted "$(read_key fold_links)" 1
+printf 'Rows `%%100`, `%%111` and `%%110` folded to [`x`](construction/archive/REDS-a-pen-span-rows-100-110.md) on a day.\n' > "$R/pin.md"
+commit_all
+want fold_list_middle_member_bitten "$(read_verdict)" citation_disagrees
+
+# 28 -- NUMBERED carrying the ledger's own name in the anchor -- [`REDS %108`](path) -- which five
+# living citations write and the elder anchor pattern refused.
+new_repo; shelves
+printf 'See [`REDS %%100`](construction/archive/REDS-a-pen-row-rows-100.md) for the account.\n' > "$R/pin.md"
+commit_all
+want numbered_reds_word_welcomed "$(read_verdict)" ok
+want numbered_reds_word_counted "$(read_key numbered_links)" 1
+printf 'See [`REDS %%100`](construction/archive/REDS-a-pen-row-rows-101.md) for the account.\n' > "$R/pin.md"
+commit_all
+want numbered_reds_word_bitten "$(read_verdict)" citation_disagrees
+
+# 29 -- NUMBERED with no sigil at all -- [`488`](path) -- which the operator card writes once. A
+# reader clicks a number whether or not it wears the sigil, so the promise is the same.
+new_repo; shelves
+printf 'The account rests on the [`100`](construction/archive/REDS-a-pen-row-rows-100.md) shelf.\n' > "$R/pin.md"
+commit_all
+want numbered_sigilless_welcomed "$(read_verdict)" ok
+printf 'The account rests on the [`100`](construction/archive/REDS-a-pen-row-rows-101.md) shelf.\n' > "$R/pin.md"
+commit_all
+want numbered_sigilless_bitten "$(read_verdict)" citation_disagrees
+
+# 30 -- A SPAN HOLDS ITS INTERIOR, and this is a correctness fix rather than a widening. Read on
+# metal, REDS-the-integration-and-its-wake-rows-242-254.md carries rows 245, 246, 247, 248 and 251
+# beside its two endpoints, so a citation naming one of them is honest. The elder reading split the
+# path on `-` and took the two numbers as a SET, which called eighteen such citations wrong.
+new_repo; shelves
+printf 'The row [`%%105`](construction/archive/REDS-a-pen-span-rows-100-110.md) rests here.\n' > "$R/pin.md"
+commit_all
+want span_interior_welcomed "$(read_verdict)" ok
+
+# 31 -- and a claim OUTSIDE the span still refuses, so case 30 widened the reading without opening
+# a door. The endpoint-plus-one is the sharpest case: 111 is one past a shelf named 100-110.
+printf 'The row [`%%111`](construction/archive/REDS-a-pen-span-rows-100-110.md) rests here.\n' > "$R/pin.md"
+commit_all
+want span_outsider_bitten "$(read_verdict)" citation_disagrees
+
+# 32 -- `through` is DELIBERATELY not a fold spelling, and the absence is proven rather than
+# trusted. The recital writes `Rows %1 through %172 are folded`, never `folded to`, so a form
+# reading it would be this round's own fault inverted: a reading drawn from a spelling nobody
+# writes. The link is counted UNREAD and the verdict stays ok even though the numbers disagree.
+#
+# A READABLE CITATION STANDS BESIDE IT ON PURPOSE. A corpus whose every citation is unreadable
+# refuses at `refused_no_citation` (case 15), which would hide this reading behind that one -- the
+# pen said so on the first run rather than being reasoned about.
+new_repo; shelves
+{ printf 'Rows 100 through 110 folded to [`x`](construction/archive/REDS-a-pen-row-rows-101.md) on a day.\n'
+  printf 'The row [`%%100`](construction/archive/REDS-a-pen-row-rows-100.md) closed.\n'
+} > "$R/pin.md"
+commit_all
+want fold_through_not_read "$(read_verdict)" ok
+want fold_through_counted_unread "$(read_key unread_links)" 1
+want fold_through_not_counted_fold "$(read_key fold_links)" 0
+
+# 23 -- the reach adds up: every shelf link is read by one of the three forms or counted as unread,
+# never both and never neither. An identity a reader checks without trusting the reading.
+all=$(read_key all_links); n=$(read_key numbered_links); h=$(read_key shelf_links)
+f=$(read_key fold_links); u=$(read_key unread_links)
+want reach_adds_up "$((n + h + f + u))" "$all"
+
+# 16 -- an unknown mode refuses at exit 2, which is a misuse rather than a finding.
+ROOT_DIR="$R" sh "$scan" fetch >/dev/null 2>&1
+want unknown_mode_refuses "$?" 2
+
+# 17 -- a subject that is no git repository at all cannot be read, and says so.
+new_repo
+rm -rf "$R/.git"
+printf 'A page citing [`%%100`](construction/archive/REDS-a-pen-row-rows-100.md).\n' > "$R/pin.md"
+want no_repository_refuses "$(read_verdict)" refused_grep_failed
+
+echo "cases=$cases repos=$repos failed=$fails"
+if [ "$fails" -eq 0 ]; then echo "control_verdict=ok"; exit 0; fi
+echo "control_verdict=a_case_read_wrong"
+exit 1

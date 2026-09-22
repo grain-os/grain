@@ -1,0 +1,95 @@
+# tools/am/amphora_restore_negative_witness.rish -- Q44: planted restore negatives.
+#
+# Three plants, each caught at its named wall:
+#   tampered seal_cargo  -> seal unopened (walls / open refuse); no out-home
+#   truncated vessel     -> stamp unverified; no out-home
+#   forged resin body    -> cargo unproven after open; refuse named
+#
+#   rishi/bin/rishi run tools/am/amphora_restore_negative_witness.rish
+
+let season = "tools/fixtures/cellar_ring1_tree"
+let tamp_sh = "tools/fixtures/a/amphora_tamper_seal_cargo.sh"
+
+# THE PEN CARRIES A UNIQUE NAME, because eight ships run this roster and two of them running this
+# witness at once would share one home: this witness plants and re-pours a vessel in place, so a
+# peer mid-plant loses its vessel and reds on a fact about the pen rather than about Amphora. It
+# reddened the cold open of `20260906.222342` exactly that way -- green alone, red in company
+# (REDS %512's class, in the spelling that sweep never read: a Rishi `let` string rather than a
+# shell `TMPDIR=`).
+# The pen comes from the runtime rather than from `mktemp -d`, so a refusal releases it too.
+# The elder sweep stood on the straight-line success path below every assert, where a refusal
+# never reached it (REDS %745).
+let home = make-pen "amphora_rneg"
+let vessel = "${home}/v.kyri"
+
+# The witness builds the binaries it runs, rather than assuming a previous lap left them
+# behind. amphora/bin/ is gitignored (.gitignore:336), so a clone carries none of them and
+# this witness died on a missing file rather than on an Amphora fact (REDS %334).
+# All three, whatever this file names in run position: amphora/src/main.rye:138 and :176
+# resolve vessel-seal and vessel-core as SIBLING SUBPROCESSES, so `pour` needs them present.
+# The mkdir comes first because rye build refuses an absent -femit-bin directory (REDS %337).
+let zig = "vendor/zig-toolchain/zig"
+let build_amphora = run ["sh" "-c" "mkdir -p ${home}/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/src/main.rye -femit-bin=${home}/bin/amphora"]
+if build_amphora.ok == false then say build_amphora.err
+assert build_amphora.ok else "amphora_rneg: amphora build failed -- read the line above"
+let build_core = run ["sh" "-c" "env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/vessel_core.rye -femit-bin=${home}/bin/vessel-core"]
+if build_core.ok == false then say build_core.err
+assert build_core.ok else "amphora_rneg: vessel-core build failed -- read the line above"
+let build_seal = run ["sh" "-c" "env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/vessel_seal.rye -femit-bin=${home}/bin/vessel-seal"]
+if build_seal.ok == false then say build_seal.err
+assert build_seal.ok else "amphora_rneg: vessel-seal build failed -- read the line above"
+
+let pour = run ["${home}/bin/amphora" "pour" season vessel]
+assert pour.ok else "rneg: seed pour must pass"
+
+# --- plant 1: tamper seal_cargo, then re-stamp so the seal wall is the one that speaks ---
+let bak = run ["sh" "-c" "cp ${home}/v.kyri ${home}/v.kyri.bak"]
+assert bak.ok else "rneg: bak must land"
+let tamp_prep = run ["sh" tamp_sh "${home}/v.kyri"]
+assert tamp_prep.ok else "rneg: tamper plant must prepare"
+let restamp = run ["${home}/bin/vessel-core" "sign" "${home}/v.kyri"]
+assert restamp.ok else "rneg: re-stamp after tamper must pass (isolates seal wall)"
+let tamp = run ["${home}/bin/amphora" "restore" vessel]
+assert (tamp.ok == false) else "rneg: tampered seal_cargo must refuse"
+assert tamp.err contains "seal unopened" else "rneg: tamper names seal unopened"
+let tamp_out = run ["sh" "-c" "test ! -e ${home}/v.kyri.season"]
+assert tamp_out.ok else "rneg: tamper refusal must leave no out-home"
+say "plant_tamper_seal=refused"
+
+let heal1 = run ["sh" "-c" "cp ${home}/v.kyri.bak ${home}/v.kyri"]
+assert heal1.ok else "rneg: heal vessel after tamper"
+
+# --- plant 2: truncate vessel ---
+let trunc_prep = run ["sh" "-c" "cp ${home}/v.kyri ${home}/v.kyri.full; n=$(wc -c < ${home}/v.kyri); head -c $((n/2)) ${home}/v.kyri.full > ${home}/v.kyri"]
+assert trunc_prep.ok else "rneg: truncate plant must prepare"
+let trunc = run ["${home}/bin/amphora" "restore" vessel]
+assert (trunc.ok == false) else "rneg: truncated vessel must refuse"
+assert trunc.err contains "stamp unverified" else "rneg: truncate names stamp unverified"
+let trunc_out = run ["sh" "-c" "test ! -e ${home}/v.kyri.season"]
+assert trunc_out.ok else "rneg: truncate refusal must leave no out-home"
+say "plant_truncated=refused"
+
+let heal2 = run ["sh" "-c" "cp ${home}/v.kyri.full ${home}/v.kyri"]
+assert heal2.ok else "rneg: heal vessel after truncate"
+
+# --- plant 3: forge one resin body ---
+let forge_prep = run ["sh" "-c" "f=$(ls ${home}/resins | head -1); test x$f != x; printf 'FORGED-BYTES-NOT-THE-SEASON\n' > ${home}/resins/$f"]
+assert forge_prep.ok else "rneg: forge resin plant must prepare"
+let forge = run ["${home}/bin/amphora" "restore" vessel]
+assert (forge.ok == false) else "rneg: forged resin must refuse"
+assert forge.err contains "cargo unproven" else "rneg: forge names cargo unproven"
+say "plant_forged_digest=refused"
+
+# The forged refusal leaves NO out-home, the same way the two plants above do. This line was a
+# `rm -rf` of a partial season until `20260910.073234`, because the restore wrote each body and
+# proved it afterward; `restore_prove_resins` now proves every resin while the out-home still
+# does not exist, so the sweep became an assertion.
+let forge_out = run ["sh" "-c" "test ! -e ${home}/v.kyri.season"]
+assert forge_out.ok else "rneg: forge refusal must leave no out-home"
+let heal3 = run ["${home}/bin/amphora" "pour" season vessel]
+assert heal3.ok else "rneg: re-pour heal must pass"
+let ok = run ["${home}/bin/amphora" "restore" vessel]
+assert ok.ok else "rneg: healed restore must pass"
+assert ok.err contains "restore complete" else "rneg: healed restore completes"
+
+say "GREEN: amphora_restore_negative -- tamper, truncate, forged digest, each refused at its wall."

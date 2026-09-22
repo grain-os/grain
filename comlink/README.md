@@ -1,0 +1,110 @@
+# Comlink -- the Sealed Wire, Hosted and on Real Virtio
+
+**Language:** EN
+**Last updated:** 2026-07-10 (Tablecloth query device **15575**/**15576**; Granary device **15573**/**15574**; hosted resin **38496**/**38497**)
+**Style:** Gauge, Door setting (see `../context/GAUGE_STYLE.md`)
+**Status:** Checkable -- sealed datagram wire
+**Where this sits:** home is [`../README.md`](../README.md) - a first hour in your hands is
+[`../docs-geode/tutorials/the-first-hour.md`](../docs-geode/tutorials/the-first-hour.md) - the whole
+path from nothing to a signed, sandboxed home is [`../SOURCE.md`](../SOURCE.md)
+
+**Comlink carries a sealed datagram, and the format stays whole.** `wire_format.rye` defines one
+offset layout and one seal/open pair. Every rung above it reads and writes those same bytes. That
+includes a hosted UDP socket on localhost and a real virtio-net link between two freestanding
+guests on QEMU virt. A fact that crosses this wire arrives whole or stays with its sender. Each
+message fits one frame.
+
+## The Core
+
+| File | Proves |
+|------|--------|
+| [`wire_format.rye`](wire_format.rye) | the sealed datagram layout every rung shares -- offsets and crypto identical across shared memory, hosted UDP, and virtio-net |
+| [`hosted_wire.rye`](hosted_wire.rye) | the same sealed datagram crosses a real localhost UDP socket |
+| [`virtio_net.rye`](virtio_net.rye) | virtio-net MMIO types and the freestanding driver seed -- shared by hosted descriptor validation and real guests on QEMU virt |
+| [`device_wire.rye`](device_wire.rye) | descriptor algebra proven on a fixture, then the same crossing proven on a real virtio link between two guests |
+| [`turn_route.rye`](turn_route.rye) | routing reads the **turn** tilak (`../kumara/tilak.rye`): a peer's rotation record is verified, the freshest supersedes, a replay is kept out, a forgery refused -- the seam that hands the wire the networking key to seal with |
+| [`handshake_turn.rye`](handshake_turn.rye) | the live handshake -- the introduction gate (`discovery/introduce.rye`) admits a peer and the rotation gate (`turn_route.rye`) keys the wire, in one breath; identity and rotation gate **independently**, so a valid introduction still routes only to a verified freshest key. `handshake_wire` **closes the loop**: the peer's turn arrives on the wire in the descriptor bytes (`turn_to_bytes`), doubly held -- the introducer signed the descriptor, the turn carries the peer's own signature |
+| [`topology.rye`](topology.rye) | the **d12-d60 fractal address space** -- twelve galaxies to a universe, five stars to a galaxy (its d5), twelve planets to a star (its d12), a galaxy leading a d60 of sixty; a point number decodes to a place, a place's sponsor climbs planet->star->galaxy (the `sponsor` tilak's own parent link), and two places share a route counted in honest hops -- within a galaxy, one bridge across. The number spaces **nest inclusively** like Azimuth (`20260810`): a galaxy is also a star and a planet (720/universe, sponsor by mod), wearing each lower role as an outfit. **The geometry is a loadable `Sky`**: the seated d12-d60 is `compass_sky`, and a differently-shaped `council_sky` (15-3-9, a d27 of 27, 405/universe inclusive) round-trips by the same law -- a community may load its own shape, toward Pond loading a sky like a game |
+
+`device_wire.rye`'s hosted selftest is the fast path and runs on the host alone. It proves five wire
+structures padding-free at compile time through Tally's `no_padding`: `VirtioNetHdr`, `VqDesc`,
+`VqAvail`, `VqUsedElem`, and `VqUsed`. A camel-case call site once stayed here after
+`virtio_net.rye` moved to `negotiate_features`. The parity suite built only the downstream
+freestanding lab, so it missed this hosted binary. The hosted check now builds and runs beside the
+lab. The alignment study names the discipline that caught the gap.
+
+## The Guest Fleet
+
+Every Mantra and Linengrow wire capability that crosses onto real virtio carries a matched pair of freestanding guests -- one transmitting, one receiving -- named for the capability they prove: `pattern`, `sealed`, `receipt`, `sync`, `batch`, `2way`, `catchup` (with revision-numbered variants `_r2`/`_r3` as the catch-up protocol grew a second and third rung), `snapshot`, the full `open_asks` ladder (`application`, `acceptance`, `escrow_hold`, `escrow_release`, `completion`, `consent`, plus `poster` and the bare `open_asks` request pair), Amphora `vessel_fetch_*`, and Granary `granary_resin_*`. Each guest is small and single-purpose by design -- a guest proves one crossing, not a general-purpose client.
+
+## Port Map
+
+**Read the roster rather than this table** (`20260911`), which is a readable face over a counted
+reading and goes stale the day a lab moves:
+
+```
+sh tools/fixtures/p/port_band_scan.sh --list
+```
+
+It counts every `const <name>_port: u16 = <number>;` in living tracked Rye and every
+`if <var> == "" then let <name>_port = "<number>"` in the wire labs, names each number two rooms
+claim, and offers the free numbers in both bands. Gated by `tools/p/port_band_witness.rish`.
+
+| Capability | Hosted | Device |
+|------------|--------|--------|
+| Device wire | -- | 15555 |
+| Receipt | -- | 15556 |
+| Open Asks | -- | 15557 / 15558 |
+| Open Asks escrow | -- | 15559 / 15560 |
+| Open Asks (OA-L5) | 38488 / 38489 | 15561-15563 |
+| Recall catch-up | 38484 / 38485 | 15565 / 15566 |
+| Snapshot device | 38490 / 38491 | 15567 / 15568 |
+| MALA M2 / M2b | 38492 / 38493 | 15569 / 15570 |
+| Amphora vessel fetch | 38494 / 38495 | 15571 / 15572 |
+| Granary resin serve | 38496 / 38497 | 15573 / 15574 |
+| Tablecloth query (hosted + device) | 38490 / 38491 | 15575 / 15576 |
+| Recall sync | 38478 / 38479 | 15577 / 15578 |
+| Recall two-way sync | 38482 / 38483 | 15579 / 15580 |
+| Recall batch | 38480 / 38481 | 15581 / 15582 |
+| Subscribe poll | 38486 / 38487 | 15583 / 15584 |
+
+Ports repeat across unrelated laps by design in the **hosted** column -- each witness binds, uses,
+and releases its own pair within one bounded run. The table therefore reads 38490 / 38491 twice, for
+the snapshot export and the Tablecloth query, and both rows are right.
+
+**That sentence was written about the hosted column and read as covering the whole table.** Until
+`20260911` the device column carried repeats too, and they were a different thing: two labs holding
+one QEMU listen address. Five numbers had two or three claimants -- 15561 through 15563 between the
+open-asks lap-5 ladder and three recall labs, and 15565 / 15566 between catch-up and subscribe-poll
+-- and four override variables were each read by two labs, so a hand reaching for the documented
+override moved both labs at once. Four labs moved to 15577-15584, and `device_double_claimed` and
+`device_override_shared` are walls at zero, so the next lab copied from a sibling without editing
+its port block reds on the lap it lands. This table also showed `--` for the two-way sync and
+catch-up device pairs, which both labs declare, and carried no row at all for the four labs at
+15555 through 15560; both are why the reading above is the authority and this is its face.
+
+**A port belongs to the machine, and this pier runs eight trees.** This paragraph closed with *and
+Comlink's laps never run concurrently against the same address* until `20260911`, which held for one
+checkout and lapsed the day a second one opened. The two rows above met inside a single tree as
+well: `mantra_snapshot_hosted` and `mantra_tablecloth_query_wire` are both rostered and both bound
+38490 / 38491, and the first was observed red at 2,689ms under load and GREEN alone straight after,
+its evidence naming `BadKind` then `RecvFailed`, which is the signature of a foreign sender. Eight
+concurrent Tablecloth selftests read 39 of 80 red on metal at load 14, where 120 serial runs of the
+same binary read zero.
+
+Three things answer it, at three levels. The Tablecloth query **removes the name**, binding port
+zero at both ends and exchanging addresses through a readiness datagram, so the kernel's own choice
+replaces a number a file spelled. Every Mantra delivery module now reads
+`SO_REUSEADDR` back and asserts it zero rather than setting it, so the kernel answers a second binder with
+`error.BindFailed` naming the bind site -- measured `20260911` against a foreign holder of 38491,
+where the elder module bound beside the holder and printed `GREEN`. Above that,
+[`tools/fixtures/m/mantra_delivery_port_lock.sh`](../tools/fixtures/m/mantra_delivery_port_lock.sh)
+holds a pair by its low port while a witness runs, so two lawful runs keep out of each other's way
+and the refusal stays a floor that lawful work clears. Held by
+[`tools/m/mantra_udp_reuseaddr_witness.rish`](../tools/m/mantra_udp_reuseaddr_witness.rish); Amphora
+met the same shape one lane over and measured the four binds that decide it
+([`tools/fixtures/a/amphora_udp_reuseaddr_scan.sh`](../tools/fixtures/a/amphora_udp_reuseaddr_scan.sh)).
+
+---
+
+*May a sealed datagram always mean the same bytes, whichever rung carries it. May every guest prove exactly the one crossing it was built for. And may a hosted check always exist beside a freestanding one, so nothing waits a whole season to be found.*

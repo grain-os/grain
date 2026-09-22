@@ -1,0 +1,290 @@
+#!/bin/sh
+# tools/fixtures/r/rune_assert_sweep_scan.sh -- assert coverage across the TAME rooms.
+# Orchestrated by tools/r/rune_assert_sweep.rish.
+#
+#   sh tools/fixtures/r/rune_assert_sweep_scan.sh [rooms-file]
+#
+# WHAT THIS READS. Every authored `.rye` under the rooms named in
+# `tools/fixtures/t/tame_style_rooms.txt` -- 1,127 files, measured `20260908` -- plus the twelve
+# cores the elder hand list named, which are read by name whatever the roster holds. TAME root rule
+# 2 asks a function-bearing file to state its invariants: at least one `assert(`, each preceded by
+# a `// invariant:` comment. This scan counts three readings of that one rule -- two about files,
+# one about the asserts themselves.
+#
+# THIS HEADER SAID "COUNTS BOTH" AND COUNTED PRESENCE. From `20260908.161651` until
+# `20260908.170042` the two file readings stood alone: does this file assert at all, does it name
+# an invariant anywhere. Neither answers the word the rule turns on, which is EACH. A source
+# carrying 2,331 asserts above 25 comments read identical here to one that names every line.
+# `unnamed_assert` is the reading that word asks for, added the same day the header was measured
+# against the code beneath it.
+#
+# WHY IT DERIVES. Until `20260908` this reading was twelve file paths typed into the witness beside
+# it -- 1.1 percent of the population, with the rest passing by their author's care. It is the
+# fifth reader to arrive at `tame_style_rooms.txt`, after the style scan's two halves,
+# `opening_lines` and `tame_check`, so a room added once reaches all five.
+#
+# THE ELDER TWELVE ARE NOT A SUBSET, which is why they keep a leg of their own. Five of them --
+# `mandate/store.rye`, `mandate/keyed.rye`, `kumara/tilak.rye`, `settlement/constellation.rye`,
+# `sundial/sundial.rye` -- sit in four rooms the roster does not name at all. Deriving alone would
+# have dropped five gated files while the printed population grew a hundredfold.
+#
+# WHAT IS A WALL and what is a ratchet. The elder twelve keep their asserts at a ceiling of zero,
+# because that is the regression guard the hand list was drawn for. The derived population is two
+# ratchets under ceilings that only fall, since a wall at zero there would ask for a hundred files
+# to be repaired in one lap and a wall that reds on honest work is a wall somebody turns off.
+#
+# WHAT COUNTS AS AN ASSERT. Any `assert(` not preceded by a word character, so a qualified
+# `std.debug.assert(` counts too: the question here is whether the file states an invariant, and
+# `tame_check` separately holds the qualified spelling at zero. `xassert(` is a different function
+# and is left alone.
+#
+# CEILINGS IN A PEN ARE ZERO. A control owns its own files, so any plant in a pen is over its
+# ceiling; that is what lets both ratchets be shown from the failing side without planting a
+# hundred files. Output convention: context/specs/20260729-215600_scan-seam-convention.md.
+set -eu
+
+# `--map` PRINTS THE PER-FILE READING AND GATES NOTHING, added `20260916.025734` for REDS %752.
+# The three counts below are populations over eight hundred files, so a ratchet one over its
+# ceiling names a number and no arrival: the red lists the heaviest twenty by standing count, and
+# a file that arrived carrying one assert is never among them. Naming the arrival means comparing
+# this reading against an earlier tree, and until this flag the only way to do that was to
+# reimplement `pair_read` by hand -- which is a second copy of the predicate the gate reads, free
+# to drift from it in exactly the case it is consulted. One flag, the guard's own awk, so the
+# comparison is made of the same bytes the refusal was.
+map_only=no
+if [ "${1:-}" = "--map" ]; then
+  map_only=yes
+  shift
+fi
+
+default_rooms="tools/fixtures/t/tame_style_rooms.txt"
+rooms_file="${1:-$default_rooms}"
+if [ ! -f "$rooms_file" ]; then
+  echo "detail: absent rooms file ($rooms_file)"
+  echo "verdict=unread"
+  exit 2
+fi
+
+rooms=$(grep -v '^#' "$rooms_file" | grep -v '^$')
+# shellcheck disable=SC2086
+files=$(find $rooms -name '*.rye' ! -type l ! -path '*/.cache/*' ! -path '*/bin/*' 2>/dev/null | sort)
+
+# THREE LIST-WIDE READINGS, never three greps per file. The first draft spawned one `grep` per
+# file per question -- 3,381 processes against 1,127 sources, 19.3s of a lap pass -- and each
+# question is answerable in one pass over the whole list. Diffuser measured the tax on `20260908`:
+# this pier makes 1,137 processes a second standing still, so a guard's cost is mostly its forks
+# rather than its bytes. Set arithmetic over three sorted lists gives the same three counts for
+# six processes.
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+printf '%s\n' "$files" | grep -v '^$' | sort > "$work/all"
+authored=$(grep -c '' "$work/all" || true)
+
+if [ "$authored" -eq 0 ]; then
+  fn_bearing=0
+  zero_assert=0
+  invariant_gap=0
+  module_assert=0
+  unnamed_assert=0
+  proving_assert=0
+  proving_unnamed=0
+  : > "$work/zero"
+  : > "$work/gap"
+  : > "$work/pairs"
+else
+  # shellcheck disable=SC2046
+  grep -lE '^[[:space:]]*(pub )?fn ' $(cat "$work/all") 2>/dev/null | sort > "$work/fn" || true
+  # shellcheck disable=SC2046
+  grep -lE '(^|[^A-Za-z0-9_])assert\(' $(cat "$work/all") 2>/dev/null | sort > "$work/as" || true
+  # shellcheck disable=SC2046
+  grep -lF '// invariant:' $(cat "$work/all") 2>/dev/null | sort > "$work/inv" || true
+  fn_bearing=$(grep -c '' "$work/fn" || true)
+  # A function-bearing file with no assert anywhere: it states no invariant at all.
+  comm -23 "$work/fn" "$work/as" > "$work/zero"
+  zero_assert=$(grep -c '' "$work/zero" || true)
+  # A function-bearing file that asserts and names no `// invariant:` reason above any of them.
+  comm -12 "$work/fn" "$work/as" > "$work/loud"
+  comm -23 "$work/loud" "$work/inv" > "$work/gap"
+  invariant_gap=$(grep -c '' "$work/gap" || true)
+
+  # THE THIRD READING, and it is the one root rule 2 actually spells. Both readings above answer a
+  # FILE question -- does this file assert at all, does it name an invariant anywhere -- while the
+  # law asks that EACH assert be preceded by a `// invariant:` comment. The two are far apart: a
+  # source carrying 2,331 asserts above 25 comments read identical here to one naming every line.
+  # The elder reading is a strict SUBSET of this one, which the control proves by plant: a file
+  # counted there necessarily holds an assert counted here.
+  #
+  # WHAT COUNTS AS NAMED, generously, so the ratchet refuses nothing anyone does on purpose. An
+  # assert is named when the contiguous run of `//` comment lines and assert lines directly above
+  # it opens on a `// invariant:`. That admits the three shapes this tree writes -- the comment
+  # directly above, a multi-line block opening on the invariant, and a run of asserts under one
+  # comment -- and a blank line breaks the run, since a comment separated from its assert names
+  # nothing a reader would join up. Measured `20260908` across these rooms, the three predicates
+  # read 14,272 named by strict adjacency, 15,043 through a comment block, and 17,876 through both.
+  #
+  # WHY THE PROVING FILES ARE COUNTED APART AND GATED NOWHERE. A `*_witness.rye` asserts about the
+  # OUTPUT of a program under test rather than about its own construction, so the rule's comment
+  # would be the wrong sentence written 2,588 times. Folding them in would also libel one room: on
+  # the whole population `glow/` reads 1.1 percent named, and on its modules alone 92 percent.
+  # `_control.rye` is named in the split for completeness and stands at zero in these rooms today.
+  #
+  # ONE PASS AND NO ARRAY. A first draft stored every line of every file so an assert could walk
+  # back up, and added 3.9s to a 0.5s scan; carrying one `armed` flag forward answers the same
+  # question in 2.5s and returns the identical four counts, since the walk only ever climbs a run
+  # the reader has just come down. Diffuser's tax, paid the way its siblings pay it: one `awk` per
+  # batch rather than one grep per file, and 0.2 percent of a lap pass for the reading the rule's
+  # own word asks for.
+  pair_read() {
+    [ -s "$1" ] || return 0
+    xargs awk '
+      FNR == 1 { armed = 0 }
+      {
+        is_comment = ($0 ~ /^[ \t]*\/\//)
+        is_assert = (!is_comment && $0 ~ /(^|[^A-Za-z0-9_])assert\(/)
+        if (is_assert) { A[FILENAME]++; if (armed) N[FILENAME]++ }
+        if (is_comment) { if ($0 ~ /^[ \t]*\/\/ invariant:/) armed = 1 }
+        else if (!is_assert) armed = 0
+      }
+      END { for (f in A) printf "%s %d %d\n", f, A[f], N[f] + 0 }
+    ' < "$1"
+  }
+  grep -vE '_(witness|test|control)\.rye$' "$work/all" > "$work/mod" || true
+  grep -E '_(witness|test|control)\.rye$' "$work/all" > "$work/prove" || true
+  pair_read "$work/mod" | sort > "$work/pairs"
+  pair_read "$work/prove" | sort > "$work/prove_pairs"
+  module_assert=$(awk '{a += $2} END { print a + 0 }' "$work/pairs")
+  module_named=$(awk '{n += $3} END { print n + 0 }' "$work/pairs")
+  unnamed_assert=$((module_assert - module_named))
+  proving_assert=$(awk '{a += $2} END { print a + 0 }' "$work/prove_pairs")
+  proving_named=$(awk '{n += $3} END { print n + 0 }' "$work/prove_pairs")
+  proving_unnamed=$((proving_assert - proving_named))
+fi
+
+if [ "$map_only" = yes ]; then
+  # One line per module source carrying at least one unnamed assert, path then count, sorted by
+  # path so two runs diff cleanly. Files reading zero are left out: a tree holds eight hundred of
+  # them and a diff wants the moving part.
+  awk '$2 > $3 { printf "%s %d\n", $1, $2 - $3 }' "$work/pairs" | sort
+  echo "map_files=$(awk '$2 > $3' "$work/pairs" | grep -c '' || true)"
+  echo "map_unnamed=$unnamed_assert"
+  echo "verdict=map"
+  exit 0
+fi
+
+if [ "$rooms_file" = "$default_rooms" ]; then
+  zero_ceiling=100
+  gap_ceiling=101
+  # 6,619 of 24,495 module asserts named nothing when this reading was seated `20260908.170042`.
+  # A wall at zero would ask for six thousand comments in one lap, and each one has to say a true
+  # reason rather than restate the line beneath it, so the ceiling only falls.
+  # 6,619 -> 6,489 on `20260908.205507`: `amphora/src/main.rye` named all 85 of its unnamed asserts,
+  # which is the whole of amphora's remainder -- the room's six library modules were named the lap
+  # before, and the CLI held every one that was left. The file's own reading is the reason to lower
+  # rather than a tree-wide sweep: a ceiling left where a repair found it credits the next lap with
+  # work this one did.
+  # 6,489 -> 6,488 -> 6,482 on `20260915.230000`. The reading arrived one OVER its 6,487 ceiling and
+  # refused every ship's cold endurance run; four commits inside the day had each added asserts to
+  # a `.rye` module and no one of them is the culprit a hand could name. Repaired in the lane that
+  # met it: `glow/digraph_twin_check.rye` named all six of its unnamed asserts, which is every one
+  # it held. That file binds `tools/fixtures/g/glow_digraph_table.txt` against `match_rune2`, so the
+  # reasons are about the lexer rather than restatements of the line beneath them -- and its
+  # `assert(count == 30)` is the one reading that refuses a fixture table that got smaller, since
+  # every other assert in the file runs inside the loop.
+  #
+  # AND THE CEILING FELL BY ONE RATHER THAN BY SIX, which is this population's own lesson written
+  # down. The repair above removed six, and between the reading that measured 6,488 and the landing
+  # an hour later the tree read **6,492** with that repair stashed -- a peer had added four. So the
+  # ceiling lands at **6,486**: the reading this commit actually leaves. Chasing the other four
+  # would mean naming asserts inside another lane's modules without running their witnesses, which
+  # `%752` already refused in the other direction. A whole-tree ratchet is repaired by whoever
+  # touches a file, and priced by whoever lands next; those are rarely the same lap.
+  #
+  # BOTH HALVES OF THAT LESSON LANDED IN ONE HOUR, FROM OPPOSITE ENDS, WHICH IS THE PROOF.
+  # The account above repaired the file its own lane had touched and priced the remainder it could
+  # not name -- *no one of them is the culprit a hand could name*. The account below NAMED them, by
+  # walking the window rather than the population. Two lanes met one ratchet, neither could see the
+  # other's arrival, and the reading that ends the guesswork is
+  # `tools/fixtures/r/rune_assert_arrival.sh`. The ceiling beneath is the count both repairs leave.
+  # 6,487 -> 6,486 on `20260916.025734`, closing REDS %752. The ratchet stood at 6,492 against this
+  # ceiling and named no arrival; `rune_assert_arrival.sh` found both on real history -- one assert
+  # into `mantra/recall_tablecloth_hit_census.rye` and four into `mantra/src/weave.rye`, five in
+  # all. Repairing them took the count to 6,486 rather than back to 6,487, because a SIXTH stood in
+  # `weave.rye` from before the window and was repaired in the same pass. All six already carried a
+  # TRUE written reason the adjacency rule could not join: four sat under a twenty-line postcondition
+  # block that never spelled the token, and two were separated from their own `// invariant:` by
+  # exactly one line of code -- an `if` guard, and a `const` with its `print`. So the repair moved
+  # comments rather than inventing reasons, which is the only kind of ratchet repair worth crediting.
+  #
+  # 6,486 -> 6,480 on the rebase that brought the two accounts together: both repairs stand in one
+  # tree now, six asserts each, and the ceiling is the reading that tree actually leaves rather than
+  # either lane's own number. A ceiling set from one lane's measurement credits the next lap with
+  # the other lane's work.
+  unnamed_ceiling=6480
+else
+  zero_ceiling=0
+  gap_ceiling=0
+  unnamed_ceiling=0
+fi
+
+echo "rooms_file=$rooms_file"
+echo "authored=$authored"
+echo "fn_bearing=$fn_bearing"
+echo "zero_assert=$zero_assert ceiling=$zero_ceiling"
+echo "invariant_gap=$invariant_gap ceiling=$gap_ceiling"
+echo "module_assert=$module_assert"
+echo "unnamed_assert=$unnamed_assert ceiling=$unnamed_ceiling"
+# Reported, gated nowhere: a proving file's asserts check another program's output rather than
+# their own construction, so the rule's `// invariant:` is the wrong sentence there.
+echo "proving_assert=$proving_assert proving_unnamed=$proving_unnamed gated=no"
+
+# THE ELDER TWELVE, read by name. These are the cores the hand list gated, and each prints its own
+# line so a regression names the file rather than moving a number. The block reads real tree paths,
+# so it runs on the default roster alone; a pen run reports it absent rather than reading a tree the
+# pen does not own.
+elder="mandate/store.rye mandate/keyed.rye tally/seed.rye tally/gardens.rye tally/kumara.rye caravan/seed.rye caravan/bounded.rye comlink/topology.rye kumara/tilak.rye settlement/constellation.rye sundial/sundial.rye glow/expr.rye"
+elder_faults=0
+if [ "$rooms_file" != "$default_rooms" ]; then
+  echo "elder_roster=absent -- a pen roster reads its own files"
+else
+  n=0
+  for f in $elder; do n=$((n + 1)); done
+  echo "elder_roster=$n"
+  for f in $elder; do
+    if [ ! -f "$f" ]; then
+      echo "FAIL $f absent"
+      elder_faults=$((elder_faults + 1))
+      continue
+    fi
+    fns=$(grep -cE '^[[:space:]]*(pub )?fn ' "$f" || true)
+    asserts=$(grep -cE '(^|[^A-Za-z0-9_])assert\(' "$f" || true)
+    invs=$(grep -cE '// invariant:' "$f" || true)
+    if [ "$fns" -gt 0 ] && [ "$asserts" -eq 0 ]; then
+      echo "FAIL $f fns=$fns asserts=0"
+      elder_faults=$((elder_faults + 1))
+    else
+      echo "OK   $f fns=$fns asserts=$asserts invariants=$invs"
+    fi
+  done
+  echo "elder_faults=$elder_faults ceiling=0"
+fi
+
+# EVERY GUARD HERE IS AN `if`, never a `&&` tail. Under `set -e` a failing `[ ... ] && x=1` is a
+# failing statement, so the scan would exit silently the first time a ratchet read UNDER its
+# ceiling -- the passing case, which is the one nobody would have watched.
+over=0
+if [ "$zero_assert" -gt "$zero_ceiling" ]; then over=$((over + 1)); fi
+if [ "$invariant_gap" -gt "$gap_ceiling" ]; then over=$((over + 1)); fi
+if [ "$unnamed_assert" -gt "$unnamed_ceiling" ]; then over=$((over + 1)); fi
+if [ "$over" -gt 0 ]; then
+  while read -r f; do echo "detail: zero_assert $f"; done < "$work/zero"
+  while read -r f; do echo "detail: invariant_gap $f"; done < "$work/gap"
+  # The heaviest twenty by name, and a count of the rest. Its siblings above name every file they
+  # hold, and they hold a hundred; this one stands over eight hundred, so a red that named them all
+  # would bury its own first line under the list.
+  awk '$2 > $3 { printf "%d %s\n", $2 - $3, $1 }' "$work/pairs" | sort -rn > "$work/worst"
+  head -20 "$work/worst" | while read -r n f; do echo "detail: unnamed_assert $f $n"; done
+  rest=$(( $(grep -c '' "$work/worst" || true) - 20 ))
+  if [ "$rest" -gt 0 ]; then echo "detail: unnamed_assert and $rest more files"; fi
+fi
+echo "ratchets_over_ceiling=$over"
+echo "verdict=read"

@@ -1,0 +1,264 @@
+# The Bound That Names a Joule
+
+**Stamp:** `20260905.232224`
+**Language:** EN
+**Style:** Gauge, Field setting -- see [`../context/GAUGE_STYLE.md`](../context/GAUGE_STYLE.md)
+**Voice:** Kyri
+**Room:** Proposed, **research for understanding** -- nothing here is checkable until a witness binds it
+([`../context/TWO_ROOMS.md`](../context/TWO_ROOMS.md))
+**Instrument:** [`../tools/fixtures/b/bound_kind_census.sh`](../tools/fixtures/b/bound_kind_census.sh)
+**Crossing:** the measurement over this tree is room two,
+[`the-fence-with-no-post-on-the-time-side`](../active-designing/20260905-232224_the-fence-with-no-post-on-the-time-side.md)
+
+---
+
+## What this paper claims, before the argument
+
+**A bound on extent answers one question and a bound on cost answers another, and safety
+lives in the first.** A program that names a maximum for every buffer, list, and loop stays
+protected against running away. Cheapness is a separate property it must earn separately, and
+on a device drawing from a battery that separation is the whole engineering problem.
+
+This paper argues the distinction from first principles, states what would refute it, and
+hands the buildable half to the modules that would carry it. The companion study measures
+this tree against the argument.
+
+**Scope.** The claim covers programs written under a bound-everything discipline, aimed at
+targets where energy is scarce. It leaves correctness entirely alone, and it stays silent on
+whether any current program in this tree is wasteful -- that is a measurement nobody here has
+taken.
+
+---
+
+## The two questions a maximum can answer
+
+Write `const max_frame_bytes: u32 = 4096;` and you have answered a question about **extent**:
+how large may one thing get. Check it at the edge, fail with a named error, and a whole class
+of fault is gone -- the buffer cannot overflow, the allocation cannot surprise the arena, and
+the failure that remains is a refusal you can read.
+
+Write `const max_patience_looks: u32 = 8;` and you have answered a question about **work**:
+how many times may this loop go around. Same discipline, one axis over, and the fault it
+prevents is the loop that never returns.
+
+Now write the third one. The tree holds two axes rather than three, and the reason deserves
+plain naming rather than a shrug: **a bound-everything discipline inherits its axes from the
+failures it was drawn against**, and both failures above are failures of *runaway*. A buffer
+that overflows corrupts memory. A loop that spins forever hangs the machine. Both are
+catastrophic, both are structural, and a named maximum genuinely prevents them.
+
+Cost belongs to a different family. A program that costs twice what it should still returns the
+right answer at the right time. It simply drains something, and what it drains stays invisible
+from inside the process.
+
+## Why the invisible thing became the binding one
+
+Energy is the integral of power over time, and for a digital device it splits into two terms
+that behave differently.
+
+**Dynamic energy** is spent per operation -- each transistor switch charges and discharges a
+capacitance. It scales with how many operations you perform, which means it is bounded exactly
+when your operation count is bounded.
+
+**Static energy** is spent per unit of time the device is awake -- leakage current flows
+whether or not anything is computing. It scales with wall time, which means it is bounded
+exactly when your *wakefulness* is bounded.
+
+Here is the asymmetry that matters. **An extent bound leaves both terms free.** A bound on
+`max_frame_bytes` speaks to the size of one frame, and stays quiet about how many frames you
+draw and how long you stay awake drawing them. A work bound reaches the first term within one
+episode, and leaves the count of episodes open. So a program can hold every maximum this
+discipline asks for, run its bounded loop a thousand times a second forever, and cost without
+limit.
+
+**Read this as an axis the discipline has yet to grow rather than a hole in it**, and the
+distinction earns its place: the repair for a hole is a patch, where the repair for a missing
+axis is a new kind of bound.
+
+## The physical floor, so the discussion is bounded from below
+
+**Observation, derived rather than recalled.** Landauer's principle gives the minimum energy
+to erase one bit irreversibly as `kT ln 2`. With Boltzmann's constant `k = 1.380649e-23 J/K`
+(exact, SI 2019 definition) and `T = 300 K`:
+
+```
+kT ln 2 = 1.380649e-23 x 300 x 0.693147 = 2.87e-21 J   (2.87 zeptojoules)
+```
+
+A reader can check that on a calculator, which is why the arithmetic is shown rather than the
+conclusion asserted.
+
+**Illustrative calculation, with its assumptions named.** A CMOS switching event dissipates
+roughly `1/2 C V^2`. Taking a node capacitance of `1 fF` and a supply of `0.8 V` -- both
+plausible round numbers for a recent process, neither measured here:
+
+```
+1/2 x 1e-15 F x (0.8 V)^2 = 3.2e-16 J   (320 femtojoules)
+```
+
+which is about `1.1e5` times the Landauer figure above.
+
+**The inference this licenses, and no more:** practical computing sits many orders of magnitude
+above the thermodynamic floor, so the constraint everyone actually meets lies far above it.
+**The projection:** architectural and scheduling choices -- how often you wake, how much you do
+per wake -- will dominate energy on real parts for the foreseeable horizon, because they
+operate on the factor of `1e5` rather than on the floor beneath it.
+
+**Falsifier for that projection:** exhibit a target part whose measured energy per useful
+operation sits within two orders of magnitude of `kT ln 2` at its operating temperature. Given
+such a part, the headroom argument is spent and the interesting work moves to reversible
+computing rather than to scheduling. **Confidence: high** for silicon CMOS through the next
+decade; the two capacitance and voltage figures above are round numbers rather than datasheet
+readings, and the argument rests on the ratio being large rather than on their precision, which
+a factor-of-ten error in either leaves intact.
+
+## What a joule-naming bound would actually look like
+
+The honest shape stops short of a bound that names joules. Counting joules from inside a
+program takes hardware the program may lack, and a bound checkable at an edge is the only kind
+worth writing -- the rest are wishes.
+
+The shape that *is* checkable bounds the two quantities energy is proportional to.
+
+**A wake bound.** How long may this component hold the machine awake in one episode? Checked
+against a monotonic clock at the edge, refused with a named error, exactly as a byte bound is
+checked against a length. This bounds the static term.
+
+**A rate bound.** How often may this episode repeat? A minimum interval between wakes, or a
+maximum count per window, checked the same way. This bounds the repetition the work bound
+cannot see.
+
+Both are ordinary bounds, and both work with the clock a program already has rather than a
+power meter. Both are the same discipline already written, applied to a quantity carrying a
+time denominator rather than a byte count -- and that is the paper's whole proposal, which is
+smaller than it first sounds.
+
+## The three ways this argument could be wrong
+
+**The target might be plugged in.** Where the software runs only on a server drawing from a
+wall socket, energy becomes a cost line rather than a constraint, and every hour spent on wake
+bounds is an hour correctness could have had. *Falsifier: name the deployment. Given a roadmap
+holding only mains-powered targets, this paper is enthusiasm.*
+
+**The runtime might already own it.** On a system where the scheduler, the kernel, or the
+runtime governs wakeups centrally, a per-component bound duplicates a decision made better one
+layer down, and duplicated decisions drift apart. *Falsifier: exhibit the layer that already
+bounds wakefulness, and show a component held under it.*
+
+**The numbers might be too small to matter.** Where a radio, a screen, or a sensor dominates
+the energy cost, bounding compute wakeups optimizes the wrong term. *Falsifier: a power budget
+for the target device, broken down by subsystem, in which compute is a minority share.* This is
+the likeliest of the three to fire, and it redirects the argument rather than defeating it --
+the same bound shape applies to a radio's wake, and a radio is exactly the kind of resource a
+supervisor already governs.
+
+## What this paper does not do
+
+It measures no running program's energy, on any device. Every figure above is either derived
+arithmetic with its inputs shown, or an illustrative calculation with its assumptions named.
+**Everything here stays in the proposed room**, and the companion study keeps its own
+measurement -- which reads names in source files -- separate from any claim about joules.
+
+---
+
+*May every fence in this tree have a post on each side it is asked to hold, and may the
+discipline that made the first one grow the second when the ground asks for it.*
+
+---
+
+## Addendum `20260908.005732` -- the third falsifier was run
+
+**The third falsifier above -- *a power budget for the target device, broken down by subsystem, in
+which compute is a minority share* -- was run on `20260908`, and it neither fired nor survived.**
+
+Built over published datasheet currents for the parts a Mikrophone-class capture device is made
+from, the budget returns a **threshold rather than a verdict**: compute is a minority share exactly
+when the processor is awake less than **14.5 percent** of wall time, falling to **5.1 percent** if
+the microphone runs in low-power mode, and to **zero** while the microphone sleeps. Compute's share
+is a property of the schedule rather than of the parts, and the schedule is what this paper's own
+proposed wake bound sets.
+
+**What that does to the argument.** The falsifier assumed compute's share is a fact a budget can
+report. On a duty-cycled device it is not, so the question converts into the number the bound
+should be set to -- which is what this paper wanted the third axis to buy, arrived at from the
+other side. **The radio leg redirects exactly as predicted here:** a radio at 0 dBm outdraws the
+microphone tenfold, so the same two bounds belong to a supervised **resource** rather than to
+compute.
+
+**What stands unchanged.** Every figure, derivation, and claim above -- the Landauer arithmetic,
+the CMOS illustration, the two-question distinction, and the wake-and-rate shape -- stands as
+written. The first and second falsifiers remain unrun.
+
+Full run, sources, and the surface across 2,304 part pairs:
+[`20260908-005732_the-share-that-is-not-a-property-of-the-parts.md`](20260908-005732_the-share-that-is-not-a-property-of-the-parts.md).
+
+---
+
+## Addendum `20260908.031940` -- all three falsifiers are run, and the thesis moves
+
+**The first and second falsifiers have now been run too, which supersedes the closing sentence of
+the addendum above.** None of the three fired cleanly, so the paper survives -- and it survives as
+a smaller claim than it made. That is worth saying here, at the paper a reader arrives at, rather
+than leaving it distributed across three companion studies.
+
+| Falsifier | Run | What it returned |
+|---|---|---|
+| **First** -- name the deployment; given a mains-only roadmap this paper is enthusiasm | `20260908.025249` | **Fails.** Of 33 living and hand-seated ladders in `construction/waymark-registry.kyri`, **13 name a hardware target and 7 are battery-primary**. DREY settles it alone: firmware whose capture is *"held only while powered, provably dissolved on power-down."* |
+| **Second** -- exhibit the layer that already bounds wakefulness | `20260908.021719` | **Fires on its terms, and stops short of its purpose.** Caravan bounds wakefulness twice, and the wake-and-rate shape this paper proposed is already written once at `caravan/harvest.rye:134`. There is nothing to duplicate, because the existing layer states almost no maximum. |
+| **Third** -- a power budget in which compute is a minority share | `20260908.005732` | **Neither fires nor survives.** It returns a threshold rather than a verdict: compute is a minority share exactly when the processor is awake under **14.5 percent** of wall time. |
+
+### What weakened
+
+**The novelty.** This paper's headline is an axis the discipline has yet to grow. The second
+falsifier's exhibit shows the axis is not missing -- `caravan/harvest.rye:134` carries
+
+```
+comptime { assert(max_poll_sweeps * poll_rest_ms > max_linger_ms); }
+```
+
+a rest interval times a work count, asserted to cover a span. That is the wake-and-rate shape
+proposed below, written once, before this paper, by a hand that needed it. So the honest verb is
+**carry** rather than **grow**, and the paper's own framing of a new kind of bound overstates what
+is wanted.
+
+**The joule.** The third falsifier's budget shows compute's share of a duty-cycled device is a
+property of the schedule rather than of the parts. A bound proportional to energy therefore cannot
+be validated against a fixed subsystem breakdown, which is what a joule-naming bound would want.
+The physical-floor section below reaches a **ratio** rather than a budget, and the ratio is what
+carries the argument; the joule in this paper's title is a direction rather than a checkable
+quantity, and the paper already says so one section down.
+
+### What strengthened, and it is not what this paper argued
+
+**The decisions are already being made, at existing sites, in silence.** Three measurements, each
+taken on this tree and each with its own reading recorded:
+
+- **47 time constants** in authored Rye stand outside the bound form; a hand read of the eleven the
+  census flags finds **6** genuinely constrained -- **12.8 percent**, against **90.9 percent** for
+  the extent control (40 of 44). Source: the second falsifier's hand read, over
+  [`../tools/fixtures/b/bound_kind_census.sh`](../tools/fixtures/b/bound_kind_census.sh).
+- **16 `std.Io.sleep` sites** across 7 files pass `.awake` -- Zig's `CLOCK_MONOTONIC`, which
+  *excludes* suspended time -- with zero exceptions, so the suspend question is answered uniformly
+  in an argument slot.
+- `grep -rni "monotonic|suspend|clock_boottime|wall.clock"` over `caravan/**.rye` returns **zero**.
+  Sixteen suspend decisions, no sentence.
+
+### The thesis, restated at its measured size
+
+**This tree's rest and wake decisions are made in constants and parameters rather than in bounds,
+and the cheap repair is to name them where they already stand** -- a `// invariant:` line at
+`caravan/entrust.rye:145` beside `note_rest_ms`, and the `harvest.rye` assert carried to the rest
+constants that have no such neighbor -- before any new axis is designed. A comment costs one
+sentence; an axis costs a design round. **The cheap thing first.**
+
+### What stands unchanged
+
+Every figure, derivation, and physical claim below stands as written: the Landauer arithmetic, the
+CMOS illustration, the two-question distinction between extent and cost, and the wake-and-rate
+shape as the only checkable form a joule bound can take. What moved is the claim of novelty and
+the order of the work.
+
+Full runs: [`20260908-025249_the-clock-nobody-chose.md`](20260908-025249_the-clock-nobody-chose.md)
+(first) - [`20260908-021719_the-layer-was-already-there.md`](20260908-021719_the-layer-was-already-there.md)
+(second) - [`20260908-005732_the-share-that-is-not-a-property-of-the-parts.md`](20260908-005732_the-share-that-is-not-a-property-of-the-parts.md)
+(third).

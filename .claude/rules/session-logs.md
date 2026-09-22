@@ -1,0 +1,100 @@
+# Session Logs
+
+At the end of **every** response -- before finishing the turn -- write a session log to `session-logs/`. The log captures the step-by-step reasoning followed before and during any prose writing, repository update, or code implementation, together with the changes made. It is a record kept for years.
+
+Provider, product, model, and joint-session attribution follow [`session-log-provenance.md`](session-log-provenance.md). Configuration describes a default; only runtime evidence identifies the model that produced a log.
+
+## Format -- Kyri (living law; named Kyri `20260810`)
+
+**New logs are `.kyri`** -- the Kyri notation, named on the maintainer's word (`20260810`): immutable key-value, one field per line, `#` comments, no quotes, no braces. Spec: `active-designing/yonder/date/20260621/20260621-063912_kyri-notation.md` (bannered as the Kyri notation; kept readable) and counsel `20260707-222500`.
+
+Historical Markdown logs live under `session-logs/date/YYYYMMDD/` (folded by day). Write every new session log as `.kyri`.
+
+## Filename
+
+`session-logs/date/YYYYMMDD/YYYYMMDD-HHMMSS_short-sprig.kyri` -- **a log is born on its day's shelf**, seated `20260827.171500` on the maintainer's word: write it straight into `date/YYYYMMDD/` rather than flat in the room. Hyphen stamp in the filename; body field `stamp YYYYMMDD.HHMMSS` (dot form). New logs are `.kyri` (the Kyri notation, named `20260810`).
+
+**Countdown prefixes** (`99999_`, etc.) are **retired**. One clock only.
+
+Full naming law: `context/specs/20260627-102012_one-clock-naming-law.md` (extension is `.kyri` for this stream). Files sort ascending by stamp; the living index in `session-logs/README.md` reads newest first.
+
+When two logs share a second, add `_short-sprig` from `title` (or from `prompt` when titles match). Derive a missing stamp from the file's first-commit date per the naming law.
+
+## Index
+
+After each new log, prepend a newest-first row to **that day's shelf**, `session-logs/date/README-index-YYYYMMDD.md`, **directly below the table's delimiter row**: stamp, linked title, and one line of meaning drawn from `title` / `obs`. The title and the delimiter both live at the top, and a row goes under them, so the table keeps rendering and the title keeps its place. Writing above them costs both, and on `20260824` both were being paid: the title stood at line 1,881 beneath 1,880 rows, and 1,658 pipe rows stood above the delimiter, which GitHub-Flavored Markdown reads as plain text with pipes in it (REDS %182). **A row's link is relative to the shelf it sits on**, so it opens with the day directory -- `](YYYYMMDD/YYYYMMDD-HHMMSS_sprig.kyri)`. Written at the pin's own depth instead -- `](YYYYMMDD-HHMMSS_sprig.kyri)` -- the row points at a file that is not there, and the fold-rule resolver still recovers the reference, so the meters read it as fine while a reader's click finds nothing. **One log, one row:** a log is named once on a shelf, since a rebase that re-applies an updated row without lifting the stale one leaves both -- which is how 76 rows came to stand for 63 logs on `20260830`, three of them still naming REDS numbers the ledger had moved past. Held by `tools/in/index_row_bound_witness.rish`, which reads the OPEN shelf beside the pin (REDS %381).
+
+**And the row's identity is the LOG it points at, never its stamp** (seated `20260910`, REDS %676). The naming law lets two logs share a second and resolves them by sprig; a shelf row keyed on its stamp cell could carry no such tiebreak, so on `20260909` two ships wrote at `20260909.072922` and the guard refused a lawful day. The repair merged both records into one row -- a page that had stopped pointing one row at one log. **Measured before the key moved**, over the 73 revisions of `session-logs/date/README-index-20260830.md` where this reading last fired hard: **89 duplicate stamps carried one link and 64 carried two**, and every one of the 64 was the same log written at two depths -- `20260830/x.kyri` beside a bare `x.kyri` -- which the bare form's own failure to resolve already refuses one branch above. So the link is an exact key rather than an approximate one. Across the tree the same stamp: **78 seconds carry two or more logs**, and every day shelf reads **zero** duplicate rows under both keys, so the two agree today and part on the next collision -- roughly every eleven days at 130 laps, rising with the square of the fleet's daily count. The shared second stays **reported** as `rows_stamp_shared` rather than gated, because it is lawful and a growing fleet meets it oftener. Two rows naming one log still refuse, including the shape the elder key could not see at all: one log wearing two rows under two different stamps.
+
+**Count, never number.** Both rosters of this room -- this pin and `session-logs/CHAPTERS.md` --
+spell every day's lap count as a literal constant, and only the pin is named by a close duty. So the
+roster drifted for eleven days: six closed days read wrong in CHAPTERS and right in the pin
+(`20260828` 66/67, `20260829` 84/86, `20260830` 92/73, `20260905` 58/61, `20260906` 133/134,
+`20260907` 129/131), and six days carried no row at all, `20260821` through `20260826`, because one
+row reading *the days still flat in the room* went stale when a log became born-on-shelf at
+`20260827.171500` and later hands appended below it. All twelve were derived by a hand on
+`20260909`; `tools/s/session_roster_agree_witness.rish` is what keeps them true, deriving each count
+off the shelf's own rows and holding both pages to that one reading.
+
+**A row points, and the log carries the summary.** The log is the record and the index is the way in, so an index row stays **at or under 192 bytes** -- a stamp, a linked title, and one clause. That number is the pin's own arithmetic: a row costs ~123 bytes before it says anything, the pin's prose takes ~2,100, and 192 leaves room for ~116 rows inside the 24,576 the page declares. Rows once ran to **2,223 bytes** apiece, which made the index a second copy of the logs (REDS %204, resolved on the maintainer's word `20260824`). Gated by `rishi/bin/rishi run tools/in/index_row_bound_witness.rish`; shelved rows keep every byte they wrote. **This one pin carries its own byte bound** -- `living_pin_max_bytes[session-logs/README.md] = 57344`, which is `256 x 192` rows plus 8,192 for prose, so the index can hold a full room. Every other pin keeps 24,576 (REDS %205).
+
+**Nothing folds afterward, because nothing arrives loose.** A log and its row are born on the same shelf, so the living pin holds the way in -- one row per day, newest first -- rather than a row per lap, and it stays one row per day however the room grows. The fold tool stays as the safety net for a log written flat by hand:
+
+```
+rye run tools/rye/session_logs_archive.rye index-preview   # count, change nothing
+rye run tools/rye/session_logs_archive.rye index-fold      # shelve the closed days
+```
+
+`rishi/bin/rishi run tools/i/index_fold_witness.rish` gates this room at zero stale rows, and since `20260824.172000` it gates all five folding rooms -- the ratchet reads zero. The byte bound then follows from the fold **and the row bound together**: folding alone left this pin 5,421 over, since the rows were paragraphs (REDS %204). Shelves are listed in `session-logs/CHAPTERS.md` and are immutable once written.
+
+Batch hygiene for **archived Markdown** only: `rye run tools/rye/align_session_logs.rye`. Living Kyri logs are indexed by hand (or a future Kyri-aware aligner).
+
+## Contents (Kyri fields)
+
+Minimum shape (`format session-log-v1`):
+
+```kyri
+format session-log-v1
+stamp YYYYMMDD.HHMMSS
+editor product interface
+provider model provider
+product product name
+role repository role
+modality text-or-voice
+model verified-active-id-or-unverified
+model_status evidence status
+voice Kyri
+host anonymized host and one-clock zone
+title short title
+prompt what the maintainer asked
+think step of reasoning
+think another step
+obs observation or trade-off
+loom metric=value ... -- optional; Loom / performance metrics for the round (see below)
+rota lap N, row R -- optional; the council-rota row this lap deep-read, and what it surfaced
+file path why-one-line
+recommend keep-going|check-in what and why
+```
+
+- **editor** / **model** / **voice** -- the interface, verified active model identity, and standing writing voice. Record `voice Kyri` on new logs. Record the active model verbatim only when runtime evidence proves it; otherwise write `model unverified` and carry configured defaults separately under the provenance rule. `GLOW_PROFILE.kyri` describes clone defaults, while `.claude/settings.json` carries the FLEET DEFAULT `claude-opus-5` at `medium`, read `20260917` -- and a clone may RUN another model entirely, since `.claude/settings.local.json` outranks that file per key and `.gitignore` denies it, which seven of the eight ships took on `20260917.180039`. Ask `sh tools/fixtures/d/declared_model.sh resolved_model` for what this clone runs and record THAT as `configured_model`, per [`session-log-provenance.md`](session-log-provenance.md); neither file is runtime telemetry, and the effort a lap actually runs at depends on its launch path -- `tools/f/fleet_lap.sh` execs `--effort max`, `tools/f/fleet-loop.sh` execs `--effort medium`, which this pier runs. This sentence said `max` about that file for eight days while the file read `medium`, and [`session-log-provenance.md`](session-log-provenance.md) said `medium` the whole time; `tools/fixtures/d/declared_model_scan.sh` gates both pages against the file from `20260916`. Dated logs keep the voice and model they recorded unless the maintainer asks for a factual correction.
+- **host** -- optional; names the editor/OS/chip combination for this specific machine, anonymized (no serial, hardware UUID, hostname, or username -- see `context/specs/20260713-211800_local-host-system-hardware-anonymized.md` for what stays out and why). Omit on hosts where this has never mattered; add it wherever a log's meaning depends on knowing which machine produced it (a sandbox-adaptation session, a hardware-specific witness).
+- **think** -- repeatable; step-by-step reasoning.
+- **obs** -- decisions and trade-offs.
+- **loom** -- optional, repeatable; **Loom / performance metrics** captured when the round touched a measured path -- **Loom**, **Caravan**, **Tally**, the **Shuttle** (the io_uring horizon), a witness whose wall-time matters, or any hot loop where throughput or allocation is load-bearing. **Auto-add it whenever the round produced a measurement**, so performance is recorded as it happens rather than reconstructed later. Write plain `key=value` pairs, one metric family per `loom` line, from real measurement (never guessed): e.g. `loom witness=mandate_store_witness wall_ms=42 records=64 blob_bytes=196`, or `loom caravan=subscribe_poll ops=1000 wall_ms=310 allocs=0`. Bound each number to what was actually run; when nothing was measured this round, omit the field entirely (measurement beats memory -- an absent `loom` is honest, a fabricated one is a red). The metric names are free-form yet stable within a module, so a future Loom-aware reader can trend them across logs. **That reader exists from `20260907.222830`**: `tools/l/loom_trend.sh <key> --summary` reads a key back across every tracked log, ordered by the log's own stamp, and `--keys` lists the 60 most frequent keys, printing `keys_distinct` beside `keys_shown` so the cap is never silent -- `--keys --all` maps the whole vocabulary, which read **9,782** keys on `20260917` and grows with the journal, so RUN it rather than reading that number. **This sentence said `--keys` mapped what the journal actually holds, and the mode showed 60 of 9,767 with no count of what it dropped.** Two laps on one day took the sixty for the vocabulary: one built a premise wrong by two orders of magnitude, and one sampled `loom_name`'s verdicts over a population frequency had already selected -- *written by many families* being the definition of the one verdict it drew, 60 times out of 60. A cap is lawful here and every reading is bounded by law; a cap contradicting its own tool's account of itself is what a reader cannot see past. It was promised here and unbuilt for months -- **3,426 measurements stood across 1,577 logs and nothing in the tree read one**, while 115 of 116 logs that day dutifully wrote them. The convention was never the gap; the reader was. Its first question had been unanswerable by memory: the standing roster grew from **17 guards to 173** while its wall time **fell**. **Scope a reading with `LOOM_FAMILY`** -- a bare key collides across families, which the first run proved by returning a minimum of 0.4 beside a maximum of 1806 for `seconds`.
+- **rota** -- optional; the council-rota row this lap deep-read, in the shape `rota lap 3985, row 0 -- Aether, the row that hears` followed by what the reading actually surfaced. **The field was in use before it was in any law**: on `20260906` twenty of that day's 109 logs carried it, fifty-three named a row in prose alone, and thirty-six recorded nothing -- so a ship following the convention and a ship that never met it read the same from the law's side. Seated here `20260906.222120` with that measurement attached. **Why a field rather than prose:** *a row appears in this log* was being asked to answer two questions at once -- whether a rota was read, and whether the reading was recorded -- and those come apart, which is the braid [`../../foundations/20260823-204456_single-stranded.md`](../../foundations/20260823-204456_single-stranded.md) names. **Optional and reported, never gated:** a lap that legitimately did no rota read looks identical from outside to one that skipped it, and a gate unable to tell them apart would red on honest work. `tools/fixtures/r/rota_declared_scan.sh` counts the three answers for a day shelf. **An honest absence has a form:** `rota none -- pure repair, no rota this lap` counts as declared, so the record says which of the three things happened rather than leaving a reader to guess. Seated in `tools/f/fleet_baton.txt` on `20260907.002044`, which is how it reaches every ship.
+- **file** -- repeatable; `path` then why.
+- **recommend** -- one close line: `keep-going ...` when mechanical and policy-written; `check-in ...` when seams, Rishi/value-model, unruled design, or horizon facts.
+
+**Stamp timezone, per host -- one CLOCK, not one hand.** The invariant is a single canonical clock (later is always larger). Any agent may produce a stamp when it reads that clock; Cursor's automated stamping is welcome. On this Framework / cloud bench the zone is **`America/New_York`** by name (`context/specs/20260627-102012_one-clock-naming-law.md` addendum `20260724.205009` - `context/specs/20260722-125845_edt-framework-host-convention.md`). The macOS clone keeps Pacific (`context/specs/20260713-201910_pacific-time-local-clone-convention.md`). A zone change is itself a seated decision. Existing dated stamps are never rewritten. Witness: `tools/o/one_clock_witness.rish` (shape - mono - zone - blocking). `GLOW_PROFILE.kyri`'s `timezone` field is the machine-local pointer.
+
+## Archive fold
+
+Prior (and closed) days' logs live under `session-logs/date/YYYYMMDD/` -- the destination molted from `archive/` on `20260821.161758` with the mark law ([`stamp-and-name.md`](stamp-and-name.md)), since ORGANIZING defines archive as finished-and-historical while a log from nine days ago is the live record. **Preview:** `rishi/bin/rishi run tools/s/session_logs_archive_preview.rish`. **Fold:** `rishi/bin/rishi run tools/s/session_logs_archive.rish` -- folds `.kyri`, and historical `.md`; today's stamp stays flat, and the index is repointed in the same pass. Run fold on the maintainer's word.
+
+**The room is bounded at 256 flat files**, enforced by `rishi/bin/rishi run tools/r/room_bound_witness.rish` -- because at roughly a hundred and eight logs a day an emptied room refills past GitHub's 1,000-entry listing cap in nine days, so the bound is the fix and the fold is only how it is met. **A stale reference is resolved, never rewritten:** `rishi/bin/rishi run tools/d/dated_path_resolve.rish <reference> [<citing-file>]`.
+
+Kyri session logs prefer `product_nib` - `suite_nib` - `git_nib` (or `nib <hash>`) over legacy `tip` fields.
+
+## Spirit
+
+Write it plainly and honestly, at Gauge's **Meter** setting (`.claude/rules/gauge-style.md`), so a future self or another agent can follow the work home. **Commit the log in the same commit as the work it records** whenever possible; a log-only follow-up commit is a last resort, **and it carries `construction/ITINERARY.md`'s Git nib forward in the same commit** -- rewritten to `git rev-parse --short=10 HEAD` read before that commit is made, since a follow-up moves HEAD past the nib the work commit pinned and `tools/r/remember_git_nib_witness.rish` then reds on the next lap. That is [`remember-git-nib.md`](remember-git-nib.md) rule 5, and the two rules met at REDS %450: this one permitted the follow-up, that one forbade only a *pin*-only commit, and neither reached the other.

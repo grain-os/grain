@@ -1,0 +1,61 @@
+# mantra_recall_tablecloth_query_wire.rish -- Tablecloth query over Comlink hosted wire.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/m/mantra_recall_tablecloth_query_wire.rish
+#
+# EVERY REFUSAL HERE CARRIES ITS TARGET'S OWN SENTENCE (`20260910.203444`, REDS %700). This witness
+# read red on one cold roster pass and green on a re-run minutes later over an unchanged tree, and
+# the evidence page could name only which LEG refused -- its five bindings each asserted on `.ok`
+# and mentioned neither `.out` nor `.err`, so the compiler's and the selftest's own words were
+# discarded inside the interpreter. Rishi interpolates a capture into an `assert ... else` message,
+# which costs nothing on the green path and is the whole difference between flakiness a hand can
+# diagnose and one that can only be inferred. The two selftest runs fold stderr into stdout with
+# `2>&1`, so `.out` is the field carrying their reason; the builds keep theirs on `.err`. Counted
+# tree-wide as `unsaid_rostered` by `tools/fixtures/s/shim_reason_scan.sh`.
+
+let zig = "vendor/zig-toolchain/zig"
+
+# THE TWO BUILDS LAND IN A PEN, NEVER A FIXED TREE PATH (`20260915`, REDS %700's SECOND cause).
+# The shared port repaired below was one cause of this witness's flakiness and not the only one. Caught
+# in the act `20260915` by running three copies of THIS witness at once inside ONE checkout: two
+# red, one green, over identical bytes, and the refusal named itself --
+# `failed to open output binary: FileBusy`. That is ETXTBSY: one run is EXECUTING the delivery
+# binary while another run's linker opens the same path to write it. The elder shape built both
+# binaries to fixed paths under `mantra/bin/`, so any two passes in one checkout raced for two
+# filenames -- and the port fix could not reach this, because that one shares a name on the
+# MACHINE while this one shares a name in the TREE.
+#
+# Each leg builds and runs inside ONE shell, so the pen outlives neither half, and exits non-zero
+# when either fails -- `.ok` keeps meaning what this file's head promises, and `.out` still carries
+# the reason. `mantra/bin/` is a gitignored build directory no other guard reads.
+let wire = run ["sh" "-c" "d=$(mktemp -d) || exit 9; b=$d/wire; if env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh mantra/recall_tablecloth_query_wire.rye -femit-bin=$b 2>$d/err; then $b selftest 2>&1; s=$?; else echo BUILD_FAILED; cat $d/err; s=3; fi; rm -rf $d; exit $s"]
+assert wire.ok else "tablecloth query wire build or selftest failed: ${wire.out_brief}"
+assert wire.out contains "GREEN" else "tablecloth query wire selftest not GREEN: ${wire.out_brief}"
+
+let delivery = run ["sh" "-c" "d=$(mktemp -d) || exit 9; b=$d/delivery; if env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh mantra/recall_tablecloth_query_delivery.rye -lc -femit-bin=$b 2>$d/err; then $b selftest 2>&1; s=$?; else echo BUILD_FAILED; cat $d/err; s=3; fi; rm -rf $d; exit $s"]
+assert delivery.ok else "tablecloth query delivery build or selftest failed: ${delivery.out_brief}"
+assert delivery.out contains "GREEN" else "tablecloth query delivery selftest not GREEN: ${delivery.out_brief}"
+
+# THE REFUSALS, PROVEN FROM THE FAILING SIDE. The delivery selftest now carries the answer-slot
+# budget: a request reserves the slot its reply will live in, so a caller keeping an answer is
+# charged for the bytes it keeps. A GREEN selftest alone cannot tell that reservation from a
+# ceiling nobody enforces, so the control breaks the module six ways in a pen and watches five of
+# them refuse -- with one unmutated leg, so a refusal stays tellable from a bypass.
+let pool_control = run ["sh" "tools/fixtures/m/mantra_tablecloth_answer_pool_control.sh"]
+assert pool_control.ok else "answer-slot budget control did not reach verdict=ok: ${pool_control.err_brief}"
+assert pool_control.out contains "verdict=ok" else "answer-slot budget control verdict missing"
+assert pool_control.out contains "clean_exit=0" else "the unmutated pen refused, so no break below reads honestly"
+
+# THE LEG THAT RUNS THE SELFTEST BESIDE ITSELF. Every check above runs the delivery binary ONCE,
+# and the fault that made this witness flaky was invisible to one run: the module spoke over two
+# port numbers written into the file, and a port is a name on the MACHINE rather than in a tree.
+# Eight checkouts stand on this pier, each running this witness every roster pass, so two of them
+# reaching port 38490 read each other's replies. Measured `20260911` at load 14, eight at once:
+# the elder binary 39 of 80 red, the repaired binary 0 of 80 -- and both 0 of 120 run serially,
+# which is why a fortnight of green passes never named it (REDS %700).
+let port_control = run ["sh" "tools/fixtures/m/mantra_delivery_port_control.sh"]
+assert port_control.ok else "delivery concurrency control did not reach verdict=ok: ${port_control.out_brief}"
+assert port_control.out contains "clean_red=0" else "the delivery selftest refused beside itself: ${port_control.out_brief}"
+assert port_control.out contains "verdict=ok" else "delivery concurrency control verdict missing"
+
+say "GREEN: Tablecloth query wire witness passed (encode + hosted Comlink filter + answer-slot budget + concurrent delivery)."

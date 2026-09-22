@@ -1,0 +1,28 @@
+# realidream_thin_view.rish -- Realidream thin view: local MUR/WOV fixtures -> Skate frame (was MALA).
+#
+# Re-scopes the TASKS thin-demo exception after chain-read removal: render
+# already-on-disk fact fixtures through SLC-2a's drawn terminal surface.
+# Run from the repository root:
+#   rishi/bin/rishi run tools/r/realidream_thin_view.rish
+
+let bin = "pond/bin/drawn-terminal"
+
+# A Wayland application on a headless pier is a machine fact, never a tree red (REDS %173).
+# One shared probe answers for every caller; it exits 3, and only 3, when a seam is absent.
+let gate = run ["sh" "-c" "sh tools/fixtures/d/display_seam_probe.sh >/dev/null 2>&1; test $? -eq 3"]
+if gate.ok then say "GATED: drawn-terminal wants a host with a display -- no graphical link seam here."
+if gate.ok then say "GATED: run it on a Wayland host, or provision the seams -- a NixOS rebuild, a hand's gate."
+if gate.ok then exit 0
+
+say "build: Realidream thin view — drawn-terminal compile"
+let build = run ["sh" "tools/fixtures/p/pond_build_drawn_terminal.sh"]
+assert build.ok else "drawn_terminal build failed for thin view witness"
+assert build.out contains "GREEN:" else "drawn_terminal build did not reach GREEN"
+
+let thin = run ["sh" "-c" "${bin} thinviewtest 2>&1"]
+assert thin.ok else "drawn terminal thinviewtest exited non-zero"
+assert thin.out contains "thin view" else "thin view witness missing expected output"
+assert thin.out contains "GREEN" else "Realidream thin view witness not GREEN"
+assert thin.out contains "lines=5" else "thin view missing five-line frame"
+
+say "GREEN: Realidream thin view — local MUR/WOV fixtures (was MALA) compose a Skate frame."

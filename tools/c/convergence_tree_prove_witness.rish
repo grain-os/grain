@@ -1,0 +1,167 @@
+# tools/c/convergence_tree_prove_witness.rish -- the writers no single-file prover could reach.
+#
+#   rishi/bin/rishi run tools/c/convergence_tree_prove_witness.rish
+#
+# `tools/c/convergence_prove.sh` settles convergence by RUNNING, and it invokes a tool as
+# `<tool> <one-path>`. Measured `20260908.190452`, NINE of the ten tools the census finds answer
+# to a flag rather than a path -- `apply`, `write`, `--check` -- because they are whole-tree
+# operators that find their own work. So the census column read whether somebody WROTE an
+# idempotence check, and for nine of ten nobody could have run one. This proves the instrument that
+# can: the subject is a repository, the pen is a `git worktree` checkout of HEAD, and the tree under
+# test is never touched.
+#
+# TWO LEGS PROVE THE TWO CHOICES THAT ARE NEW, rather than only the verdicts.
+#
+# THE IGNORED-PATH LEG (`20260909.201720`). The comparison is `git write-tree`, which stages nothing
+# `.gitignore` denies -- and this tree denies its whole repository root, so a write there moved the
+# disk and moved no hash. An operator appending to an ignored `notes.txt` on every run read `inert`,
+# and a perturbation writing an ignored root file read `perturb_inert`, whose own words are "the
+# sample never landed". `unseen` and `perturb_unseen` refuse instead, and the control shows one
+# operator across two pen repositories differing only in their `.gitignore`.
+#
+# THE MODE LEG. An operator toggling a file's exec bit changes no LINE, so a prover comparing diffs
+# would call it converged. The comparison here is `git write-tree` -- one hash over every path, its
+# bytes and its mode -- so the toggle reads `diverges`. `.claude/rules/exec-bit.md` is thirty-nine
+# lost exec bits' worth of argument that a mode is content the repository tracks.
+#
+# A SIXTH VERDICT THE WITNESS ITSELF EARNED. The first version of the assertion below passed a
+# `sed` expression through Rishi, whose escaping doubled the backslashes, so the expression matched
+# nothing and exited zero. The prover read `inert` and this witness refused -- correctly, and for
+# the wrong reason, since nothing was wrong with the tool. `perturb_inert` now tells a sample that
+# never landed apart from a tool with no work, by asking the tree rather than the exit status.
+#
+# THE PERTURBATION WRITES THROUGH THE ORIGINAL INODE rather than reaching for an in-place flag.
+# GNU and BSD spell `sed -i` differently and `shell_dialect` gates it at zero, so the portable form
+# this tree already prescribes -- write a temporary, `cat` it back -- is what a pen gets too.
+#
+# A SECOND SUBJECT, AND A SHAPE NEITHER PROVER'S USAGE NAMED (`20260909.201050`). The paragraph
+# above counts the nine that answer to a FLAG, and `tools/fixtures/r/readme_metrics_splice.sh`
+# answers to neither a flag nor a single path: it takes TWO -- the target file and the file holding
+# the rendered block. So the sibling prover cannot reach it either. `tools/c/convergence_prove.sh`
+# invokes a tool as `sh <tool> <one-path>`, and handed one argument the splice exits at its own
+# `${2:?}` guard. Measured on metal:
+# `sh tools/c/convergence_prove.sh tools/fixtures/r/readme_metrics_splice.sh README.md` answers
+# `verdict=refused -- the first run exited non-zero`, naming the missing block file. The variadic
+# argument list here reached it with no change to this prover at all, which is the honest finding:
+# the instrument was already able, and nobody had asked it. `tools/hooks/pre-commit` runs that
+# splice on every commit this tree makes, so it is the second-busiest writing in the tree after the
+# headline writer below.
+#
+# THE PERTURBATION IS ANCHORED ON THE MARKER, NEVER ON A ROW OF THE BLOCK. The block's rows are
+# generated metrics and their wording is free to change with the tree, where the begin marker is
+# the one thing the splice's own contract requires to exist -- it refuses outright without it. So
+# the sample drops the line AFTER the marker rather than a named row, and it lands whatever the
+# block currently says. A sample that stopped landing would read `perturb_inert` rather than
+# blaming the tool, which is the whole reason that verdict exists.
+#
+# AND THE BLOCK FILE KEEPS THE MARKERS, which is a property of the sample rather than of the tool.
+# The splice replaces marker to marker INCLUSIVE, so a block captured without them destroys both,
+# the second run refuses `no begin marker in README.md`, and the prover reads `write_once` -- a
+# true verdict about a sample that asked the wrong question. The `sed -n` range below captures the
+# markers with the body.
+#
+# THE PERTURB LEG, and it is the honest half. For a whole-tree operator the sample IS the tree, and
+# a committed tree usually already holds the state the operator produces -- `reds_ledger_headline_write.sh`
+# runs in `tools/hooks/pre-commit` on every commit, so at HEAD it has nothing left to do and reads
+# `inert`. That reading is true and proves nothing. `--perturb` hands the pen a tree with work
+# waiting, exactly as the sibling prover takes a sample file, and the control shows one operator on
+# one repository reading `inert` and then `converges` with only the perturbation between them.
+
+say "convergence-tree-prove: Language EN -- a prover whose subject is a repository."
+say "convergence-tree-prove: Style Gauge, Meter -- nine verdicts, and the two that refuse to guess are named."
+say "convergence-tree-prove: Lens TAME -- safety first: the pen is a throwaway checkout, never the tree."
+
+say "convergence-tree-prove: the control -- forty-two behaviors, including an operator whose whole output git ignores..."
+let ctl = run ["sh" "tools/fixtures/c/convergence_tree_prove_control.sh"]
+assert ctl.ok else "convergence-tree-prove: the control refused --\n${ctl.out_brief}\n${ctl.err_brief}"
+assert ctl.out contains "pass=42 fail=0" else "convergence-tree-prove: the control did not prove forty-two behaviors --\n${ctl.out_brief}\n${ctl.err_brief}"
+
+# invariant: the control exercises a mode-only divergence, both refusal shapes, and the perturb
+# pair -- each of which a passing-direction-only proof would miss. A refusal proven only in the
+# passing direction cannot be told from a bypass.
+assert ctl.out contains "coverage: mode divergence, the perturb pair, a no-op perturbation, an ignored-root write and an ignored-root perturbation shown from both sides, both refusal shapes, an in-tree operator rooted at $0, a Rishi operator against a shell-only prover, and the elder prover's own leak were each exercised" else "convergence-tree-prove: the control never exercised its own teeth"
+
+# invariant: the prover answers for the busiest writing this tree does. `reds_ledger_headline_write.sh`
+# runs on every commit through `tools/hooks/pre-commit`, and it is one of the nine no prover could
+# reach. On a tree whose headline has been perturbed it has real work, and it converges.
+say "convergence-tree-prove: the headline writer that runs on every commit, on a tree with work waiting..."
+let hw = run ["sh" "tools/c/convergence_tree_prove.sh" "--perturb" "sed 's/^..Rows: [0-9][0-9]*/**Rows: 1/' construction/REDS.md > .perturbed && cat .perturbed > construction/REDS.md && rm -f .perturbed" "tools/fixtures/r/reds_ledger_headline_write.sh" "write"]
+assert hw.ok else "convergence-tree-prove: the headline writer did not converge --\n${hw.out_brief}\n${hw.err_brief}"
+assert hw.out contains "verdict=converges" else "convergence-tree-prove: the headline writer read something other than converges --\n${hw.out_brief}"
+
+# THE TWO PAGES EVERY COMMIT REGENERATES THAT NO PROVER COULD REACH. `tools/hooks/pre-commit`
+# rewrites three pages on every commit this tree makes, and the leg above proves ONE of them. The
+# other two are Rishi operators, and every invocation in both provers read `sh <tool>` -- so a
+# Rishi subject was parsed as shell and answered `verdict=refused` over a syntax error, which reads
+# as the tool refusing. The dispatch that repairs it is one `case` on the subject's suffix, and
+# these are the subjects it was owed.
+say "convergence-tree-prove: the front door's metrics block, a Rishi operator, on a perturbed tree..."
+let rm2 = run ["sh" "tools/c/convergence_tree_prove.sh" "--perturb" "sed 's/^| Reading | Now |/| Reading | Then |/' README.md > .perturbed && cat .perturbed > README.md && rm -f .perturbed" "tools/r/readme_metrics.rish" "write"]
+assert rm2.ok else "convergence-tree-prove: the metrics writer did not converge --\n${rm2.out_brief}\n${rm2.err_brief}"
+assert rm2.out contains "verdict=converges" else "convergence-tree-prove: the metrics writer read something other than converges --\n${rm2.out_brief}"
+
+say "convergence-tree-prove: the crushed library index, the second Rishi operator..."
+let gl = run ["sh" "tools/c/convergence_tree_prove.sh" "--perturb" "sed 's/^# The Libraries/# The Library/' docs-geode/libraries/README.md > .perturbed && cat .perturbed > docs-geode/libraries/README.md && rm -f .perturbed" "tools/g/geode_libraries.rish" "write"]
+assert gl.ok else "convergence-tree-prove: the library index writer did not converge --\n${gl.out_brief}\n${gl.err_brief}"
+assert gl.out contains "verdict=converges" else "convergence-tree-prove: the library index writer read something other than converges --\n${gl.out_brief}"
+
+# invariant: the prover answers for a two-path writer neither prover's usage names, and the tree
+# it leaves after one run is the tree it leaves after two. `tools/hooks/pre-commit` runs this
+# splice on every commit.
+say "convergence-tree-prove: the README metrics splice, which takes two paths and no flag..."
+let sp = run ["sh" "tools/c/convergence_tree_prove.sh" "--perturb" "sed -n '/^<!-- metrics:begin/,/^<!-- metrics:end -->/p' README.md > .metrics-block && sed '/^<!-- metrics:begin/{n;d;}' README.md > .p && cat .p > README.md && rm -f .p" "tools/fixtures/r/readme_metrics_splice.sh" "README.md" ".metrics-block"]
+assert sp.ok else "convergence-tree-prove: the metrics splice did not converge --\n${sp.out_brief}\n${sp.err_brief}"
+assert sp.out contains "verdict=converges" else "convergence-tree-prove: the metrics splice read something other than converges --\n${sp.out_brief}"
+
+# THE FIRST SUBJECT THE COMMITTED TREE ALREADY HAS WORK FOR, and it is the one that makes the
+# perturb leg above legible by contrast. Every subject before this one runs in `tools/hooks/pre-commit`,
+# so at HEAD its work is already done and a bare reading answers `inert` -- which is why each of
+# them is handed a perturbation. `tools/fixtures/r/rish_spoken_ascii_convert.sh` is a SWEEP rather
+# than a regenerator: read `20260910.211856` over 2,485 tracked `.rish` sources, 1,501 of them still
+# hold a character it would convert, so the committed tree is its own sample and no perturbation is
+# owed.
+#
+# THE SUBJECT IS CHOSEN FOR ITS HELD LINES. `tools/m/mycelium_chorus_knot_witness.rish` carries
+# convertible spoken text AND two COUPLED sayings -- lines another runner greps for, which the
+# converter holds back whole. A converter that converts some lines of a file and refuses others is
+# where a second run is most likely to move: the hold-back set is derived on every run rather than
+# pinned, so a first run that changed the file could hand the second run a different derivation. It
+# does not, and this leg is what says so.
+#
+# AND THE FIRST SUBJECT THIS LEG REACHED FOR WAS PUT BACK, which is worth writing down rather than
+# quietly fixing. `tools/gen/chapter/prin_scope.rish` holds three coupled sayings and was the better
+# sample; naming it here moved it out of `unheard_guard`'s `unnamed_choirs` set -- 11 to 10 -- and
+# reddened that guard's published leg. The fall was bought by a MENTION. This leg hands prin_scope
+# to a converter as a data file; it never RUNS it, and `unheard_guard`'s own first line is *a guard
+# that is never run guards nothing*. So the subject moved to a file that is not a silent choir, and
+# the reading that guard publishes stays honest. The blind spot it names -- a path cited as data
+# reading as a path that was run -- is that guard's lane rather than this one's.
+say "convergence-tree-prove: the Rishi spoken-ASCII sweep, on a file whose held lines it must re-derive..."
+let rs = run ["sh" "tools/c/convergence_tree_prove.sh" "tools/fixtures/r/rish_spoken_ascii_convert.sh" "--apply" "tools/m/mycelium_chorus_knot_witness.rish"]
+assert rs.ok else "convergence-tree-prove: the Rishi spoken sweep did not converge --\n${rs.out_brief}\n${rs.err_brief}"
+assert rs.out contains "verdict=converges" else "convergence-tree-prove: the Rishi spoken sweep read something other than converges --\n${rs.out_brief}"
+
+
+# THE SIXTH SUBJECT IS THE FIRST REAL TOOL TO EARN `write_once`, and that verdict is the reading the
+# other five could never produce. Each of them REGENERATES a page: run it twice and it rewrites the
+# same bytes, so its convergence is a second write that happens to agree. `tools/fixtures/r/reds_fold.sh`
+# moves rows OUT of `construction/REDS.md` onto a shelf, and a fold is a one-way move -- asked the
+# same question again it answers `row_absent` and touches pin, shelf and recital not at all. That
+# refusal IS the convergence accrete-never-break asks of a shelf writer, and the prover tells it from
+# `refused_on_second` by asking the tree rather than the exit code.
+#
+# WHY THE ROW IS PLANTED RATHER THAN BORROWED. A leg naming a live row number goes stale the day that
+# row folds, which is the shape `.claude/rules/stamp-and-name.md` refuses under *count, never number*.
+# `%999001` stands far above the spine -- `tools/gen/chapter/reds_ledger_monotone_witness.rish` holds
+# the living numbers gapless from 1, so this one can never collide -- and it exists only inside the
+# worktree pen, which is removed whole on every exit path. The real pin is never handed to the fold.
+#
+# THE PERTURBATION CARRIES NO BACKSLASH ON PURPOSE. The prover's own header records a witness whose
+# `sed` expression had its backslashes doubled passing through Rishi, matched nothing, exited zero,
+# and read `inert` -- a broken sample wearing a true verdict's clothes. Two `echo` calls and a
+# single-quoted body need no escape at all, so there is nothing for a second parser to double.
+say "convergence-tree-prove: the REDS fold, a one-way move that must refuse its own output..."
+let rf = run ["sh" "tools/c/convergence_tree_prove.sh" "--perturb" "echo '' >> construction/REDS.md && echo '**REDS %999001 (20260101.000001) -- a pen row planted so the fold has work.** *What went wrong:* nothing; this row lives only inside a throwaway checkout. *What caught it:* the convergence witness. *What it taught:* a fold asked twice moves nothing the second time. **BOOKED.**' >> construction/REDS.md && echo '# REDS -- the pen fold, rows 999001' > construction/archive/REDS-pen-convergence-rows-999001.md && echo 'A shelf the convergence witness writes inside a throwaway pen.' >> construction/archive/REDS-pen-convergence-rows-999001.md" "tools/fixtures/r/reds_fold.sh" "construction/archive/REDS-pen-convergence-rows-999001.md" "999001" "--why" "a fold asked twice moves nothing the second time"]
+assert rf.ok else "convergence-tree-prove: the REDS fold did not converge --\n${rf.out_brief}\n${rf.err_brief}"
+assert rf.out contains "verdict=write_once" else "convergence-tree-prove: the REDS fold read something other than write_once --\n${rf.out_brief}"
+say "GREEN: convergence-tree-prove -- six subjects run twice on a pen checkout, in shell and in Rishi alike, one of them taking two paths rather than a flag and one a one-way move that converges by refusing its own output, with mode divergence caught, both refusals named, an unperturbed tree refused as proof, a write git ignores refused rather than read as inert, all three pages the pre-commit hook regenerates proven to converge, and a whole-tree sweep proven on the committed tree itself, holding its coupled sayings back on both runs."

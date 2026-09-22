@@ -1,0 +1,35 @@
+# caravan_subscribe_poll_source_crash_witness.rish -- source-loop dies mid-service -> named halt.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/ca/caravan_subscribe_poll_source_crash_witness.rish
+
+let zig = "vendor/zig-toolchain/zig"
+let delivery = "mantra/bin/recall-subscribe-poll-delivery"
+let service = "caravan/bin/subscribe-poll-service"
+# THE PEN IS UNIQUE PER RUN, and the elder name leaves with it. `/tmp/acme-owner*` was a
+# CONSTANT shared by six files, so two of them running at once -- or one witness on each of eight
+# ships -- collide on one stop sentinel: one run's prep `rm -f` deletes the stop signal another
+# run just wrote to halt its service, and a service that never stops hangs a witness or, worse,
+# stops early and inverts its result. Each file is self-contained, so a per-run pen breaks no
+# contract (%618/%601). The elder repository name is breached to `grain` here and kept in history
+# and in dated testimony, which is where a superseded name belongs (`20260908.180000`).
+let mk = run ["sh" "-c" "mktemp -d /tmp/grain_poll.XXXXXX"]
+assert mk.ok else "poll pen: the pen could not be opened"
+let pen = trim mk.out
+let sentinel = "${pen}/poll-stop"
+let log = "${pen}/src-crash.out"
+let probe_sh = "tools/fixtures/c/caravan_subscribe_poll_source_crash.sh"
+
+let build = run ["sh" "-c" "mkdir -p mantra/bin caravan/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh mantra/recall_subscribe_poll_delivery.rye -lc -femit-bin=${delivery} && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh caravan/subscribe_poll_service.rye -lc -femit-bin=${service}"]
+assert build.ok else "source crash witness build failed -- ${build.err_brief}"
+
+let probe = run ["sh" probe_sh service delivery sentinel log]
+assert probe.ok else "source crash witness shell failed"
+assert probe.out contains "source-loop died" else "missing source death message"
+assert probe.out contains "supervisor halting" else "missing halt message"
+assert probe.out contains "exit:3" else "supervisor should exit 3 on source loss"
+
+let cleanup = run ["sh" "-c" "rm -f ${sentinel} ${log}"]
+assert cleanup.ok else "source crash witness cleanup failed"
+
+say "GREEN: Caravan source-crash recovery witness passed."

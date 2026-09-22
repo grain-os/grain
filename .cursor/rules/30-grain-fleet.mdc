@@ -1,0 +1,45 @@
+---
+description: Cursor CLI fleet adapter for the Incense ship, shared baton, bare mode, and captain role
+alwaysApply: true
+---
+
+# Fleet adapter
+
+When this session is launched through `tools/l/launch-cursor-incense.sh`, the prompt already carries
+the shared [`tools/f/fleet_baton.txt`](../../tools/f/fleet_baton.txt) and the Incense lane stanza
+from [`tools/i/incense_seat_prompt.txt`](../../tools/i/incense_seat_prompt.txt). Read them as the
+ship's operating context; do not replace them with a shorter personal summary.
+
+The launcher has four independent inputs:
+
+- `FLEET_BARE=1` runs `cursor-agent` on the pier host. `FLEET_BARE=0` uses the repository's
+  `agent-jail.sh` enclosure. Bare mode changes the enclosure, not the permission decision.
+- `FLEET_CAPTAIN=1` gives the Incense prompt its captain's-hat context for law, review, and custody.
+  It never authorizes human-only gates: keys, funds, provisioning, identity, or seed publication
+  remain with the maintainer.
+- `CURSOR_MODEL` selects the model explicitly. The launcher default is Cursor Grok 4.7 at its
+  documented high effort, `grok-4.7-high`; a log records this as configured selection, not proof
+  of active runtime use.
+- `CURSOR_FORCE=1` passes Cursor's `--force` flag. This is the CLI's force-allow equivalent for
+  commands unless explicitly denied; it does not erase project rules or custody gates.
+- `CURSOR_PREFLIGHT=1` performs a bounded model probe first, so an unavailable model or transport
+  fault fails with a named error instead of looking like a hung terminal. Set it to `0` only when
+  a hand has already proved the model path.
+- `CURSOR_INLINE_CONTEXT=0` keeps the request compact by pointing Cursor at the tracked baton and
+  Incense seat files. Set it to `1` only when the CLI cannot read those files from the repository;
+  embedding them duplicates context and can trigger resource exhaustion.
+- `CURSOR_RUN_TIMEOUT=900` bounds the full print-mode lap. Cursor's plain text output may be silent
+  while it works; use `CURSOR_OUTPUT_FORMAT=stream-json CURSOR_STREAM_PARTIAL_OUTPUT=1` when live
+  activity is needed. Set the timeout to `0` only deliberately.
+
+Cost/effectiveness default: keep `grok-4.7-high` for difficult repository work, keep prompts
+file-backed and bounded, and do not inflate the context with pasted files. The launcher does not
+select Cursor's 500k long-context tier. A repeated lap may set `CURSOR_PREFLIGHT=0` after a known-
+good probe to avoid the small extra startup request. `cursor-grok-4.6-high` is an explicit
+responsiveness fallback, not a cheaper published token tier; never claim it ran unless
+`CURSOR_MODEL` says so.
+
+Keep the fleet invariants from the Claude and Codex loops: one writer per checkout, round-open
+before work, the baton before the lane, stop markers before a lap, session output in the shared
+window, and a commit plus Kyri log at close. Cursor is another engine at the same ship door, not a
+new fleet policy.

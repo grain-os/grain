@@ -1,0 +1,57 @@
+# fleet_claim_witness.rish -- the fleet's live claim board, and the reader that must read upstream.
+#
+# Absence is checkable and intent is not. On 20260911 that gap cost two ships a whole build apiece:
+# incense withdrew port_registry -- 35 constants, 21 files, 44 pen legs, GREEN on metal -- against
+# a peer's port_band landed two hours earlier, and bakery dropped a 29-leg port census into that
+# same peer's scan. Both absence readings were honest and both were hours stale. The board is the
+# declaration a peer can read before anything exists; this proves the reader cannot be fooled.
+#
+#   rishi/bin/rishi run tools/f/fleet_claim_witness.rish
+
+say "fleet-claim: Language EN -- a declaration of intended work, published before the work exists."
+say "fleet-claim: Style Gauge, Meter -- every leg is a reading, and every refusal is shown from both sides."
+say "fleet-claim: Lens TAME -- safety first: a reader that answers from local bytes answers about a tree nobody stands in."
+
+# invariant: the board, the reader and the writer all stand before any of them is judged. One
+# binding rather than three `test -f` calls, and `ls` rather than `test`, because `test` reports
+# nothing when it refuses -- so an asserting witness would hand the reader its own sentence and
+# discard the reason. `ls` names exactly which of the three is missing, and the assert forwards it.
+let present = run ["ls" "construction/fleet-claims.kyri" "tools/fixtures/f/fleet_claim_scan.sh" "tools/f/fleet_claim.sh"]
+assert present.ok else "fleet-claim: the board, the reader or the writer is missing -- ${present.err_brief}"
+
+let control = run ["sh" "tools/fixtures/f/fleet_claim_control.sh"]
+say control.out
+assert control.ok else "fleet-claim: a reading disagreed with the board -- read the control's own lines"
+assert control.out contains "control_verdict=ok" else "fleet-claim: the control did not close ok"
+assert control.out contains "control_failures=0" else "fleet-claim: a leg failed -- the count above names how many"
+
+# The readings worth naming here are the ones whose loss would be silent. A reader that fell back
+# to local bytes passes every other leg, because in a pen the two copies agree.
+assert control.out contains "board_read_from_upstream=yes" else "fleet-claim: the reader stopped reading the anointed remote"
+assert control.out contains "a_local_edit_does_not_reach_the_reader=yes" else "fleet-claim: the reader is answering from local bytes"
+assert control.out contains "peer_claim_is_found=yes" else "fleet-claim: a peer building the same path went unreported"
+assert control.out contains "own_claim_does_not_shout=yes" else "fleet-claim: a seat is colliding with itself"
+assert control.out contains "stale_claim_is_its_own_verdict=yes" else "fleet-claim: a dead ship's claim now reads as live work"
+assert control.out contains "a_merely_similar_name_is_not_a_collision=yes" else "fleet-claim: the path comparison lost its directory boundary"
+assert control.out contains "mutation_substring_boundary_bites=yes" else "fleet-claim: the boundary leg passes a loosened comparison, so it proves nothing"
+assert control.out contains "the_sentence_is_printed_even_when_clear=yes" else "fleet-claim: the board stopped printing what each ship is building"
+assert control.out contains "reopening_is_idempotent=yes" else "fleet-claim: the writer stopped being idempotent"
+assert control.out contains "idempotent_run_moves_no_byte=yes" else "fleet-claim: a second identical open rewrote the board"
+assert control.out contains "a_peers_claim_name_is_refused=yes" else "fleet-claim: one seat can now overwrite another's claim"
+
+# The card the writer carries. A claiming lap makes two commits this writer causes, and while it
+# wrote the board alone both left `construction/ITINERARY.md` naming HEAD~2, so `remember_git_nib`
+# read stale for the whole build window -- 185 of this tree's 204 claim-opening commits. The pen
+# runs that red rather than arguing it, with the guard's own state predicate copied verbatim.
+assert control.out contains "a_board_only_commit_stales_the_card=yes" else "fleet-claim: the pen no longer reproduces the red this carry exists to close, so the legs below prove nothing"
+assert control.out contains "an_open_carries_the_card=yes" else "fleet-claim: the lead-in claim commit stopped carrying the card"
+assert control.out contains "the_carried_nib_is_the_pre_commit_head=yes" else "fleet-claim: the carried nib is not HEAD read before the commit, so it will not name that commit's parent"
+assert control.out contains "a_carried_claim_commit_reads_honest=yes" else "fleet-claim: a carried claim commit still reads stale under the guard's own predicate"
+assert control.out contains "a_close_carries_the_card=yes" else "fleet-claim: the close commit stopped carrying the card"
+assert control.out contains "an_idempotent_open_never_reaches_the_carry=yes" else "fleet-claim: a no-op open now reaches the carry, so the pair is no longer idempotent"
+assert control.out contains "an_idempotent_open_moves_no_card_byte=yes" else "fleet-claim: a second identical open rewrote the operator card"
+assert control.out contains "a_missing_card_still_writes_the_board=yes" else "fleet-claim: an absent card now holds the board's write hostage -- a claim the fleet cannot read is the worse outcome"
+assert control.out contains "mutation_carry_above_the_exit_is_bitten=yes" else "fleet-claim: the idempotence leg passes a carry placed above the exit, so it proves nothing"
+assert control.out contains "mutation_the_amend_shape_is_bitten=yes" else "fleet-claim: the carry leg passes the amend's HEAD^ shape, so it proves nothing"
+
+say "GREEN: fleet-claim -- intent is declared before it exists, and the reader reads the fleet's copy."

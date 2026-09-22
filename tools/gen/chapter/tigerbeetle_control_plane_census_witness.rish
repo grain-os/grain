@@ -1,0 +1,42 @@
+# tools/gen/chapter/tigerbeetle_control_plane_census_witness.rish -- e20 control/data plane.
+#
+#   rishi/bin/rishi run tools/gen/chapter/tigerbeetle_control_plane_census_witness.rish
+#
+# Requires gratitude/tigerbeetle submodule present.
+# Clean-room: presence + counts only - never copies into rye/.
+
+say "tb-control-plane: Language EN — control plane and data plane name the assert budget."
+say "tb-control-plane: Style Radiant — spend asserts where free; gate where dear."
+say "tb-control-plane: Lens TAME — e20 · clean-room study · almanac seat 26."
+
+# AN ABSENT OPTIONAL GITLINK IS A FACT ABOUT THE HOST, NEVER A DEFECT (`20260908.202239`).
+# `gratitude/tigerbeetle` is a submodule this tree STUDIES and never links, so a clone that has not
+# initialised it is a correct clone. The hard assert this replaces made the witness UNROSTABLE: a
+# row would red the fleet on every machine without the checkout, which is why it was never rostered
+# -- and an unrostered witness runs nowhere, so the assert bought a red nobody would ever hear.
+#
+# The census script already answers in three ways: exit 2 `absent`, exit 1 `thin`, exit 0 `ok`.
+# Only `thin` is a defect. Reading `census.ok` cannot tell 1 from 2, so the SKIP is decided here on
+# the clone and the failure is asserted below as a negative on `thin`.
+let clone = run ["test" "-d" "gratitude/tigerbeetle/src"]
+if (clone.ok == false) then say "tb-control_plane: SKIP -- gratitude/tigerbeetle is an uninitialised submodule here; run git submodule update --init gratitude/tigerbeetle to read this census"
+if (clone.ok == false) then say "GREEN: tb-control_plane -- skipped honestly, the clone this census reads is absent"
+if (clone.ok == false) then exit 0
+
+let census = run ["sh" "tools/fixtures/t/tigerbeetle_control_plane_census.sh"]
+say census.out
+assert census.ok else "tb-control-plane: census failed or thin"
+assert census.out contains "CLONE=present" else "tb-control-plane: want CLONE=present"
+assert census.out contains "verdict=ok" else "tb-control-plane: want verdict=ok"
+assert census.out contains "GUIDE_PLANE=yes" else "tb-control-plane: held guide must name both planes"
+assert census.out contains "ARCH_PLANE=yes" else "tb-control-plane: clone ARCHITECTURE must name both planes"
+assert census.out contains "TAME_BRIDGE=yes" else "tb-control-plane: TAME_GUIDANCE bridge must hold"
+
+let elder = run ["rishi/bin/rishi" "run" "tools/gen/chapter/tigerbeetle_assert_census_witness.rish"]
+assert elder.ok else "tb-control-plane: assert census elder went RED"
+
+let almanac = run ["sh" "tools/equinox/almanac/equinox_tigerbeetle_control_plane_almanac.sh"]
+assert almanac.ok else "tb-control-plane: almanac append failed"
+say almanac.out
+
+say "GREEN: tb-control-plane — guide·arch·verify·TAME bridge ok · assert elder GREEN · almanac seat 26"

@@ -1,0 +1,73 @@
+#!/bin/sh
+# tame_style_scan_advise_legacy.sh -- original shell ratchet lines (parity selftest only).
+set -u
+# THE ROOMS COME FROM ONE FILE, from 20260908 -- tools/fixtures/t/tame_style_rooms.txt, read by
+# the bans half, the advise half, and this parity copy alike. Three inline lists is why this one
+# and the half it checks drifted 248 files apart and a green selftest never said so: the counts it
+# compares were equal because the rooms only one list held happened to carry none of the patterns.
+# A NOTE ON WHAT THIS COPY STILL PROVES. Its whole job is to hold the elder shell reading beside
+# the native Rishi one. With the population now shared, what remains under test is the arithmetic
+# and the predicates -- `grep -qE '\bassert\('` here against `grep -LF 'assert('` there, which are
+# not the same predicate -- rather than the roster. Whether a parity oracle whose two halves read
+# one list has outlived its seat is a REMOVAL, so it is named on the card and left for the maintainer.
+FILES=$(find $(grep -v '^#' tools/fixtures/t/tame_style_rooms.txt | grep -v '^$') \
+    -name "*.rye" ! -type l ! -path '*/.cache/*' ! -path '*/bin/*' 2>/dev/null)
+# Root by upward walk (seated 20260828): the letter fold moved this script one
+# directory deeper, and fixed ../.. depth arithmetic is what broke. The walk finds
+# the first ancestor holding rishi/bin and tools/fixtures -- git-free so pen copies
+# outside a repository still resolve -- bounded at 8 steps, loud past the bound.
+ROOT=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+_fd_steps=0
+while [ ! -d "$ROOT/rishi/bin" ] || [ ! -d "$ROOT/tools/fixtures" ]; do
+  _fd_steps=$((_fd_steps + 1))
+  if [ "$_fd_steps" -gt 8 ] || [ "$ROOT" = "/" ] || [ -z "$ROOT" ]; then
+    echo "$0: no tree root within 8 steps (needs rishi/bin and tools/fixtures)" >&2
+    exit 2
+  fi
+  ROOT=$(dirname "$ROOT")
+done
+memcpy_total=$(grep -h "@memcpy(" $FILES 2>/dev/null | wc -l | tr -d ' ')
+memcpy_canonical=$(grep -c "@memcpy(" tally/copy.rye 2>/dev/null)
+memcpy_app=$((memcpy_total - memcpy_canonical))
+camel_total=$(grep -hE "^( *)?(pub )?fn [a-z]+[A-Z]" $FILES 2>/dev/null | wc -l | tr -d ' ')
+# THESE TWO COUNT PROGRAM POSITION, from 20260908, through the same fixture the native half
+# calls -- so the predicate is written once and neither copy can drift from the other on it.
+# What that costs the parity oracle is nothing that existed: the selftest beside this file
+# compares only the zero-assert and memcpy numbers, and `@memcpy(` is deliberately left on its
+# own two independent readings below. What it buys is that these two stop counting a compiler's
+# emitted text and a comment's prose as calls to migrate -- 79 and 29 lines respectively,
+# measured on the lap this landed.
+APP="$ROOT/tools/fixtures/t/tame_style_app_sites.sh"
+parseint_total=$(sh "$APP" "parseInt(" $FILES 2>/dev/null)
+parseint_canonical=$(sh "$APP" "parseInt(" tally/parse_int.rye 2>/dev/null)
+parseint_app=$((parseint_total - parseint_canonical))
+ed25519_total=$(sh "$APP" --exclude fromEd25519 "Ed25519" $FILES 2>/dev/null)
+ed25519_canonical=$(sh "$APP" --exclude fromEd25519 "Ed25519" tally/kumara.rye 2>/dev/null)
+ed25519_app=$((ed25519_total - ed25519_canonical))
+echo "ratchet: @memcpy application sites = ${memcpy_app} (migrate to copy_disjoint on touch)"
+echo "ratchet: @memcpy canonical in tally/copy.rye = 1 (intentional inside copy_disjoint)"
+echo "ratchet: camelCase fn declarations = ${camel_total} (snake_case on touch)"
+echo "ratchet: parseInt( application sites = ${parseint_app} (program position; migrate to tally/parse_int.rye on touch; leading-zero footgun otherwise silent)"
+echo "ratchet: Ed25519 application sites = ${ed25519_app} (program position; migrate to tally/kumara.rye on touch; identity at the seam)"
+echo "ratchet: Ed25519 canonical in tally/kumara.rye = ${ed25519_canonical} (program position; intentional inside kumara seam)"
+echo "ratchet: functions past 70 lines —"
+zero_assert_total=0
+for f in $FILES; do
+    if grep -qE '\bassert\(' "$f" 2>/dev/null; then
+        continue
+    fi
+    case "$f" in
+        comlink/guest_*|aurora/src/*|brushstroke/font8x8_data.rye|\
+        caravan/supervisor_signal.rye|caravan/supervisor_exit.rye|pond/apps/window_input.rye|\
+        tally/maybe.rye|tally/pedersen.rye)
+            continue ;;
+    esac
+    zero_assert_total=$((zero_assert_total + 1))
+    echo "  $f (zero assert — review on touch)"
+done
+echo "ratchet: zero assert( files remaining = ${zero_assert_total} (honest exempt: virtio guests, aurora freestanding, signal handler, font table, thin line editor, exit constants, the dual-of-assert mark itself, a pure re-export shim)"
+
+# tools/*.py -- Python-at-seam law (parity with native advise)
+py_count=$(find tools -name '*.py' -type f 2>/dev/null | wc -l | tr -d ' ')
+echo "ratchet: tools/*.py count = ${py_count} (target zero; migrate-on-touch; ephemeris seam classical-vedic-astrology/cast_a_chart.py exempt by name)"
+"${ROOT}/rishi/bin/rishi" run tools/fixtures/t/tame_style_long_fn.rish

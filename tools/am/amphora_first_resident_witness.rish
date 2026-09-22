@@ -1,0 +1,63 @@
+# tools/am/amphora_first_resident_witness.rish -- Q56: Amphora pours a real counsel season.
+#
+# Chapter source: tools/fixtures/amphora_first_resident_counsel (five J4 counsel seats).
+# Proves: pour - stamp - seal - restore - byte-equal out-home.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/am/amphora_first_resident_witness.rish
+
+let season = "tools/fixtures/amphora_first_resident_counsel"
+
+# THE PEN CARRIES A UNIQUE NAME (REDS %512's class, held by tools/s/shared_pen_witness.rish).
+# Eight ships run this roster from eight checkouts and share one /tmp, so a pen named by a
+# constant is ONE directory on all eight: a peer's `rm -rf` lands mid-run and the reading becomes
+# a fact about the pen wearing the costume of a fact about Amphora. The runtime composes the
+# suffix, so no two runs can agree by accident, and the directory it hands back is already empty
+# -- which is why the wipe-then-mkdir this replaced is gone rather than moved.
+# Full argument and the seated exemplar: tools/am/amphora_restore_negative_witness.rish.
+# The pen comes from the runtime rather than from `mktemp -d`, so a refusal releases it too.
+# The elder sweep stood on the straight-line success path below every assert, where a refusal
+# never reached it (REDS %745).
+let home = make-pen "amphora_first_resident"
+let vessel = "${home}/counsel.kyri"
+let out = "${home}/counsel.kyri.season"
+# The witness builds the binaries it runs (REDS %334: a build named in a comment builds
+# nothing). The directory is made first: rye build refuses an absent -femit-bin directory
+# with "unable to open output directory", so a clone died here even with the build line.
+# All three, whatever this file names in run position: amphora/src/main.rye:138 and :176
+# resolve vessel-seal and vessel-core as SIBLING SUBPROCESSES, so `pour` needs them present
+# (REDS %337).
+let zig = "vendor/zig-toolchain/zig"
+let build = run ["sh" "-c" "mkdir -p ${home}/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/src/main.rye -femit-bin=${home}/bin/amphora"]
+assert build.ok else "first_resident: amphora build must succeed"
+
+let build_core = run ["sh" "-c" "env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/vessel_core.rye -femit-bin=${home}/bin/vessel-core"]
+if build_core.ok == false then say build_core.err
+assert build_core.ok else "first_resident: vessel-core build failed -- read the line above"
+let build_seal = run ["sh" "-c" "env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/vessel_seal.rye -femit-bin=${home}/bin/vessel-seal"]
+if build_seal.ok == false then say build_seal.err
+assert build_seal.ok else "first_resident: vessel-seal build failed -- read the line above"
+
+let pour = run ["${home}/bin/amphora" "pour" season vessel]
+assert pour.ok else "first_resident: pour must exit ok"
+assert pour.err contains "pour complete" else "first_resident: pour speaks complete"
+
+let verify = run ["${home}/bin/vessel-core" "verify" vessel]
+assert verify.ok else "first_resident: stamp must verify"
+
+let seal = run ["${home}/bin/vessel-seal" "open-check" vessel]
+assert seal.ok else "first_resident: seal must open"
+
+let restore = run ["${home}/bin/amphora" "restore" vessel]
+assert restore.ok else "first_resident: restore must exit ok"
+assert restore.err contains "restore complete" else "first_resident: restore speaks complete"
+
+let eq = run ["diff" "-qr" season out]
+assert eq.ok else "first_resident: restored season must equal counsel source"
+
+let count = run ["sh" "-c" "ls tools/fixtures/amphora_first_resident_counsel | wc -l | tr -d ' '"]
+say "first_resident=poured stamp=ok seal=ok restore=byte-equal files --"
+say count.out
+assert count.ok else "first_resident: fixture count measured -- read the reading above"
+
+say "GREEN: amphora_first_resident -- a real counsel season crosses and returns whole."

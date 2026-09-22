@@ -1,0 +1,177 @@
+# The window Rye raised -- macOS needs no Swift, and the Swift work is early rather than wasted
+
+**Stamp:** `20260828.215659`
+**Language:** EN
+**Style:** Gauge, Field setting
+**Voice:** Kyri
+**Status:** Living design, mixed room -- the finding is measured and checkable; the re-aim is proposed and awaits its own supervisor update
+**Probe:** [`../tools/rye/macos_window_probe.rye`](../tools/rye/macos_window_probe.rye)
+**Kin:** REDS %295 (the host tier) - [`../.claude/rules/tame-guidance.md`](../.claude/rules/tame-guidance.md) - the Mind seat's operating prompt
+
+the maintainer asked whether macOS Tahoe needs a Swift wrapper to run a GUI application at all, whether
+the whole thing could be Rye, and whether the Swift work already standing is a waste of time.
+Three questions, and the first one is answerable by doing rather than by argument -- so it was
+done, and this page records what the doing showed.
+
+## What was measured, on this Mac, `20260828.215659`
+
+`tools/rye/macos_window_probe.rye` builds with the tree's own toolchain and raises a real native
+window. The reading it printed:
+
+```
+macos-window-probe: window_number=4648 frame=256x160 bytes=163840
+macos-window-probe: GREEN -- a native macOS window, painted from Rye, with no Swift linked.
+```
+
+A nonzero window number is the window server's own receipt that the window exists on screen
+rather than only in the process's memory. `otool -L` on the binary counts **zero** Swift
+libraries. The 256x160 buffer of RGBA bytes is filled by a `paint` function in the probe itself,
+handed to `CGBitmapContextCreate`, and set as the content view's layer contents -- so the pixels
+on screen are the program's own, which is exactly the shape a frame grid needs.
+
+The mechanism, in one sentence: **AppKit is Objective-C, the Objective-C runtime is a plain C
+ABI, and Rye calls C without a shim.** `objc_getClass` finds the class by name, `sel_registerName`
+finds the selector, and `objc_msgSend` cast to an exact signature sends the message. Core Graphics
+is straight C and needs no runtime at all. On this target there is not even a separate
+struct-return entry point to reach for.
+
+## The one true fork
+
+**SwiftUI has no C ABI and no Objective-C interface.** Its calling conventions, generics, result
+builders, and property wrappers are Swift-language constructs, and no amount of runtime cleverness
+reaches them from Rye. That is the whole of the constraint, and it is a real one:
+
+- **AppKit surface** -- Rye reaches all of it, proven above.
+- **SwiftUI surface** -- Swift, necessarily. If the Tahoe Liquid Glass look delivered the way
+  Apple delivers it best is the goal, that goal names Swift.
+
+Nothing else on the macOS side requires Swift. An `.app` bundle is a directory with a plist and a
+Mach-O; code signing and notarization read a binary and never ask which compiler made it.
+
+## Why this fork points away from Swift for *this* application
+
+`skate/Sources/SkateCore/` is two files, `FrameGrid.swift` and `EventRing.swift`, and they import
+**nothing** -- no AppKit, no Foundation. It is a bounded cell grid with a palette and an event
+ring: a custom-drawn surface, which is the easiest possible case for the C path. One window, one
+view, one buffer. It wants no `NSTableView`.
+
+And the tree has already done this work once, on the other platform. **Brushstroke is 72 Rye
+modules driving Wayland natively** -- its own pixel buffers, `xdg_surface`, shm. `linengrow/
+glow_native_activity.rye` drives Android's NativeActivity the same way. macOS's protocol is
+`objc_msgSend` where Wayland's is `wl_display`; the shape of the work is one shape.
+
+The Swift path's cost is already paid and already measured: **REDS %295** exists because
+`xcrun swift test` cannot run on the Linux pier, which is what the host tier was seated to answer.
+That is one guard rooted to one machine, plus a second value model and a second proof idiom.
+
+## The seam, which is the whole safety question
+
+The first draft of this page recommended the Rye path on one-value-model and operations
+arguments, and the maintainer pushed on whether that is really the most TAME-guided road. It was not, and
+the gap was in the place TAME cares most. Casting `objc_msgSend` to a signature is an
+**unchecked reinterpretation of a function pointer**: get an argument width wrong and the failure
+is silent corruption rather than a type error. Swift's Objective-C interop is generated from real
+headers and checked by the compiler. **Safety is TAME's first priority, above clarity and joy,
+and at that seam Swift was ahead.**
+
+TAME already carries the answer, in the rule it writes for `usize` -- *a boundary type, not a
+design type; assert the bound, cast at the edge* -- and in the shape of `copy_disjoint`, where
+one intentional `@memcpy` lives inside one named wrapper. What the first draft missed is that
+**the Objective-C runtime is introspectable**: `class_getInstanceMethod` answers null for a
+selector that does not exist, and `method_getTypeEncoding` returns the signature the *loaded*
+framework actually has. So the cast is checkable, at construction, once, against the runtime on
+this machine rather than an SDK's description of it.
+
+The probe does that now. Eight selectors are verified before any message is sent, and the check
+**earned itself on its first run** by catching two of this file's own declarations -- `@:` where
+the framework reads `@@:`, a forgotten return type that would have been silent. The gate is
+proven from both sides: `PROBE_PROVE_RED=1` declares a signature the framework does not have and
+dies at the seam with exit 134, naming what it read against what was declared, while the ordinary
+run passes the same gate and raises the window.
+
+That reading is arguably **stronger than a compile-time header check**, since it is the framework
+actually loaded rather than the one the SDK described. What it costs is the discipline of keeping
+every selector in one seam module -- the `copy_disjoint` shape -- rather than letting casts spread
+through a backend.
+
+## The second probe: Brushstroke's own grid, on AppKit, with the pump answering
+
+The window proved the platform. The question it left open was whether Skate on macOS is a
+**backend beside the Wayland backend** or a second application, and that one is closed now too.
+`tools/rye/macos_cell_grid_probe.rye` imports `brushstroke/skate_grid.rye` -- the same module
+`brushstroke/wayland_seed.rye` imports, reached by the symlink idiom `tally_copy.rye` already
+uses -- builds a real `Grid`, sets a real palette, and calls the module's **own** `rasterize`.
+Not one glyph is redrawn: the rasterizer is Brushstroke's, and only the surface underneath it
+is new. Its reading:
+
+```
+macos-cell-grid: seam verified -- 19 selectors match the loaded framework's own encodings.
+macos-cell-grid: grid=44x9 cells scale=2 surface=704x288 lit_pixels=16268
+macos-cell-grid: event dequeued type=15 (application-defined is 15)
+macos-cell-grid: events_seen=6 turns=300
+```
+
+**16,268 lit glyph pixels** is the rasterizer's own count of what it drew, so the surface rendered
+rather than merely cleared. And the input half is proven beside the output half: a synthetic event
+posted to this process's own queue -- never a system-level injection into a stranger's focused
+window -- was dequeued, identified by type, and dispatched, which is the whole of what a backend's
+event pump does, shown small.
+
+The seam earned itself twice more here. Of nineteen declarations it caught `stringWithUTF8String:`
+reading `@@:r*` where the caller wrote `@@:*` -- the `r` is `const`, a difference no compiler on
+this path would have raised. Eleven of the twelve new guesses were right; the check exists for the
+twelfth.
+
+What stays open is honest and bounded: resize, retina backing scale, a display link, a menu bar,
+and a signed bundle. **A window is a lap, a backend is a quest**, and this is the second lap.
+
+## The counterweights, stated honestly
+
+**Ghostty** -- in this tree's own gratitude library -- is a Zig core with a *Swift* macOS shell,
+chosen by the author who also wrote the Zig-to-Objective-C bindings. That is evidence from
+someone who had both roads open and took the Swift one for the Mac app.
+
+Swift 6.2's `InlineArray`, `borrowing`, and StrictMemorySafety give a great deal of what TAME
+asks for, natively -- visible in SkateCore's own shape, which is genuinely disciplined code.
+
+And if the shell ends up SwiftUI, a Swift core removes a foreign-function seam rather than adding
+one.
+
+## The verdict: early, not wasted
+
+The **design** is the value, and the design is language-independent: a bounded grid, refusal
+before mutation, whole-state preservation across a refusal, alias-sameness over one referent.
+Those port to Rye in an afternoon, and the proofs that matter -- the refusal cases -- port with
+them.
+
+What the finding changes is the **aim**. Swift is optional on macOS and load-bearing on **iOS**,
+where UIKit is reachable but the publishing surface, the tooling, and the modern framework floor
+all lean Swift in a way macOS does not. So the honest reading of the Swift work standing today is
+that it is **early rather than misplaced** -- a core written in the language the iOS door will
+want, before that door is the one being opened.
+
+## What the re-aim would cost, named rather than assumed
+
+Moving `skate/` under a yonder shelf is **not** a file move this bench can simply make:
+
+- `skate/` is one of three roots in Mind's staged-path wall, spelled in
+  `tools/fixtures/c/chatgpt_mind_lane.awk`, whose SHA-256 is byte-pinned in the launcher.
+- The lane appears again in the operating prompt, the adaptation receipt, and the witness path on
+  the standing roster.
+- Every one of those is a **user-owned signed supervisor update**, which is the same gate the
+  `skate/` grant itself came through.
+
+So the physical yonder is a booked proposal rather than tonight's edit, and it deserves its own
+lap with the pins moved in one commit. What tonight seats is the finding and the aim.
+
+## The falsifiers, so this page can be proven wrong
+
+- If a Swift-free entry point turns out to be refused in a *shipped, signed, notarized* bundle
+  under Tahoe's hardened runtime -- the probe proves a window, never a shipped app.
+- If Liquid Glass is wanted specifically, and AppKit's adoption of it proves too thin.
+- If the iOS door opens first, in which case the Swift core is simply already in the right place
+  and this page's re-aim is the whole of its contribution.
+
+The probe stays a hand-run instrument rather than a rostered guard, on purpose: it opens a window
+on somebody's screen, which is a rude thing for an unattended loop to do at three in the morning.
+Its build and run lines live in its own header.

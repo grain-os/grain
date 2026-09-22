@@ -1,0 +1,101 @@
+# Follow Our Compass -- Navigation Back to Direction
+
+*Living mutant, re-seated `20260826.024943` in the chapter era (standfast molt, the maintainer's word); the elder stands whole at its own stamp and banner-points here.*
+
+*The tree already names a **grain** -- the standing structural strands that decide how an idea may be cut to fit. This brief names a **compass** -- the habit of returning to those strands, the foundations beneath them, and the active-designing ladder ahead -- so "which way next?" has one calm answer without replacing the grain we already seated.*
+
+**Stamp:** `20260706.185112`
+**Language:** EN
+**Style:** Gauge (see `../context/GAUGE_STYLE.md`)
+**Status:** Landed -- the maintainer `20260706.185512 UDT`; companion to grain index and `context/README.md` compass home. **Reviewed and kept** `20260710.171707` -- commerce season Granary/Mandi through Mandi listing settle (parity **242**) rests on the rose; next commerce gates parked until brief.
+**Room:** checkable -- a read order over named files, each of which resolves.
+**Front door:** the root [`../README.md`](../README.md) names this brief among the reasons
+beneath its own pages, and this brief links back.
+
+*Written by Rio 3 for the maintainer.*
+Radiant pass `20260725.035453`
+Radiant pass `20260727.213740` -- Voice/Radiant named on the day-one rose (`docs/COMPASS.md`); claims unchanged
+AHOY1 weave `20260811.214423` -- kin block added; the return read now orders by **Lindy-first, crux-first**; claims unchanged
+Strand-count erratum `20260907.062544` -- four sentences carried the elder total of ten; the grain has held thirteen since the fusion of `20260802`, and a pointer now names the strands rather than counting them
+Map station added `20260909.204315` -- the walk now opens at [`MAP.md`](../MAP.md); the six elder stations keep their order and their words, and the two sentences citing them by number now name them instead
+Station-name erratum `20260916.190000` -- stations 6 and 7 sent a reader to *Now -- the live front*, *The Compass Chapter* and *Next -- the ranked remainder*, three headings the card's molt of `20260912` renamed; each now names a section `construction/ITINERARY.md` carries, and [`../tools/s/section_citation_witness.rish`](../tools/s/section_citation_witness.rish) holds the promise from here forward
+
+---
+
+## Compass and grain -- two jobs
+
+| Word | Job |
+|------|-----|
+| **Grain** | The **standing strands** -- primitives, TAME order, bounds, silo, witnesses, sameness, and the rest indexed in the grain brief. A pattern *fits the grain* when every sentence leans on a named strand. |
+| **Compass** | The **return habit** -- when direction frays, read the map -> foundations -> grain index -> active-designing newest-first -> `construction/ITINERARY.md` now -> run the witness before claiming green. |
+
+**Grain** answers *does this cut clean?* **Compass** answers *where do I look to remember what we already decided?*
+
+We do **not** need to rename the **grain strands** to "compass points." The strands are precise and deeply cited. We **do** gain by saying **follow our compass** in conversation, README intros, and collaboration rhythm -- because newcomers grasp a compass immediately, and the metaphor matches what `context/` already calls itself: *memory and compass*.
+
+## The compass rose (read order)
+
+When refreshing before a lap or a roadmap edit, walk this rose **oldest conviction to newest lap**:
+
+1. **Where you are** -- [`MAP.md`](../MAP.md): the seven rooms of the root, and the two floors that say which of them a lap walks by default.
+2. **Foundations** -- [`foundations/README.md`](README.md): why beneath the work; happy zone; sameness; wire serves the fold.
+3. **Grain index** -- [`foundations/20260826-024942_the-grain-and-the-crossing.md`](20260826-024942_the-grain-and-the-crossing.md): the strands + crossing test.
+4. **Two rooms** -- [`context/TWO_ROOMS.md`](../context/TWO_ROOMS.md): external-research vs active-designing; doorway witness.
+5. **Active-designing ladder** -- [`active-designing/README.md`](../active-designing/README.md): newest briefs first; only our names.
+6. **Now** -- [`construction/ITINERARY.md`](../construction/ITINERARY.md) *Now -- the eight sailing ship itineraries* and *Open doors for the maintainer*: what is open, what waits on a word.
+7. **Order** -- [`construction/ITINERARY.md`](../construction/ITINERARY.md) *Simple, Lovable, Complete order* and *Fleet dependency order*: why and season, Lindy-first and crux-first.
+
+**The Now and Order stations are one card, and the fusion is why.** `construction/TASKS.md` and
+`construction/ROADMAP.md` carried the now and the order until `20260823.103804`, when three cards
+fused into [`construction/ITINERARY.md`](../construction/ITINERARY.md) (commit `98a8ee481`). Both
+paths remain on disk as **pointer stubs**, each declaring `Status: Pointer` on its own face, because
+roughly thirty `equinox_e*` fixtures and this document's own guard read them and a guard reading a
+file that is gone reports green while measuring nothing. So the *paths* are alive and the *stations*
+moved, and a reader sent to them arrives at a redirect rather than at the now.
+
+**The map opens the walk, because the walk itself is now bounded.** Read scope seated
+`20260827.155213`: a lap walks the **open shelves** by default and enters a **closed stack** only
+holding a named path, and [`../.claude/rules/read-scope.md`](../.claude/rules/read-scope.md) names
+[`MAP.md`](../MAP.md) as *the walk that replaces the `ls`*. The rose was drawn before that law and
+carried six stations after it, so the reader most likely to over-read -- the one who has lost
+direction and is opening doors to find it -- met no floor plan on the way back. Measured
+`20260909.204315` with `git grep -E '(^|[^A-Z/])MAP\.md'`, which excludes `ROADMAP.md`: of the
+tree's orientation pages only [`../README.md`](../README.md) and [`../llms.txt`](../llms.txt) named
+the map at all. Neither rose did, nor [`../ORGANIZING.md`](../ORGANIZING.md), which the map's own
+Status line sends keepers to. The map links out and almost nothing links back, which is how a page
+goes quiet without going wrong.
+
+**A station is named rather than numbered.** Two sentences cited these stations by their ordinal --
+one here, one in [`README.md`](README.md) -- and prepending a seventh would have falsified both.
+Marking by name is the standing law ([`../.claude/rules/stamp-and-name.md`](../.claude/rules/stamp-and-name.md)),
+and the numbers stay in the list, where they order a walk rather than travel as citations.
+
+If the card disagrees with a seated brief, **the brief and green witnesses win**; hygiene fixes the plan.
+
+## When the compass disagrees with enthusiasm
+
+- **Logic before carriage** -- sync in-process before wire; escrow logic before escrow wire.
+- **Witness before narrative** -- parity green on metal before "landed" in prose.
+- **One lap, one witness bolt** -- see [`../active-designing/date/20260706/20260706-185112_the-witness-bolt.md`](../active-designing/date/20260706/20260706-185112_the-witness-bolt.md).
+- **Check in before module seams** -- graduation rule, Rishi/value model, new domain: collaboration rhythm says pause for Claude when no written policy answers.
+
+## Vocabulary hygiene
+
+- Say **follow our compass** for the navigation habit.
+- Keep **grain strand**, **fits the grain**, **siloed into our grain** for structural fit tests.
+- Retire **follow our grain** only in *new* conversational prose where compass reads clearer; do not chase every historical "grain" mention in archive or gratitude.
+- Meet **Radiant** on the day-one rose (`docs/COMPASS.md` Voice step - `context/RADIANT_STYLE.md`) -- how dated pages speak; lint and pass ledger keep the surface honest.
+- Loop words **kg** - **check-in** - **checkpoint** - **bookmark** - **send** - **remember** - **align** live in [`context/LEXICON.md`](../context/LEXICON.md); closing lines always name `kg` or a typed `check in (...)` per collaboration rhythm.
+
+## Kin in the weave
+
+The compass is one of two canonical hubs every leaf foundation routes through; naming its neighbours keeps the tree wiki-connected rather than star-shaped.
+
+- **The front door** -- the root [`../README.md`](../README.md) opens onto the whole tree and points here for the return habit; the `**Front door:**` key at the head of this page declares that promise so [`../tools/f/front_door_claim_witness.rish`](../tools/f/front_door_claim_witness.rish) can hold it.
+- **The room** -- the [`foundations/README.md`](README.md) indexes the *why*; this brief is its navigation habit.
+- **The sibling hub** -- [The Grain and the Crossing](20260826-024942_the-grain-and-the-crossing.md) defines the strands the compass returns you *to*; the compass says *where to look*, the grain says *does this cut clean*.
+- **The order of the read** -- the newest-first walk now follows [**Lindy-first, crux-first**](../.claude/rules/lindy-first-crux.md): among what direction offers, take the longest-lived work first, and within a tier the *crux* -- the hardest solvable problem. Grounded in [the Lindy effect](20260811-211431_the-lindy-effect-and-the-long-return.md).
+
+---
+
+*May the compass always point home to strands we already trust. May the grain keep its name where it names structure, and the compass keep ours where we need direction.*

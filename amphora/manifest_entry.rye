@@ -1,0 +1,352 @@
+//! amphora/manifest_entry.rye -- Amphora -- manifest entry: one cargo line, three fields, wreck rule - 20260713.
+//!
+//! Graduated from work-in-progress crossing manifest seed (parity 151).
+//!
+//!   rye build amphora/manifest_entry.rye -femit-bin=amphora/bin/manifest-entry
+//!   amphora/bin/manifest-entry selftest
+//!
+//!     <mark> <sha3-256-hex> <name>
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+
+pub const amphora_manifest_entry_version = "20260710.143500";
+
+pub const digest_hex_len: u32 = 64;
+pub const max_mark_len: u32 = 32;
+pub const max_name_len: u32 = 200;
+pub const max_line_len: u32 = max_mark_len + 1 + digest_hex_len + 1 + max_name_len;
+
+/// The two roots the engine hardcodes, and the only marks it knows without asking.
+/// `foundations/20260703-202312_the-marked-value.md` names exactly these two and says
+/// why the circle of who-validates-the-validators has to break somewhere: the
+/// plain-bytes mark, which every value trivially satisfies, and the manifest mark,
+/// so a vessel can always be read. Everything above them is defined in the tree and
+/// arrives through `mark_verdict`, never by widening this pair.
+pub const mark_plain_bytes = "plain-bytes";
+pub const mark_manifest = "manifest";
+
+/// What the engine can say about a mark on sight. `known` is one of the two roots;
+/// `unknown` is cargo whose kind cannot be named, which the wreck rule refuses whole.
+pub const MarkVerdict = enum { known, unknown };
+
+/// Read a mark's verdict off its face, the way a shoulder line is read before a seal breaks.
+/// Postcondition: every mark receives exactly one verdict -- there is no third answer and
+/// no partial trust, which is the wreck rule stated positively.
+pub fn mark_verdict(mark: []const u8) MarkVerdict {
+    // invariant: a mark reaching here has already passed the shape check above.
+    assert(mark.len >= 1);
+    // invariant: the roster is the two roots, so the walk is bounded by a named pair.
+    assert(mark.len <= max_mark_len);
+    if (std.mem.eql(u8, mark, mark_plain_bytes)) return .known;
+    if (std.mem.eql(u8, mark, mark_manifest)) return .known;
+    return .unknown;
+}
+
+/// What the engine can say about a NAME on sight. `contained` is a plain relative
+/// path that can only ever land inside the home a restore was pointed at;
+/// `escaping` is one that names a place outside it, or names no place at all;
+/// `unframed` is one that cannot be written as a single record at all, because it
+/// carries a byte the vessel's own line format reserves.
+///
+/// The rule exists because a cargo line proves its bytes and never proved its
+/// PLACE. Measured on metal `20260910`: a vessel whose cargo named
+/// `../escaped.txt` passed the Kumara stamp, the AEAD seal, the listing-agrees
+/// walk, and printed `restore files proven count=2` -- the digest matched,
+/// because the content was honest and only the destination was not -- and
+/// `restore` wrote the file one directory ABOVE its out-home before refusing on
+/// the parent compare. A refusal that arrives after the write is not a wall.
+pub const NameVerdict = enum { contained, escaping, unframed };
+
+/// Read a name's verdict off its face. A contained name is a relative path whose
+/// every segment carries content and is neither `.` nor `..`: no leading `/`, no
+/// empty segment (which is what `//` and a trailing `/` are), and no segment that
+/// walks upward. A season is read by a directory walk, so a pour can never MAKE an
+/// escaping name -- this door exists for the names that arrive from outside, which
+/// is every name a restore reads back out of a sealed vessel.
+///
+/// Postcondition: every name receives exactly one verdict, stated positively --
+/// there is no partial containment.
+pub fn name_verdict(name: []const u8) NameVerdict {
+    // invariant: a name reaching here carries bytes -- the parser refuses an empty
+    // field before asking where it points.
+    if (name.len == 0) return .escaping;
+    // invariant: and it fits the roster's own name roof, so the walk below is
+    // bounded by a named constant rather than by whatever arrived.
+    if (name.len > max_name_len) return .escaping;
+    // The framing rule. A cargo line and a manifest line each END at a newline, so a name
+    // carrying one is written as TWO records and the second is whatever the name said.
+    // Measured on metal `20260910` before a line changed: a season file named
+    // `b.txt<LF>manifest plain-bytes <64 hex> evil.txt<LF>cargo plain-bytes <64 hex> evil.txt`
+    // poured clean -- `season read files=2`, then `pour complete` -- and the sealed,
+    // Kumara-stamped head listed THREE names for a season holding two files, two of them
+    // `evil.txt` at a digest the season never produced. The signature covered the forgery,
+    // because the forgery arrived as part of a name nobody had asked to be one record.
+    //
+    // The class is control bytes rather than the newline alone. `vessel_seal.trim_line`
+    // strips a trailing carriage return, so `a.txt\r` and `a.txt` are two files under one
+    // listed name; and a NUL ends a path at every C seam a restore hands one to. Bytes at
+    // or above 0x80 walk free on purpose -- a season may hold a UTF-8 filename, and
+    // refusing one would be a wider claim than this fault earns.
+    var ci: u32 = 0;
+    const nlen: u32 = @intCast(name.len);
+    while (ci < nlen) : (ci += 1) {
+        const c = name[@intCast(ci)];
+        if (c < 0x20 or c == 0x7f) return .unframed;
+    }
+    var start: u32 = 0;
+    const len: u32 = @intCast(name.len);
+    while (start <= len) {
+        var end: u32 = start;
+        while (end < len and name[@intCast(end)] != '/') : (end += 1) {}
+        const seg = name[@intCast(start)..@intCast(end)];
+        if (seg.len == 0) return .escaping;
+        if (std.mem.eql(u8, seg, ".")) return .escaping;
+        if (std.mem.eql(u8, seg, "..")) return .escaping;
+        if (end >= len) break;
+        start = end + 1;
+    }
+    return .contained;
+}
+
+/// The most places one listing may name, mirrored from the seal module's own cargo roof so a
+/// roster built here holds whatever either reader hands it.
+/// couples: vessel_seal.max_cargo
+pub const max_listed_names: u32 = 16;
+
+/// What a roster can say about the next name a listing offers. `fresh` is a place named for the
+/// first time; `repeated` is a place this same listing already named; `overflowing` is a listing
+/// naming more places than any vessel may carry. Three answers rather than one boolean, because a
+/// repeat and an overflow are two faults wanting two cures.
+pub const NameAdmit = enum { fresh, repeated, overflowing };
+
+/// The places a listing has named so far. A cargo line is judged on its face by `mark_verdict`
+/// and `name_verdict`; naming one place twice is a fault BETWEEN lines, so the rule needs one
+/// small memory rather than a wider parser.
+pub const NameRoster = struct {
+    names: [max_listed_names][max_name_len]u8 = undefined,
+    lens: [max_listed_names]u32 = [_]u32{0} ** max_listed_names,
+    count: u32 = 0,
+};
+
+/// Offer the roster the next name a listing carries, and read back its verdict.
+///
+/// Measured on metal `20260910` before this door existed: a vessel naming `a.txt` on two cargo
+/// lines, each carrying an honest digest for a different body, answered `listing agrees count=2`,
+/// crossed a dock whole, and restored through `restore files proven count=2` before refusing on
+/// the parent compare -- leaving an out-home holding ONE file named `a.txt` whose bytes belonged
+/// to the other. Every digest was honest; only the mapping was not.
+///
+/// Postcondition: every name receives exactly one verdict, and a `fresh` one stands in the roster
+/// afterward -- so offering the same name twice can only answer `repeated` the second time.
+pub fn roster_admit(roster: *NameRoster, name: []const u8) NameAdmit {
+    // invariant: a name reaching here carries bytes, since name_verdict refuses an empty one
+    // before anyone asks whether it has been seen.
+    assert(name.len >= 1);
+    // invariant: and it fits the contract's own name roof, so the copy below stays inside a slot.
+    assert(name.len <= max_name_len);
+    // invariant: the roster holds no more than its own roof, so the walk reads filled slots alone.
+    assert(roster.count <= max_listed_names);
+    var i: u32 = 0;
+    // The walk is bounded by the roster's roof, so a whole listing costs at most
+    // max_listed_names * max_listed_names comparisons -- 256 at today's roof of 16, which is
+    // cheaper than the one resin read each line already earns.
+    while (i < roster.count) : (i += 1) {
+        const seen = roster.names[i][0..roster.lens[i]];
+        if (std.mem.eql(u8, seen, name)) return .repeated;
+    }
+    if (roster.count >= max_listed_names) return .overflowing;
+    var ci: u32 = 0;
+    const nlen: u32 = @intCast(name.len);
+    while (ci < nlen) : (ci += 1) {
+        roster.names[roster.count][@intCast(ci)] = name[@intCast(ci)];
+    }
+    roster.lens[roster.count] = nlen;
+    roster.count += 1;
+    // invariant: the fresh name now stands in the roster, so the next offer of it answers repeated.
+    assert(roster.count >= 1);
+    return .fresh;
+}
+
+pub const ManifestEntry = struct {
+    mark: []const u8,
+    digest_hex: []const u8,
+    name: []const u8,
+};
+
+fn is_lower_hex(c: u8) bool {
+    if (c >= '0' and c <= '9') return true;
+    if (c >= 'a' and c <= 'f') return true;
+    return false;
+}
+
+/// Precondition: line contains no newline and fits the named bound.
+/// Postcondition: all three fields are nonempty, the digest is well-formed, and the
+/// mark is one the engine can name. An unknown mark refuses whole rather than
+/// riding through unread -- there is no partial trust of cargo whose kind has no name.
+pub fn parse_manifest_line(line: []const u8) error{ InvalidFormat, UnknownMark, EscapingName, UnframedName }!ManifestEntry {
+    // invariant: a line reaching the parser holds bytes and fits the named bound, so the u32
+    // arithmetic below indexes real content and never walks past the slice it was handed.
+    assert(line.len >= 1);
+    assert(line.len <= max_line_len);
+
+    const len: u32 = @intCast(line.len);
+
+    var first_space: u32 = 0;
+    while (first_space < len) : (first_space += 1) {
+        if (line[@intCast(first_space)] == ' ') break;
+    }
+    if (first_space == 0) return error.InvalidFormat;
+    if (first_space >= len) return error.InvalidFormat;
+    if (first_space > max_mark_len) return error.InvalidFormat;
+
+    const digest_start: u32 = first_space + 1;
+    const digest_end: u32 = digest_start + digest_hex_len;
+    if (digest_end >= len) return error.InvalidFormat;
+    if (line[@intCast(digest_end)] != ' ') return error.InvalidFormat;
+
+    var i: u32 = digest_start;
+    while (i < digest_end) : (i += 1) {
+        if (!is_lower_hex(line[@intCast(i)])) return error.InvalidFormat;
+    }
+
+    const name_start: u32 = digest_end + 1;
+    if (len - name_start > max_name_len) return error.InvalidFormat;
+
+    const entry = ManifestEntry{
+        .mark = line[0..@intCast(first_space)],
+        .digest_hex = line[@intCast(digest_start)..@intCast(digest_end)],
+        .name = line[@intCast(name_start)..@intCast(len)],
+    };
+    // invariant: the three fields the entry publishes were each cut from the line above, so every
+    // one carries content and the digest is exactly the width every later reader slices it at.
+    assert(entry.mark.len >= 1);
+    assert(entry.digest_hex.len == digest_hex_len);
+    assert(entry.name.len >= 1);
+    // The wreck rule, kept here so every reading site inherits it from one place. Counted
+    // `20260908` rather than recalled: SIX callers route a whole line through here --
+    // `vessel_core.rye:160` and `:167` (the parts reader) and `:234` (`take_listed_line`),
+    // `vessel_seal.rye:115` and `:229`, and `vessel_fetch_delivery.rye:365` -- each
+    // discarding the parsed entry with `_ =` and keeping only the refusal. This comment
+    // read `five` and named `:234` nowhere. A SEVENTH reader cannot route the whole line:
+    // `amphora/src/main.rye:append_cargo_line` walks decrypted seal plain into a catalog
+    // slot, so it borrows `mark_verdict` alone and holds its written root against
+    // `mark_plain_bytes` at comptime (REDS `20260908.004856`). A check written per caller
+    // would be a rule written seven times to be forgotten once.
+    if (mark_verdict(entry.mark) == .unknown) return error.UnknownMark;
+    // invariant: past this line the mark is a root the engine names.
+    assert(mark_verdict(entry.mark) == .known);
+    // The containment rule, kept beside the wreck rule for the same reason: a name
+    // that walks upward is refused once here rather than seven times at the readers.
+    // A digest answers WHAT the bytes are; this answers WHERE they may land, and the
+    // vessel carried the second claim unchecked until `20260910`.
+    // An exhaustive switch rather than a compare against one verdict: a verdict added
+    // later stops the build here rather than riding through as a welcome.
+    switch (name_verdict(entry.name)) {
+        .contained => {},
+        .escaping => return error.EscapingName,
+        .unframed => return error.UnframedName,
+    }
+    // invariant: past this line the name lands inside whatever home a restore names, and
+    // it is one record, so re-reading what this parser wrote gives back this same name.
+    assert(name_verdict(entry.name) == .contained);
+    return entry;
+}
+
+fn run_selftest(_: std.Io) !u8 {
+    const line = mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " session-logs/example.md";
+    const entry = try parse_manifest_line(line);
+    // invariant: a line built from the roster's own mark parses back into the same three fields, so
+    // the welcome leg proves acceptance rather than proving only that no error was raised.
+    assert(std.mem.eql(u8, entry.mark, mark_plain_bytes));
+    assert(entry.digest_hex.len == digest_hex_len);
+    assert(std.mem.eql(u8, entry.name, "session-logs/example.md"));
+
+    if (parse_manifest_line(mark_plain_bytes ++ " short name")) |_| return error.UnwelcomePassed else |_| {}
+    if (parse_manifest_line(" " ++ ("ab" ** 32) ++ " x")) |_| return error.UnwelcomePassed else |_| {}
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("AB" ** 32) ++ " x")) |_| return error.UnwelcomePassed else |_| {}
+
+    // Both directions of the wreck rule, since a refusal proven only one way cannot be
+    // told from a bypass. The manifest root walks free beside plain-bytes; a stranger
+    // and an inviting-sounding kind the engine never named both refuse.
+    const manifest_line = mark_manifest ++ " " ++ ("ab" ** 32) ++ " nested.kyri";
+    const nested = try parse_manifest_line(manifest_line);
+    // invariant: the manifest root parses beside plain-bytes, so the roster admits both kinds; a
+    // welcome proven for one mark alone would leave a narrowed roster reading green.
+    assert(std.mem.eql(u8, nested.mark, mark_manifest));
+    // invariant: each refusal names UnknownMark itself, so a refusal earned some other way -- a bad
+    // length, a malformed digest -- cannot be read as the roster doing its work.
+    if (parse_manifest_line("zzz-unknown-stranger " ++ ("ab" ** 32) ++ " x")) |_| return error.UnwelcomePassed else |err| assert(err == error.UnknownMark);
+    if (parse_manifest_line("executable " ++ ("ab" ** 32) ++ " payload.so")) |_| return error.UnwelcomePassed else |err| assert(err == error.UnknownMark);
+
+    // Both directions of the containment rule. A nested relative name walks free,
+    // because a season is read by a directory walk and `sub/a.txt` is what that walk
+    // hands back; every shape that could land outside the home refuses by its own name.
+    const nested_ok = try parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " sub/deeper/a.txt");
+    // invariant: the welcome is asserted as hard as the refusals, so a rule refusing
+    // every name would be told apart from one refusing the escaping names alone.
+    assert(std.mem.eql(u8, nested_ok.name, "sub/deeper/a.txt"));
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " ../escaped.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.EscapingName);
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " sub/../../escaped.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.EscapingName);
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " /etc/passwd")) |_| return error.UnwelcomePassed else |err| assert(err == error.EscapingName);
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " sub//a.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.EscapingName);
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " ./a.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.EscapingName);
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " sub/")) |_| return error.UnwelcomePassed else |err| assert(err == error.EscapingName);
+
+    // Both directions of the framing rule. A name carrying a control byte cannot be written
+    // as one record, so it refuses by its own error name rather than by the containment one --
+    // two faults with two cures, told apart at the door. The welcome beside them is the
+    // ordinary name that carries a space, which the format DOES admit: the name is the last
+    // field and runs to the end of the line, so a space round-trips and a newline cannot.
+    const spaced = try parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " a file with spaces.txt");
+    // invariant: the welcome is asserted as hard as the refusals, so a rule refusing every
+    // unusual byte would be told apart from one refusing the bytes that break a record.
+    assert(std.mem.eql(u8, spaced.name, "a file with spaces.txt"));
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " a.txt\nevil.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.UnframedName);
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " a.txt\revil.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.UnframedName);
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " a.txt\x00evil.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.UnframedName);
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " a.txt\tevil.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.UnframedName);
+    // invariant: the two rules stay apart -- an upward walk still answers EscapingName, so
+    // widening the framing rule did not quietly swallow the containment one.
+    if (parse_manifest_line(mark_plain_bytes ++ " " ++ ("ab" ** 32) ++ " ../still-escaping.txt")) |_| return error.UnwelcomePassed else |err| assert(err == error.EscapingName);
+
+    // Both directions of the named-once rule. A roster admits each place once; the second offer
+    // of the same place answers repeated, and a listing past the roof answers overflowing --
+    // three answers kept apart, since a repeat and an overflow want two different cures.
+    var roster = NameRoster{};
+    // invariant: a fresh roster names nothing, so the first admit below tests an empty walk.
+    assert(roster.count == 0);
+    assert(roster_admit(&roster, "a.txt") == .fresh);
+    assert(roster_admit(&roster, "b.txt") == .fresh);
+    assert(roster_admit(&roster, "sub/a.txt") == .fresh);
+    // invariant: three distinct places stand, so the repeat below is refused by the rule rather
+    // than by an empty roster that refuses everything.
+    assert(roster.count == 3);
+    assert(roster_admit(&roster, "a.txt") == .repeated);
+    assert(roster_admit(&roster, "sub/a.txt") == .repeated);
+    // A repeat leaves the roster where it stood -- a refused name is not admitted.
+    assert(roster.count == 3);
+    var full = NameRoster{};
+    var fi: u32 = 0;
+    while (fi < max_listed_names) : (fi += 1) {
+        var slot_name: [8]u8 = undefined;
+        const made = std.fmt.bufPrint(&slot_name, "f{d}.txt", .{fi}) catch unreachable;
+        // invariant: every generated name is distinct, so the roster fills to its roof by fresh
+        // places rather than by repeats -- a repeat would leave a slot open and never overflow.
+        assert(roster_admit(&full, made) == .fresh);
+    }
+    // invariant: the roster stands exactly at its roof, so the next offer tests the roof rather
+    // than a roster that happened to be short.
+    assert(full.count == max_listed_names);
+    assert(roster_admit(&full, "one-too-many.txt") == .overflowing);
+
+    print("amphora: version {s}\n", .{amphora_manifest_entry_version});
+    print("GREEN: Amphora manifest entry -- parse, name the mark, hold the name inside, keep it one record, and refuse whole.\n", .{});
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    _ = init.arena.allocator();
+    return run_selftest(init.io);
+}

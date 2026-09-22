@@ -1,0 +1,277 @@
+# two_rooms_doorway_scan.rish -- forward-facing pages name their room at the door.
+#
+# Native orchestration -- per-file verdict in two_rooms_doorway_scan_one.sh
+# (stamp compare, head-25 Status, case-insensitive room register).
+#
+# WHAT CHANGED 20260906, and why the numbers moved. The roster beside this file was a shell glob
+# over three rooms; `active-designing/` folded to `date/YYYYMMDD/` and a shell `*` stops at `/`,
+# so 607 pages left the reach with nothing to say so. The roster reads `git ls-files` now, whose
+# pathspec `*` crosses `/`. Reach 319 -> 972 files, 216 -> 880 post-seating pages, and three
+# pages that name no room became visible for the first time since their room folded.
+#
+# THE REACH FLOOR, and what it is for. A gate held at zero cannot tell a clean collection from a
+# dead instrument, since both answer zero (REDS %416). Three floors stand below, and the third is
+# this defect class watching for its own return: at least one page must come from a `date/` shelf.
+# Should a roster narrow to the flat room again -- a rewritten glob, a room renamed -- the folded
+# count falls to zero and this refuses, where the elder simply reported a smaller clean tree.
+#
+# WHAT IS RATCHETED RATHER THAN GATED. Forty-five pages carry a Status that names no room, or no
+# Status at all. Three of them sit on `date/` shelves and are dated testimony, which
+# accrete-never-break keeps exactly as written -- so a hard gate at zero could never close, and a
+# gate that can never close is one somebody turns off. The ceiling only falls, and every failing
+# page is named on every pass, so a repair is one line away from the reading that found it.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/fixtures/t/two_rooms_doorway_scan.rish
+
+let seating_env = env "TWO_ROOMS_SEATING_STAMP"
+let seating = "20260705-203144"
+if seating_env != "" then let seating = seating_env
+
+# The ceiling only ever falls FROM WHAT IT PUBLISHES. Measured 20260906.161500 on the repaired
+# roster at 45 -- 42 pages already inside the elder reach, plus 3 the fold had hidden since
+# active-designing folded. It publishes at 46, because the lap that measured 45 died before its
+# commit and one external-research page landed in the gap; a number measured on a tree that has
+# since moved is REDS %341's class, and the honest reading is the one taken at the send.
+#
+# IT ARRIVED RED AND FELL TO 44 (`20260907.001500`). The 46 was measured on a 972-page tree at
+# `20260906.161500` and published on a 974-page tree seven hours later, by which time a third
+# `Proposed` page had landed and the reading stood at **47** -- a ratchet rostered at a ceiling its
+# own tree already exceeded, which is a guard that reds on arrival. That is this scan's own header
+# reasoning turned on itself: a number measured before the send and landed after is a number about
+# a tree that has moved.
+#
+# The repair is not a wider gate. Three pages read `**Status:** Proposed -- external research`, and
+# TWO_ROOMS.md's gloss table names four tokens -- checkable, vision, mixed, research for
+# understanding -- with `proposed` among none of them, while its own prose says "what is proven as
+# proven and what is proposed as proposed". Each of the three already NAMED its register in its own
+# next sentence: two say the numbers are witness-bound and the design reading is proposed, which is
+# `mixed` by the table's own gloss, and the third says nothing here binds a witness, which is
+# `research for understanding`. So each Status gained the token its own sentence already asserted --
+# no claim changed, three pages started naming their room, and the reading fell 47 to 44. Whether
+# `proposed` should itself be a fifth token is still the canon's to settle rather than this
+# guard's, and it is carried on the card.
+#
+# AND IT ROSE AGAIN OVERNIGHT, 44 -> 48, WHICH IS THE FINDING (`20260907.094712`). Four of the four
+# new pages were written by hands that had read the law -- two of them cite `context/TWO_ROOMS.md`
+# in the very Status line that names no room. The transcription repair above had then been done
+# twice in two days and regrown twice, so the missing piece is at WRITE time rather than at census
+# time; `tools/f/fleet_baton.txt` carries the one clause now, which is where a habit reaches every
+# ship on its next lap.
+#
+# THE READING FELL 48 -> 37 IN THREE MOVES, and each is a different kind of thing:
+#   +4 free -- the door is the HEAD, not one key. Nine pages answered under `**Room:**` rather than
+#      `**Status:**`, two of them spelling `Mixed`, and were read as naming no room at all.
+#   -3 caught -- the token is a WORD, not a substring. `no infrastructure provisioned`,
+#      `no VPS provisioned` and `divisional roles` each carry the letters of `vision`, and three
+#      post-seating pages were passing on them. `visionary` is kept, since `Visionary room` is an
+#      honest naming that two pages write.
+#   +11 repaired -- each page's own next sentence already said its register, transcribed into the
+#      door line. No claim changed on any of them.
+#
+# THE RATCHET REACHED ITS FLOOR, 38 -> 3 (`20260907.191211`), and the floor is structural rather
+# than tidy. The reading arrived RED at 38 against a ceiling of 37 -- one page had landed overnight,
+# which is what a zero-slack ceiling does over a population that grows. Twenty-nine living pages
+# were repaired the same way the +11 move above was: each page's own opening sentence already
+# asserted its register, and the token was transcribed into its door line beside whatever else that
+# line said. No claim changed on any of them, and the commonest honest answer was `mixed` -- a
+# design essay reasoning from measured readings toward a proposal is both registers by construction,
+# which is why `mixed` is also the most-written token in the tree (334 of 846 post-seating door
+# lines, measured this lap).
+#
+# THE THREE THAT REMAIN CAN NEVER BE REPAIRED, and that is the point. All three sit on
+# `active-designing/date/20260820/`, and dated testimony keeps every word it wrote
+# (accrete-never-break). So 3 is a floor rather than a target, and the ceiling stands there: from
+# here the guard's whole remaining job is catching pages written from now on.
+#
+# WHICH MAKES IT A GATE ON NEW WRITING, WEARING A RATCHET'S CLOTHES, and the difference decides
+# where the repair belongs. A ratchet reports a backlog somebody works down; this now reds the whole
+# fleet the first time any hand writes a door line without a token. It runs at `tier cadence`, so
+# the hand that wrote the page is not the hand that meets the refusal -- a stranger meets it, up to
+# five rounds later, and repairs somebody else's door. That is the shape the census has already
+# regrown from twice.
+#
+# THE WRITE-TIME REACH TAKEN THIS LAP is the room's own front door rather than a hook.
+# `active-designing/README.md` gained a *The room at the door* section on `20260907.015907` and has
+# had no silent page since; `external-research/README.md` recorded teaching the token in its own
+# `Last updated` line on the same stamp and left its body silent, and the one page that landed
+# between then and now came from that room. Its *How To Add an Exploration* ritual -- the list a
+# writer actually reads before adding a page -- now carries the token. Sample size one, said
+# plainly; the mechanism is what recommends it, not the count. `docs/README.md` is untouched: it
+# supplies 14 pages, none of them silent, and it stands at the 40 lines it declares.
+#
+# WHAT A GREP STILL CANNOT READ, named rather than guessed at: a token can be DENIED and still
+# match. `**Room:** Proposed -- nothing here is checkable until a witness binds it` read OK on the
+# word its own sentence negates. That page is repaired at the source, and a negation heuristic is
+# declined here -- `not vision -- checkable` is honest prose and a rule refusing it would refuse
+# more truth than it caught. Presence is what a grep reads; assertion stays a reader's.
+# THE ROSTER READ THREE ROOMS AND THE TREE SHIPS FIVE (20260908). `docs-geode/` -- the shipping
+# shelf, the room whose whole job is the page a stranger meets first -- stood outside this guard
+# for its entire life, and `docs-geode/README.md` names "three prose rooms" that overlap this
+# roster's three in exactly one. The room joins at zero cost: 10 pages, 0 silent, because the one
+# genre here that stamps its basenames is the blog and its first piece already reads `mixed`.
+# `manual/` JOINED THE NEXT LAP (20260908), by being repaired rather than by a ceiling moving.
+# Its 7 silent pages each carried an honest `**Status:**` line that answered the lifecycle question
+# and never the register one; the token was added beside what each already said, judged from the
+# page -- four `mixed`, three `checkable`. The room reads 29 pages and 0 silent, so it entered on
+# `docs-geode/`'s own terms.
+# `foundations/` JOINED THE SAME WAY (20260908), and it was the larger half of the bill: 83 pages,
+# 35 silent, each read and given the token its own page earns -- 23 `mixed`, 12 `vision`. Two of the
+# 35 answer under `**Room:**` rather than `**Status:**`, because their Status sentence runs onto a
+# second line and this scan keeps the first, so an appended token would land mid-clause. The second
+# key, seated 20260907, is what let those two be repaired without rewriting a paragraph to suit a
+# grep. `context/` (105 pages, 38 silent) stays out: one more lap of the same shape.
+#
+# `starts-with "docs/"` does NOT catch a `docs-geode/` path -- the prefixes part at the fourth
+# character -- so the two rooms are counted apart and neither borrows the other's reach leg. That
+# was checked rather than assumed, because a reach leg passing on a sibling room's pages is the
+# same silent-narrowing shape this whole family was built for.
+#
+let ceiling_env = env "TWO_ROOMS_DOORWAY_CEILING"
+let ceiling = "3"
+if ceiling_env != "" then let ceiling = ceiling_env
+
+# THE EXEMPTION WAS POINTED AT THE LIVING PAGES (20260911). `scan_one` passed any page whose
+# basename carries no one-clock stamp, calling it grandfathered. The mark law reads that same
+# absence the other way -- *a file whose own basename carries a one-clock stamp is testimony, and
+# everything else is living* -- so the clause freed `context/LEXICON.md`, the `manual/` guides and
+# the `docs-geode/` tutorials, and gated three pages of dated testimony nobody may ever repair.
+#
+# Measured the lap this reading landed: 1,254 pages, of which 138 carry no stamp and 106 of those
+# named no room. The roster's own comments read `manual/ 29 pages and 0 silent` and `foundations/
+# 83 pages and 0 silent`, and both zeros were true of the population the guard could see. Sixteen
+# were repaired the same lap -- 13 `context/specs/`, one design shape, one foundation, one
+# external-research canon -- so the ceiling opens at 90. The remainder, by room: 33
+# `active-designing/`, 23 `context/`, 20 `manual/`, 9 `docs-geode/`, 6 in the lineage silo.
+#
+# `context/` PAID ITS LIVING SHARE THE NEXT LAP (20260911.032352), the way `%642` taught the dated
+# half to pay: one room at a time rather than the whole remainder at once. The 23 are this tree's
+# core guides -- `GAUGE_STYLE.md`, `TAME_CORE.md`, `LEXICON.md`, the three alternate registers, the
+# voice notes -- so the room that houses `TWO_ROOMS.md` was the last room whose own front matter
+# never answered it, one reading deeper than the lap that repaired its `specs/` shelf. Each took a
+# `**Room:**` line beside what its Status already said, judged from the body rather than the title:
+# 6 `checkable` where a witness or a rule file binds every claim, 8 `mixed` where a counted half
+# stands beside a judged one, 9 `vision` where a voice or a discipline is held by taste. Three of
+# the 23 are mirrored documents, so `tools/fixtures/d/document_mirror_scan.sh write` carried the
+# line to `ember-voices/KYRI.md`, `spellbook/README.md` and `biochemistry/README.md` in the same
+# commit. `context/` reads 99 pages and 0 living-silent; the ceiling falls 90 -> 67, and the
+# remainder is 33 `active-designing/`, 20 `manual/`, 8 `docs-geode/`, 6 in `external-research/`.
+#
+# AND THE SHIPPING SHELF PAID ITS SHARE THE SAME DAY (20260911.081500). The 8 living
+# `docs-geode/` pages naming no room are the shelf a newcomer is sent to -- the Rishi
+# reference, the three Sangha patterns, the naming study, and the three tutorials -- so the
+# room that teaches this tree to a stranger was answering every question at its door except
+# which register the stranger was standing in. Each took a `**Room:**` line judged from the
+# body rather than the title: 6 `checkable` where a witness binds every claim, 1 `mixed`
+# where a counted half stands beside a judged one (`the-first-hour.md`, whose quoted endings
+# `tutorial_output_scan.sh` runs and whose welcome is judged), and 1 `vision`
+# (`SHOPPING.md`, a method that names no winner and quotes no price, so no guard could bind
+# a sentence of it). `docs-geode/` reads 18 pages and 0 living-silent; the ceiling falls
+# 67 -> 59, moved by the eight and by nothing else, and the remainder is 33
+# `active-designing/`, 20 `manual/`, 6 `external-research/`.
+#
+# TWO NUMBERS RATHER THAN ONE, because a page never changes class: a stamp is in a basename or it
+# is not. Merging them would let a repair in one class hide a regression in the other, and the
+# dated ratchet's floor of 3 is structural where this one's is zero.
+#
+# AND THE MANUAL PAID ITS SHARE (20260911.114108). The 20 living `manual/` pages naming no room are
+# the OS user manual -- eight setup and operating guides a person follows on their own machine, the
+# overview and the variant template, three reference pages, two tutorials, and three video scripts.
+# The room joined this roster on 20260908 reading 0 silent, and it never regressed: the 20260911
+# amendment that reads a stampless basename as LIVING rather than elder reopened 20 of its 29 doors
+# in one reading, which is the amendment working rather than the room slipping. Each took a
+# `**Room:**` line judged from the body rather than the title: 9 `checkable` where a command answers
+# for itself or a named witness binds the page, 8 `mixed` where a proven half stands beside an
+# unproven one, and 3 `vision` where the page is held by taste. The clearest `mixed` is
+# `guides/pixel-10a-grapheneos-setup.md`, whose steps are transcribed verbatim from a cited
+# installer page -- checkable against that source -- while its own Status says the end-to-end run
+# stands unproven here; the clearest `vision` is `guides/apprentice-welcome.md`, a person-to-person
+# letter no guard binds a sentence of. `manual/` reads 29 pages and 0 living-silent; the ceiling
+# falls 59 -> 39, moved by the twenty and by nothing else, and the remainder is 33
+# `active-designing/` and 6 `external-research/`.
+#
+# AND THE DESIGN ROOM AND THE SILO CLOSED IT (20260911.133037). The last 39 living pages are 33
+# `active-designing/` and 6 `external-research/`, and they fall into three shapes rather than 39
+# judgments. THIRTY are ALES fill captures of the Lotus rungs, and their uniformity is a reading
+# rather than an assumption: 30 of 30 carry both a `## What the witness proves (GREEN on metal)`
+# section and a `## The road on` section, so each holds a proven half beside a named horizon and
+# `mixed` is what their own structure says. One token over 30 pages is therefore one honest
+# reading, where the same line typed over 30 pages of differing shape would be a shortcut.
+#
+# THE OTHER THREE DESIGN PAGES ARE MIXED FOR THEIR OWN REASONS. `20260814-fill-constel-naming-law.md`
+# seats a law `tools/f/fora_name_witness.rish` binds and names the fake-pier harness as a later
+# round; `proven-seat-guest-hammock.md` and `seam-season-hammock.md` are living ledgers whose green
+# rungs and pinned nibs stand beside parked rulings and a named Caravan horizon.
+#
+# THE SIX LINEAGE SILOS CARRIED NO `**Status:**` LINE AT ALL -- the one shape in this whole family
+# where the door was silent rather than answering a different question. Each is an outside
+# whitepaper restated in our own words under `context/SILO_TECHNIQUE.md`, and each names its own two
+# halves apart in its own headings: *What Is Load-Bearing* and *What to Read as Vision*. So all six
+# read `research for understanding`, the fourth token of `context/TWO_ROOMS.md`, and this is the
+# first room where that token is the honest answer for every page in it.
+#
+# THE LIVING CEILING FALLS 39 -> 0, AND A RATCHET AT ZERO IS A WALL. Nothing structural holds a
+# living page silent -- a living path may always be repaired, which is why this half's floor was
+# named zero when the two numbers came apart. So the next living page written into these seven
+# rooms without a room token reds on the lap it lands, which is what the baton already asks of
+# every ship. The dated half keeps its floor of 3, untouched: accrete-never-break can never let
+# anyone repair those three.
+let living_ceiling_env = env "TWO_ROOMS_LIVING_CEILING"
+let living_ceiling = "0"
+if living_ceiling_env != "" then let living_ceiling = living_ceiling_env
+
+let roster = run ["sh" "tools/fixtures/t/two_rooms_doorway_roster.sh"]
+assert roster.ok else "two_rooms doorway roster failed"
+let files = where (lines roster.out) as p: p != ""
+
+let from_research = where files as f: f starts-with "external-research/"
+let from_designing = where files as f: f starts-with "active-designing/"
+let from_docs = where files as f: f starts-with "docs/"
+let from_geode = where files as f: f starts-with "docs-geode/"
+let from_manual = where files as f: f starts-with "manual/"
+let from_foundations = where files as f: f starts-with "foundations/"
+let from_context = where files as f: f starts-with "context/"
+let from_shelves = where files as f: f contains "/date/"
+
+let results = map files as f: run ["sh" "tools/fixtures/t/two_rooms_doorway_scan_one.sh" f seating]
+
+for-each results as r do say trim r.out
+
+let fails = where results as r: r.ok == false
+let living_silent = where results as r: (trim r.out) starts-with "LIVING-SILENT"
+let stampless = where results as r: r.out contains "no one-clock stamp"
+
+say "doorway pages=${length files} research=${length from_research} designing=${length from_designing} docs=${length from_docs} geode=${length from_geode} manual=${length from_manual} foundations=${length from_foundations} context=${length from_context} folded=${length from_shelves}"
+say "doorway fails=${length fails} ceiling=${ceiling} seating=${seating}"
+say "doorway stampless=${length stampless} living_silent=${length living_silent} living_ceiling=${living_ceiling}"
+
+if length from_research == 0 then say "FAIL doorway reach: external-research read no page"
+if length from_designing == 0 then say "FAIL doorway reach: active-designing read no page"
+if length from_docs == 0 then say "FAIL doorway reach: docs read no page"
+if length from_geode == 0 then say "FAIL doorway reach: docs-geode read no page"
+if length from_manual == 0 then say "FAIL doorway reach: manual read no page"
+if length from_foundations == 0 then say "FAIL doorway reach: foundations read no page"
+if length from_context == 0 then say "FAIL doorway reach: context read no page"
+if length from_shelves == 0 then say "FAIL doorway reach: no folded page read -- a glob has narrowed to the flat room again"
+
+if length from_research == 0 then exit 1
+if length from_designing == 0 then exit 1
+if length from_docs == 0 then exit 1
+if length from_geode == 0 then exit 1
+if length from_manual == 0 then exit 1
+if length from_foundations == 0 then exit 1
+if length from_context == 0 then exit 1
+if length from_shelves == 0 then exit 1
+
+let under = run ["sh" "-c" "test ${length fails} -le ${ceiling}"]
+
+if under.ok == false then say "FAIL doorway ratchet: ${length fails} pages name no room, above the ceiling of ${ceiling}"
+if under.ok == false then exit 1
+
+let living_under = run ["sh" "-c" "test ${length living_silent} -le ${living_ceiling}"]
+
+if living_under.ok == false then say "FAIL doorway living ratchet: ${length living_silent} living pages name no room, above the ceiling of ${living_ceiling}"
+if living_under.ok == false then exit 1
+
+say "verdict=ok"
+say "OK   doorway scan complete (seating ${seating})"

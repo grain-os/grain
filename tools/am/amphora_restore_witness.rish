@@ -1,0 +1,71 @@
+# tools/am/amphora_restore_witness.rish -- Q38-Q42: the cargo's last mile home.
+#
+# pour - restore - four files - same-parent re-restore - planted fork refuses.
+#
+#   rishi/bin/rishi run tools/am/amphora_restore_witness.rish
+
+let season = "tools/fixtures/cellar_ring1_tree"
+
+# THE PEN CARRIES A UNIQUE NAME (REDS %512's class, held by tools/s/shared_pen_witness.rish).
+# Eight ships run this roster from eight checkouts and share one /tmp, so a pen named by a
+# constant is ONE directory on all eight: a peer's `rm -rf` lands mid-run and the reading becomes
+# a fact about the pen wearing the costume of a fact about Amphora. The runtime composes the
+# suffix, so no two runs can agree by accident, and the directory it hands back is already empty
+# -- which is why the wipe-then-mkdir this replaced is gone rather than moved.
+# Full argument and the seated exemplar: tools/am/amphora_restore_negative_witness.rish.
+# The pen comes from the runtime rather than from `mktemp -d`, so a refusal releases it too.
+# The elder sweep stood on the straight-line success path below every assert, where a refusal
+# never reached it (REDS %745).
+let home = make-pen "amphora_restore"
+let vessel = "${home}/v.kyri"
+let out_home = "${home}/v.kyri.season"
+let hello = "${home}/v.kyri.season/hello.txt"
+let nested = "${home}/v.kyri.season/nested/leaf.txt"
+let blob = "${home}/v.kyri.season/blob.bin"
+
+# The witness builds the binaries it runs, rather than assuming a previous lap left them
+# behind. amphora/bin/ is gitignored (.gitignore:336), so a clone carries none of them and
+# this witness died on a missing file rather than on an Amphora fact (REDS %334).
+# All three, whatever this file names in run position: amphora/src/main.rye:138 and :176
+# resolve vessel-seal and vessel-core as SIBLING SUBPROCESSES, so `pour` needs them present.
+# The mkdir comes first because rye build refuses an absent -femit-bin directory (REDS %337).
+let zig = "vendor/zig-toolchain/zig"
+let build_amphora = run ["sh" "-c" "mkdir -p ${home}/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/src/main.rye -femit-bin=${home}/bin/amphora"]
+if build_amphora.ok == false then say build_amphora.err
+assert build_amphora.ok else "amphora_restore: amphora build failed -- read the line above"
+let build_core = run ["sh" "-c" "env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/vessel_core.rye -femit-bin=${home}/bin/vessel-core"]
+if build_core.ok == false then say build_core.err
+assert build_core.ok else "amphora_restore: vessel-core build failed -- read the line above"
+let build_seal = run ["sh" "-c" "env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh amphora/vessel_seal.rye -femit-bin=${home}/bin/vessel-seal"]
+if build_seal.ok == false then say build_seal.err
+assert build_seal.ok else "amphora_restore: vessel-seal build failed -- read the line above"
+
+let pour = run ["${home}/bin/amphora" "pour" season vessel]
+assert pour.ok else "amphora_restore: pour must exit ok"
+
+let restore = run ["${home}/bin/amphora" "restore" vessel]
+assert restore.ok else "amphora_restore: restore must exit ok"
+assert restore.err contains "restore catalog files=4" else "amphora_restore: want four cargo lines"
+assert restore.err contains "restore same-parent ok" else "amphora_restore: want same-parent"
+assert restore.err contains "restore complete" else "amphora_restore: want complete"
+
+let h = run ["test" "-f" hello]
+assert h.ok else "amphora_restore: hello.txt must land"
+let n = run ["test" "-f" nested]
+assert n.ok else "amphora_restore: nested/leaf.txt must land"
+let b = run ["test" "-f" blob]
+assert b.ok else "amphora_restore: blob.bin must land"
+
+let again = run ["${home}/bin/amphora" "restore" vessel]
+assert again.ok else "amphora_restore: same-parent re-restore must welcome"
+
+let plant = run ["sh" "-c" "rm -rf ${home}/v.kyri.season && mkdir -p ${home}/v.kyri.season && echo other > ${home}/v.kyri.season/x.txt"]
+assert plant.ok else "amphora_restore: plant fork fixture"
+
+let fork = run ["${home}/bin/amphora" "restore" vessel]
+assert fork.ok == false else "amphora_restore: planted fork must refuse"
+assert fork.err contains "identity fork" else "amphora_restore: want identity fork"
+
+say "round=restored files=4 same-parent=ok reres=welcome fork=refused"
+
+say "GREEN: amphora_restore -- catalog - out-home guard - files proven - same parent - complete."

@@ -1,0 +1,2179 @@
+//! mantra/src/weave.rye -- the weave: a living history of a text stream.
+//!
+//! A Weave is a list of Lines. Each Line carries its text, a generation count,
+//! and a stable identity that never changes once assigned. Generation parity
+//! names presence: odd = present, even = gone. Generations never decrease.
+//! These two facts together mean the weave remembers every line ever seen --
+//! its full history -- while current() surfaces only what is present now.
+//!
+//! IDENTITY IS A PAIR, which is what lets two branches merge at all. A position
+//! counter runs inside one weave, so two weaves that parted hand the same small
+//! integer to different lines; a join reading that integer alone saw one line
+//! where there were two and refused the ordinary case of branching. A line is
+//! named by a LineId instead -- the position, AND the site whose counter
+//! assigned it -- and that pair is unique by construction, since no two sites
+//! share a counter. The site rides on Diff rather than on Weave, because an
+//! edit is authored by one hand while the history it lands in is shared by
+//! every hand.
+//!
+//! ORDER IS ITS OWN QUESTION, asked and answered apart from identity. Where a
+//! line sits is a Place -- run, then site, then order key, then position --
+//! and Place.less_than is that order written once, which every sort and every
+//! ordering assert in this file reads. Four keys rather than three: the order
+//! key landed between the site and the position when a replacement needed to
+//! sort where the line it replaced sat while keeping a name of its own, and
+//! this sentence went on saying three for the hours after (REDS %680).
+//!
+//! A run names one apply: every line of one edit carries one run number, read
+//! before the loop that stamps them. So the site tie between
+//! two concurrent edits is settled ONCE, for the whole run, and each hand's
+//! block arrives whole. Reading the identity pair as the order settled that tie
+//! at every line instead, so two sides that each appended three lines came back
+//! alternating left, right, left, right, their positions coinciding one for
+//! one.
+//!
+//! The identity keeps its two fields, since a position counter runs fresh
+//! inside one weave and the pair is therefore already unique. Identity is what
+//! a merge joins on; place is what it sorts by; and holding them apart is what
+//! let the order be repaired with every line's name left exactly as it was.
+//!
+//! AN INSERT KNOWS WHERE IT GOES, since REDS %689. Every insert carries the
+//! kept line it FOLLOWS -- `Diff.after`, one entry per insert, computed by
+//! mantra/src/diff.rye and read by `apply`. The insert takes that anchor's
+//! order key and run, and its own fresh position is higher, so the position
+//! tiebreak inside Place.less_than sorts it just past the anchor and ahead of
+//! whatever came next. A line lands between two others without a denser number
+//! than a `u32` holds, and a paragraph edited mid-file arrives as an edit
+//! rather than as a deletion and an append.
+//!
+//! WHAT THIS LEAVES FOR THE NEXT LAP, so the head promises exactly what the
+//! code does. An insert that OPENS the document has no line to follow, so its
+//! anchor is null and it keeps the counter's own answer -- the one case still
+//! landing at the end. A document that grows at its head wants its own lap.
+//!
+//! AND FIRST PLACE IS UNREACHABLE FROM EITHER SPELLING, measured `20260916`
+//! rather than reasoned about. Anchoring on the FIRST line lands the insert
+//! SECOND: it inherits that line's run and order key and draws a HIGHER
+//! position, and the position is the last tiebreak, so it sorts just past the
+//! anchor. The first line of a fresh weave carries order key zero and the
+//! lowest position, so no anchor a caller can name puts a line ahead of it.
+//! The residue is therefore a property of the order law rather than a
+//! forgotten branch, which is why the repair wants a word rather than a patch:
+//! the doors are read in
+//! active-designing/date/20260916/20260916-105110_no-anchor-names-the-head.md.
+//!
+//! BOTH SENTENCES ARE NOW READ BY A GUARD. Claim 9 of
+//! mantra/src/weave_apply_witness.rye presses them on one plant, and
+//! tools/fixtures/m/mantra_weave_apply_control.sh plants the two mutations that
+//! prove it able to red -- the anchor lookup forced false, and the order law's
+//! run comparison reversed, which is the only mutation in this file that can
+//! put a fresh insert in first place. The control then runs each break a second
+//! time with claim 9 REMOVED from the witness copy, where both must reach exit
+//! zero, so the leg that catches them is named rather than assumed. A behavior sentence in a head is exactly
+//! what a field enumeration cannot check, and this is the answer: pin the
+//! behavior, residue included, so the day the law makes room the leg reds and
+//! the head moves with it.
+//! One further shape is worth expecting, and it is the honest answer rather
+//! than a fault: where one side made TWO edits and the other made one, the
+//! other's block lands between them, because run numbers order edits and both
+//! sides' first edits share one. Each side's own sequence survives exactly.
+//!
+//! The operations, listed rather than counted. This list is read against the
+//! module's own `pub fn` declarations by
+//! tools/fixtures/m/mantra_weave_head_scan.sh, in both directions, so an
+//! operation that lands without a line here reds on the lap it arrives --
+//! which is what `merge` did for half a day (REDS %506):
+//!   Weave.empty()            -- an empty weave, no lines yet
+//!   Weave.from_v1(alloc, rows) -- an elder v1 record, lifted as one hand
+//!   weave.apply(alloc, d)    -- advance the weave by one Diff
+//!   weave.current(alloc)     -- the lines present now, in document order
+//!   weave.merge(alloc, w)    -- one weave from two, by union and max
+//!   weave.to_v1(alloc)       -- this weave written back as an elder record
+//!   Weave.from_v2(alloc, rec) -- a wide v2 record, read back as its weave
+//!   weave.to_v2(alloc)       -- this weave written as a wide v2 record
+//!   Weave.from_order_record(alloc, rec) -- a stamped record, order key and all, read back
+//!   weave.to_order_record(alloc)       -- this weave written as a stamped record
+//!   weave.annotate(alloc, w) -- what each side did, one Note per position
+//!
+//! The fields of `Diff`, the one value a caller builds by hand. This list is
+//! read against the struct's own declarations by the same scan, in both
+//! directions, because the head went on calling the insert anchor undone for
+//! hours after `after` landed -- a field arriving is exactly when the head
+//! goes stale, and nothing here was reading it:
+//!   Diff.site     -- whose edit this is, stamped on every insert
+//!   Diff.inserts  -- text of the new lines, in order
+//!   Diff.deletes  -- identities of the lines to remove
+//!   Diff.replaces -- per insert, the line it stands in for, or null
+//!   Diff.after    -- per insert, the kept line it follows, or null
+//!
+//! The fields of `Place`, the order every sort in this module reads. This list
+//! is read against the struct's own declarations by the same scan, in both
+//! directions, and it is a LIST rather than the sentence above because that is
+//! what an instrument can read. The sentence named three keys, `ord` landed as
+//! a fourth, and the lap that repaired four other stale records of this module
+//! passed over it -- the scan read the head's enumerations and this claim was
+//! prose:
+//!   Place.run  -- which apply stamped this line; edits sort by this first
+//!   Place.site -- whose hand made that edit, settling the tie once per run
+//!   Place.ord  -- the order key a replacement inherits from the line it stands in for
+//!   Place.pos  -- the fresh position, breaking the last tie by name alone
+//!
+//! Part of Mantra -- TAME-first from line one.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+
+/// The largest number of lines one weave holds -- and, from `20260912`, the
+/// ceiling its two COUNTERS stand under as well. The elder reading bounded the
+/// count and left the numbers those lines are named by free to the width of a
+/// u32, so a record carrying one line at position 4,294,967,295 passed every
+/// check and overflowed the next rise. One bound, said in two units: a position
+/// rises once per line and a run once per inserting edit, and `merge` takes the
+/// maximum of two counters rather than their sum, so a weave inside the line
+/// bound is inside the counter bound by construction.
+///
+/// This is the ceiling both `apply` and `merge` read before they allocate
+/// anything. A weave keeps every line a
+/// file has ever held, so its natural size is the whole history rather than the
+/// current length; a million lines stands far above any history this tree has
+/// written, and is small enough that the refusal arrives long before the
+/// machine is in trouble.
+pub const max_weave_lines: u32 = 1 << 20;
+
+/// What a weave refuses, by name. Each refusal is read at the edge -- before an
+/// allocation is made, rather than after one has grown.
+pub const WeaveError = error{
+    /// Two weaves hold one LineId with different text. An identity names a
+    /// line for all time, and it carries the site that issued it, so this now
+    /// says one site handed one identity to two different lines -- a replayed
+    /// counter or a forged weave, rather than the ordinary parting of two
+    /// branches, which the site distinguishes. Merging them would keep one
+    /// line while silently dropping the other, the single outcome a weave
+    /// exists to prevent. Refusing here is what keeps the history whole.
+    PositionTextDisagrees,
+    /// The weave would pass max_weave_lines -- by a diff's inserts in `apply`,
+    /// or by the union of two weaves in `merge`.
+    TooManyLines,
+    /// An elder v1 record handed to `from_v1` carries its rows out of order,
+    /// or twice at one position. The record's own writer appends in position
+    /// order off a counter that only rises, so a record that does not rise is
+    /// a hand-edited or truncated blob rather than one Mantra wrote -- and
+    /// lifting it would hand `current` a list whose document order was already
+    /// broken, which that read asserts rather than tidies.
+    V1PositionsDoNotRise,
+    /// An elder v1 row carries generation zero. Zero is reserved by this module
+    /// -- every line starts at generation 1, and zero is what an unseen
+    /// position reads as -- so a row claiming it would lift as a line that
+    /// predates the weave holding it.
+    V1GenerationBelowOne,
+    /// A weave handed to `to_v1` carries a line from a site other than
+    /// `v1_site`. The elder record has three fields and no place to say whose
+    /// hand wrote a line, so two lines a merge kept apart by their sites would
+    /// come back as one row -- the single outcome a weave exists to prevent. A
+    /// history two hands have written is wider than the format, and saying so
+    /// is the only honest answer.
+    V1SiteNotConstant,
+    /// A `mantra-weave-v2` row carries generation zero. The floor belongs to
+    /// the module rather than to the format -- every line starts at generation
+    /// 1, and zero is what an unseen position reads as -- so this says of the
+    /// wide record exactly what `V1GenerationBelowOne` says of the elder one.
+    /// Two names rather than one shared name because a refusal names the record
+    /// its reader was reading, and the two readers share no helper that could
+    /// carry one name without an error passed in.
+    V2GenerationBelowOne,
+    /// A `mantra-weave-v2` record's rows do not rise strictly in place order.
+    /// `to_v2` writes them in the weave's own order, which `apply`, `merge` and
+    /// `from_v1` all leave strictly rising, so a record that does not rise is a
+    /// hand-edited or truncated blob rather than one Mantra wrote -- and lifting
+    /// it would hand `current` a list whose document order was already broken,
+    /// which that read asserts rather than tidies. The elder twin is
+    /// `V1PositionsDoNotRise`, and the two are different readings because
+    /// position order stopped being document order the moment a second site
+    /// could hold a line.
+    V2PlaceOrderNotRising,
+    /// A `mantra-weave-v2` record names one line twice -- two rows sharing a
+    /// `(pos, site)` identity. The elder record ruled this out for free: its
+    /// positions rise and its site is constant, so a rising record could not
+    /// repeat a name. A wide record's rows rise in PLACE order, and place reads
+    /// the run first, so two rows may rise strictly and still carry one identity
+    /// between them. An identity names a line for all time; a record holding one
+    /// twice would make a later merge keep one line and drop the other, the
+    /// single outcome a weave exists to prevent.
+    V2IdentityRepeated,
+    /// A `mantra-weave-v2` record holds a line at or above one of the two
+    /// counters its header carries. The weave's own declared invariants are
+    /// `pos < next_pos` and `run < next_run`, and a record breaking either would
+    /// hand the next edit a number some line already answers to -- a second line
+    /// born with a name that is taken. Read at the edge rather than asserted,
+    /// since a record arrives from disk where no caller vouched for it.
+    V2CounterBelowLine,
+    /// A weave's position or run counter would stand at or above
+    /// `max_weave_lines`. The elder bound counts LINES and says nothing about
+    /// the numbers those lines are named by, so a record could carry one line
+    /// at position 4,294,967,295 and pass every reading -- and the next rise of
+    /// the counter is then an integer overflow rather than a refusal. A lawful
+    /// weave can never reach here: a position comes off a counter that rises
+    /// once per line, a run off one that rises once per inserting edit, and
+    /// `merge` takes the MAXIMUM of two counters rather than their sum, so
+    /// every counter in a weave standing inside the line bound stands inside
+    /// this one too. What arrives past it is a forged or corrupted record,
+    /// which is the class `V1PositionsDoNotRise` and `V2CounterBelowLine`
+    /// already name -- this is the third reading of the same blob, and until
+    /// `20260912` it was the one that aborted the process instead of speaking.
+    CounterPastCeiling,
+    /// A diff names one line twice among its deletes. Every target must name a
+    /// line the weave holds, and a weave holds one line per identity -- so two
+    /// targets sharing an identity name one line, and bumping its generation
+    /// twice would carry a deleted line from even back to odd and resurrect it.
+    /// `diff` cannot build this: it walks the old document once and writes one
+    /// identity per line it drops. What arrives here is a hand-built or a
+    /// concatenated diff, which is a caller's data rather than a weave's
+    /// corruption -- and until `20260912` it aborted the process on the
+    /// distinctness assert instead of speaking.
+    DeleteNamesOneLineTwice,
+    /// A diff names a line this weave does not hold. A delete carries an
+    /// identity rather than a position, so a target the weave never issued is
+    /// not a stale number -- it is a change against a document this weave is
+    /// not. Applying the rest and reporting success would say a line went away
+    /// that was never there.
+    DeleteNamesNoLine,
+    /// A diff names a line this weave already holds as gone. Parity is the
+    /// tombstone here, so a second delete would bump an even generation to odd
+    /// and bring the line back -- the exact inverse of what was asked for. This
+    /// is the ordinary shape of a STALE diff rather than a corrupt one: two
+    /// branches drop the same line, one side's diff is applied to a weave the
+    /// other's has already reached, and the target is gone before it arrives.
+    /// That is the case a version store exists to meet, which is why it is
+    /// refused by name rather than asserted.
+    DeleteNamesGoneLine,
+};
+
+/// What names a line for all time: the position one counter handed it, and the
+/// site of the hand that was counting.
+///
+/// Either half alone is ambiguous across two weaves. A position counter runs
+/// inside one weave, so two weaves that parted hand the same small integer to
+/// different lines; a site names a hand and says nothing about where in the
+/// document its line sits. Together they are unique by construction rather
+/// than by coordination, because no two sites share a counter.
+pub const LineId = struct {
+    pos: u32,
+    site: u32,
+
+    /// Whether two identities name one line -- the equality reading of the
+    /// single order below.
+    pub fn eq(self: LineId, other: LineId) bool {
+        return self.order(other) == .eq;
+    }
+
+    /// Where one identity falls against another, by its own two fields.
+    ///
+    /// This is an order over NAMES rather than the document order -- it exists
+    /// so a caller holding identities alone can put them in a stable sequence.
+    /// Where a line sits in the document is `Place.less_than`, which reads the
+    /// run as well; the two were one function until `20260907`, and the seam
+    /// between them is what the interleave cost.
+    ///
+    /// It answers a three-way `Order` rather than a bool because a binary
+    /// search needs to know which side it landed on, and a sort needs only
+    /// less-than. Writing the comparison once and deriving the second reading
+    /// from it is what keeps a sorted list and a search over that list from
+    /// ever disagreeing about where a name sits.
+    pub fn order(self: LineId, other: LineId) std.math.Order {
+        if (self.pos != other.pos) return std.math.order(self.pos, other.pos);
+        return std.math.order(self.site, other.site);
+    }
+
+    /// Whether one identity sorts before another -- the sort's reading of the
+    /// single order above.
+    pub fn less_than(self: LineId, other: LineId) bool {
+        return self.order(other) == .lt;
+    }
+};
+
+/// Where a line sits in the document: which edit placed it, whose edit that
+/// was, and where inside that edit it fell.
+///
+/// IDENTITY AND ORDER ARE TWO QUESTIONS, and one type answering both is what
+/// let two branches' inserts interleave. `LineId` answers *which line is this*;
+/// `Place` answers *where does it go*. Reading the pair as an order sorted by
+/// position first, so two sides that each appended THREE lines from a shared
+/// counter alternated line for line -- left, right, left, right -- because
+/// their positions coincided one for one and the site broke each tie
+/// separately. The run is what holds a hand's own paragraph together: every
+/// line of one `apply` carries one run number, so the whole block sorts as a
+/// block and the site tie is broken ONCE, for the run, rather than at each
+/// line inside it.
+///
+/// The three fields are read in the order that makes each of those promises:
+///
+///   run  -- which edit. Runs are handed out by a monotone counter, so an
+///           edit made before another sorts before it, and every line the two
+///           sides inherited from a common ancestor keeps its exact place.
+///   site -- whose edit. Two runs that share a number are concurrent by
+///           construction, since a counter advances for each edit it sees; the
+///           site orders them the same way on both sides.
+///   pos  -- where inside the edit. Positions rise within one `apply`, so a
+///           hand's lines keep the order that hand wrote them in.
+pub const Place = struct {
+    run: u32,
+    site: u32,
+    pos: u32,
+    /// WHERE THE LINE GOES, asked apart from WHO IT IS (REDS %680, on the maintainer's
+    /// word `20260916`: a replacement inherits the place of the line it
+    /// replaces). `pos` and `site` together are the identity, so a replacement
+    /// inheriting them would answer to the name of the line it replaced -- a
+    /// collision this weave forbids, and one probed three ways before this
+    /// field was added. `ord` is the order key alone: a replacement takes the
+    /// `ord` of the line it replaces and keeps its own fresh `pos`, so it sorts
+    /// where that line sat while naming itself.
+    ///
+    /// Every line written before this field carried `ord == pos`, which is what
+    /// `from_v2` lifts it to, so the order below reads every elder weave exactly
+    /// as it read before.
+    ord: u32,
+
+    /// Document order, written once, because every sort and every ordering
+    /// assert in this module reads it -- and an order spelled at each call site
+    /// is an order those call sites may come to disagree about, which for a
+    /// merge would mean two sides computing two documents from one history.
+    pub fn less_than(self: Place, other: Place) bool {
+        if (self.run != other.run) return self.run < other.run;
+        // THE SITE STILL COMES SECOND, and a first draft of this change put the
+        // order key here instead. The merge witness refused it within the hour,
+        // for the reason this file already carried: two branches taken from one
+        // base draw the SAME positions from the shared counter, so they carry
+        // the same `ord` too -- and ordering by `ord` before `site` alternates
+        // their paragraphs line for line, which is the interleaving the run was
+        // introduced to end. A probe over one-site-per-run data had said the
+        // swap was free; that data never held two sites in one run, which is
+        // exactly and only what a merge makes.
+        if (self.site != other.site) return self.site < other.site;
+        // The order key decides inside a block, where the position used to. On
+        // every line written before this field they are the same number, so this
+        // reads every elder weave exactly as it read before -- and a REPLACEMENT
+        // is the one line where they differ, carrying the `ord` of the line it
+        // replaces with a position of its own.
+        if (self.ord != other.ord) return self.ord < other.ord;
+        // The identity breaks the last tie, and a replacement is exactly when
+        // that tie happens: it shares the `ord` of the line it replaces and is
+        // told apart by the fresh position it drew. A total order needs an
+        // answer here, and the name is the only thing left that differs.
+        return self.pos < other.pos;
+    }
+};
+
+/// One row of the elder `mantra-weave-v1` record: the three fields the CLI
+/// seed writes to disk, in the order it writes them.
+///
+/// The record predates the pair identity and the run. It was written by ONE
+/// hand -- `mantra/src/main.rye` is a single-site CLI whose `apply` reads its
+/// positions off one counter -- so every line it ever wrote belongs to one site
+/// and one block, and the two fields the record does not carry are not missing
+/// from it. They are constant across it, which is a different thing and the
+/// whole reason `from_v1` is a lift rather than a migration.
+pub const V1Row = struct {
+    text: []const u8,
+    gen: u32,
+    pos: u32,
+};
+
+/// The site every line of an elder v1 record carries once lifted.
+///
+/// Zero rather than a fresh number on purpose: the record holds the whole
+/// history of one hand, so naming that hand `0` makes the elder document the
+/// first site of every weave that will ever descend from it, and a second hand
+/// merging into it takes a site of its own. Two elder records lifted and merged
+/// would share this site, and that is honest -- two histories written by one
+/// CLI on one disk are two edits of one hand, and the merge refuses by name if
+/// they ever disagree about a line.
+pub const v1_site: u32 = 0;
+
+/// The run every line of an elder v1 record carries once lifted, and the reason
+/// the lifted weave hands out `1` next.
+///
+/// The whole elder document is ONE block: it was written before runs existed,
+/// so nothing inside it distinguishes one edit from another, and `Place`
+/// ordering over a constant run and a constant site reduces to position order
+/// -- which is exactly what the elder reader already did. Giving the next edit
+/// run 1 is what keeps that block whole: a later hand's lines sort after every
+/// line the record held, rather than interleaving with them at the site tie.
+pub const v1_run: u32 = 0;
+
+
+/// One row of the wide `mantra-weave-v2` record: the five fields a line
+/// actually carries, where the elder record held three.
+///
+/// The two fields the elder record left out are the two a merge creates. A
+/// site names the hand that wrote a line, and until two hands could meet in one
+/// history there was only ever one; a run names the edit a line arrived in, and
+/// until lines could arrive out of position order the position said it. `merge`
+/// makes both real, so the record that holds a merged history holds five.
+pub const V2Row = struct {
+    text: []const u8,
+    gen: u32,
+    pos: u32,
+    site: u32,
+    run: u32,
+
+    /// What names this row for all time -- the same pair `Line.id` reads, so a
+    /// record and the weave it came from name their lines identically.
+    pub fn id(self: V2Row) LineId {
+        return .{ .pos = self.pos, .site = self.site };
+    }
+
+    /// Where this row sits in the document -- the same triple `Line.place`
+    /// reads, so the order a record is written in is the order it is read in.
+    pub fn place(self: V2Row) Place {
+        // A v2 row predates the order key, and every line it holds was placed by
+        // the monotone counter, so its order IS its position.
+        return .{ .run = self.run, .site = self.site, .pos = self.pos, .ord = self.pos };
+    }
+};
+
+/// A whole `mantra-weave-v2` record: the rows, and the two counters the weave
+/// they came from was standing at.
+///
+/// THE COUNTERS ARE WRITTEN DOWN RATHER THAN DERIVED, and the reason is not
+/// that deriving them fails. It does not, and that was worth checking before
+/// this field existed: `apply` advances `next_pos` once per line placed and
+/// `next_run` once per edit that placed one, and `merge` takes the maximum of
+/// two sides while dropping no line, so the side holding the higher counter
+/// also contributes the line just below it. Every weave this module can build
+/// therefore stands at exactly one above its highest position and one above its
+/// highest run -- which is why `from_v1` may read `next_pos` off the last row.
+/// The witness measures that equality across a lifted weave, an edited one and
+/// a merged one rather than leaving it argued here.
+///
+/// What the record declines to inherit is the tightness. The weave's own
+/// declared invariants are `pos < next_pos` and `run < next_run` -- upper
+/// bounds rather than equalities -- so a record deriving its counters would
+/// bind every future reading to an equality the module never promised, and an
+/// operation that one day left a counter a step higher would come back having
+/// spent a name twice. Two numbers cost one line of the record and buy
+/// independence from an accident. `from_v2` reads the bound the weave actually
+/// declares and refuses a counter standing at or below a line the record holds.
+/// One row of a `mantra-weave-20260916.101910` record: the five fields v2 wrote, and the
+/// order key beside them (REDS %680, on the maintainer's word `20260916`).
+///
+/// V3 EXISTS BECAUSE A REPLACEMENT CANNOT ROUND-TRIP THROUGH V2. A v2 row has
+/// no order key, so `V2Row.place` reads the position for it -- true of every
+/// line placed by the monotone counter, and false of the one line that inherits
+/// where it goes. Writing a replacement into v2 and reading it back would put
+/// it at the end of the document, which is the fault the order key was added to
+/// end. The record grows one field rather than the weave losing the repair.
+pub const OrderRow = struct {
+    text: []const u8,
+    gen: u32,
+    pos: u32,
+    site: u32,
+    run: u32,
+    ord: u32,
+
+    /// What names this row for all time -- the same pair `Line.id` reads.
+    pub fn id(self: OrderRow) LineId {
+        return .{ .pos = self.pos, .site = self.site };
+    }
+
+    /// Where this row sits, order key and all, so a record written in document
+    /// order is read back in document order.
+    pub fn place(self: OrderRow) Place {
+        return .{ .run = self.run, .site = self.site, .pos = self.pos, .ord = self.ord };
+    }
+};
+
+/// A whole `mantra-weave-20260916.101910` record: the rows, and the two counters the weave
+/// they came from was standing at. The counters are unchanged from v2; only the
+/// row grew.
+pub const OrderRecord = struct {
+    rows: []const OrderRow,
+    next_pos: u32,
+    next_run: u32,
+};
+
+/// The count of fields one `mantra-weave-20260916.101910` row publishes, stated
+/// once so a comparison, a witness, and a reader are all checked against the
+/// same number rather than three hand-spelled copies of it.
+pub const order_row_fields = 6;
+
+/// The count of fields a whole `mantra-weave-20260916.101910` record publishes:
+/// the rows and the two counters.
+pub const order_record_fields = 3;
+
+/// Compare two record rows field for field, over the type's own published field
+/// list.
+///
+/// WHY THE WHOLE ROW RATHER THAN A FIELD. A round trip proves nothing about the
+/// fields it never reads, and this record's mapping is hand-spelled four times
+/// over six fields -- named-field initializers in `to_order_record` and
+/// `from_order_record`, and positional `bufPrint` and `splitScalar` in
+/// `main.rye`. A writer and a reader that agree on how many fields a row
+/// carries and disagree on which value goes in which keeps the arity, renders
+/// an identical document in a store where `site` is constant zero, and passes a
+/// header check, a field count, and a document comparison alike. The sibling
+/// lesson is one file over: `receipt_offer.rye` reads the whole fact for the
+/// same reason, and `receipt_refusal_witness.rye` says in its own comment that
+/// rendering the whole line rather than one field is deliberate.
+///
+/// WRITTEN ONCE, GENERIC OVER THE ROW TYPE, because a rule copied per record is
+/// a rule the records may come to disagree about -- the shape two peer lanes are
+/// sweeping out of `glow/` the hour this landed.
+///
+/// A field type this comparison does not state reaches a `compileError` naming
+/// it, so publishing a field without a stated comparison stops the build rather
+/// than passing unread.
+pub fn row_eql(comptime T: type, a: T, b: T) bool {
+    inline for (@typeInfo(T).@"struct".fields) |field| {
+        const lhs = @field(a, field.name);
+        const rhs = @field(b, field.name);
+        switch (@typeInfo(field.type)) {
+            .pointer => |p| {
+                if (p.child != u8) @compileError("record field '" ++ field.name ++ "' publishes no stated comparison");
+                if (!std.mem.eql(u8, lhs, rhs)) return false;
+            },
+            .int => if (lhs != rhs) return false,
+            else => @compileError("record field '" ++ field.name ++ "' publishes no stated comparison"),
+        }
+    }
+    return true;
+}
+
+/// Compare two whole `mantra-weave-20260916.101910` records: both counters, the
+/// row count, and every field of every row.
+///
+/// The counters are compared because they are written down rather than derived
+/// (see `OrderRecord`), so a round trip that lost one would hand back a weave
+/// standing at the wrong next position while every line read correctly.
+pub fn order_record_eql(a: OrderRecord, b: OrderRecord) bool {
+    // invariant: the published field set stays the size this comparison covers,
+    // so a field joining the record moves this number rather than passing unread.
+    comptime assert(@typeInfo(OrderRecord).@"struct".fields.len == order_record_fields);
+    // invariant: a row's published field set stays the size `row_eql` walks, and
+    // the count the witness reads is the struct's own.
+    comptime assert(@typeInfo(OrderRow).@"struct".fields.len == order_row_fields);
+    if (a.next_pos != b.next_pos) return false;
+    if (a.next_run != b.next_run) return false;
+    if (a.rows.len != b.rows.len) return false;
+    for (a.rows, b.rows) |left, right| {
+        if (!row_eql(OrderRow, left, right)) return false;
+    }
+    return true;
+}
+
+pub const V2Record = struct {
+    rows: []const V2Row,
+    next_pos: u32,
+    next_run: u32,
+};
+
+/// A single line in the weave. Once added, its identity is permanent.
+///
+/// Invariants:
+///   gen >= 1         -- zero is reserved; every line starts at generation 1
+///   gen is odd       <->  line is currently present
+pub const Line = struct {
+    text: []const u8,
+    gen: u32,
+    pos: u32,
+    site: u32,
+    run: u32,
+    /// The order key, apart from the identity `pos` and `site` spell. See
+    /// `Place.ord`. A line this weave wrote before the v3 record carries
+    /// `ord == pos`.
+    ord: u32,
+
+    /// What names this line in every weave that will ever hold it.
+    ///
+    /// The run stays OUT of the identity on purpose. A position comes from a
+    /// counter that never repeats inside one weave, so `(pos, site)` is already
+    /// unique by construction, and a third field would name the same line twice
+    /// over -- which is exactly the kind of redundancy a merge can find itself
+    /// disagreeing with.
+    pub fn id(self: Line) LineId {
+        return .{ .pos = self.pos, .site = self.site };
+    }
+
+    /// Where this line sits in the document.
+    pub fn place(self: Line) Place {
+        return .{ .run = self.run, .site = self.site, .pos = self.pos, .ord = self.ord };
+    }
+};
+
+/// An edit to a weave: who is making it, a set of lines to insert (with their
+/// text), and a set of lines to delete (by identity). Inserts arrive in the
+/// order they should appear; deletes name currently-present lines.
+///
+/// The site sits here rather than on Weave on purpose. A weave is a shared
+/// history that several hands merge into one; an edit is the act of one hand.
+/// Holding the site on the weave would make it a field a merge has to
+/// reconcile, and there is no honest answer to whose history a merged history
+/// is -- so the question is never asked.
+pub const Diff = struct {
+    site: u32,                   // whose edit this is; stamped on every insert
+    inserts: []const []const u8, // text of new lines, in order
+    deletes: []const LineId,     // identities of lines to remove
+    /// For each insert, the line it REPLACES, or null when it replaces nothing
+    /// (REDS %680, on the maintainer's word `20260916`). Parallel to `inserts`, one
+    /// entry each, so the two are read together and cannot drift apart.
+    ///
+    /// The elder diff said WHAT arrived and WHICH names left, with nothing
+    /// linking them, so `apply` could not tell a replacement from an insert
+    /// standing beside an unrelated delete -- and a replacement that cannot be
+    /// named cannot inherit a place. An empty slice means every insert is fresh,
+    /// which is what a caller building a Diff by hand gets.
+    replaces: []const ?LineId = &.{},
+    /// For each insert, the kept line it FOLLOWS, or null when it opens the
+    /// document (REDS %689). Parallel to `inserts`, one entry each.
+    ///
+    /// A replacement inherits the place of the line it replaces; an ordinary
+    /// insert has no such line, so it takes the place of the line it comes
+    /// after and sorts just past it on the position tiebreak. Without an anchor
+    /// every insert drew a fresh order key from a counter that only rises, which
+    /// is why a middle insert landed at the end of the document.
+    after: []const ?LineId = &.{},
+};
+
+/// What the two sides did at one position, in a single word.
+///
+/// The five readings are exhaustive over two generation counts, which is why
+/// `Note.reading` needs no default arm: either exactly one side has seen the
+/// position, or both have and their counts are equal, or both have and one
+/// stands higher.
+pub const Reading = enum {
+    /// Only the left weave has ever seen this line, so the left is the side
+    /// that added it and the right has not met it yet. Two branches that each
+    /// inserted read as one left_only and one right_only, rather than as a
+    /// collision, because the two lines carry different sites.
+    left_only,
+    /// The mirror: only the right weave has seen it.
+    right_only,
+    /// Both hold the position at the same count, so neither side has touched
+    /// it since they parted. Parity says whether that shared state is present
+    /// or gone.
+    agreed,
+    /// Both have seen it and the left's count stands higher, so the left is
+    /// the side that acted last. `present_left` says whether the act left the
+    /// line present or gone.
+    left_moved,
+    /// The mirror: the right acted last.
+    right_moved,
+};
+
+/// One line, read from both sides: what each weave holds at that identity, and
+/// what a merge of the two lands on.
+///
+/// A generation of **zero** means that side has never seen this position. Zero
+/// is already reserved by the module -- every line starts at generation 1 --
+/// and zero is also even, so an unseen position reads as not-present through
+/// the same parity test every other reading uses, with no special case
+/// anywhere.
+///
+/// The merged generation is derived rather than stored. Holding a third count
+/// beside the two it comes from would let the story and the merge drift into
+/// two answers, and a story that can disagree with the thing it describes is
+/// worse than no story.
+pub const Note = struct {
+    pos: u32,
+    site: u32,
+    run: u32,
+    /// The order key of the line this note is about, carried so the note sorts
+    /// the way the merge sorts. See `Place.ord`. A note that ordered by position
+    /// where the merge orders by `ord` would be a story about a different
+    /// document, which is the fault this whole field exists to prevent.
+    ord: u32,
+    left_gen: u32,
+    right_gen: u32,
+
+    /// The line this note is about, named the way merge names it.
+    pub fn id(self: Note) LineId {
+        return .{ .pos = self.pos, .site = self.site };
+    }
+
+    /// Where the line this note is about sits, ordered the way merge orders it.
+    /// A reading that sorted differently from the merge it describes would be a
+    /// story about a different document.
+    pub fn place(self: Note) Place {
+        return .{ .run = self.run, .site = self.site, .pos = self.pos, .ord = self.ord };
+    }
+
+    /// The generation a merge of the two sides lands on at this position --
+    /// the same `@max` the merge itself takes, read from the same two counts.
+    pub fn gen(self: Note) u32 {
+        // invariant: a note names a position at least one side has seen, which
+        // is the same precondition `reading` states -- said here too because
+        // this is the other reader of the same two counts, and a note neither
+        // side has seen would answer zero rather than refusing
+        assert(self.left_gen != 0 or self.right_gen != 0);
+        const merged = @max(self.left_gen, self.right_gen);
+        // invariant: the answer is a real generation, so a caller may compare
+        // it against a weave's counts without first asking whether it is the
+        // reserved zero
+        assert(merged >= 1);
+        // A third and fourth assert -- that `merged` stands at or above each
+        // count -- were written here and taken out the same lap. `@max` is on
+        // the line above, so both are tautologies the compiler folds, and an
+        // assert that cannot fail teaches a reader that the ones beside it
+        // might not either. The two kept are derived rather than restated: the
+        // precondition is about the CALLER, and `merged >= 1` follows from it
+        // rather than from the max.
+        return merged;
+    }
+
+    /// Whether the left side holds this line present. Parity is the tombstone,
+    /// and zero is even, so a side that never saw the position answers false.
+    pub fn present_left(self: Note) bool {
+        return self.left_gen % 2 == 1;
+    }
+
+    /// The mirror, for the right side.
+    pub fn present_right(self: Note) bool {
+        return self.right_gen % 2 == 1;
+    }
+
+    /// The story at this position in one word.
+    pub fn reading(self: Note) Reading {
+        // invariant: a note names a position at least one side has seen, since
+        // a position neither weave holds never enters the union at all
+        assert(self.left_gen != 0 or self.right_gen != 0);
+        if (self.right_gen == 0) return .left_only;
+        if (self.left_gen == 0) return .right_only;
+        if (self.left_gen == self.right_gen) return .agreed;
+        // invariant: both counts are real and they differ, so exactly one side
+        // stands higher and the two arms below name it rather than falling
+        // through to a default that would hide a fourth case
+        assert(self.left_gen != self.right_gen);
+        if (self.left_gen > self.right_gen) return .left_moved;
+        return .right_moved;
+    }
+};
+
+/// Where a search key falls against a line, read through the identity's own
+/// single order. Named at file scope because both folds -- the merge's and the
+/// reading's -- search the same way, and one comparison spelled twice is
+/// exactly the drift a shared function cannot have.
+fn search_by_id(key: LineId, item: Line) std.math.Order {
+    return key.order(item.id());
+}
+
+/// Where an identity falls against an identity -- the same order, read over a
+/// slice of NAMES rather than of lines.
+///
+/// `apply` searches its own delete targets rather than the weave, because a
+/// merged weave comes back in place order and place order is not identity
+/// order. The small side is the one that can be sorted, so the search reads a
+/// slice of LineId and this is its comparison.
+fn search_by_name(key: LineId, item: LineId) std.math.Order {
+    return key.order(item);
+}
+
+/// Copy lines into a caller-owned slice of exactly their count.
+///
+/// Named rather than reached for through `@memcpy`, per the module family's
+/// own rule, and asserted on both sides so a scratch slice sized from one
+/// count can never be filled from another.
+fn copy_lines(into: []Line, from: []const Line) void {
+    // invariant: the destination holds exactly the source's count, since a
+    // shorter one would drop lines a later search would then never find
+    assert(into.len == from.len);
+    for (from, 0..) |line, i| into[i] = line;
+}
+
+/// Put a slice of lines in identity order -- the order both folds search in.
+///
+/// Strictness is asserted rather than assumed. A weave holds each identity
+/// once, so a sorted slice of one weave's lines rises strictly; a slice that
+/// merely did not fall would mean two lines answering to one name, and a
+/// binary search over it could return either.
+fn sort_by_id(lines: []Line) void {
+    std.mem.sort(Line, lines, {}, struct {
+        fn less_than(_: void, a: Line, b: Line) bool {
+            return a.id().less_than(b.id());
+        }
+    }.less_than);
+    for (lines, 0..) |line, i| {
+        // invariant: identities strictly increase, which is what makes the
+        // search below return the one line that carries the name it was given
+        if (i + 1 < lines.len) assert(lines[i].id().less_than(lines[i + 1].id()));
+        _ = line;
+    }
+}
+
+/// A Weave: the living history of a text stream.
+///
+/// Invariant: for all i < lines.items.len:
+///   lines.items[i].gen >= 1
+///   lines.items[i].pos < next_pos
+///   lines.items[i].run < next_run
+///   gen counts are non-decreasing across successive apply calls
+pub const Weave = struct {
+    lines: std.ArrayListUnmanaged(Line),
+    next_pos: u32,
+    /// The number the next edit's run will be stamped with. It counts EDITS
+    /// where `next_pos` counts LINES, and the two advance at different rates on
+    /// purpose: one `apply` inserting three lines takes one run and three
+    /// positions, which is what makes the three sort as one block.
+    next_run: u32,
+
+    /// An empty weave -- no history yet.
+    pub fn empty() Weave {
+        return .{ .lines = .empty, .next_pos = 0, .next_run = 0 };
+    }
+
+    /// Read an elder `mantra-weave-v1` record as a weave of one hand.
+    ///
+    /// WHAT THIS ANSWERS. `mantra/src/main.rye` declares its own three-field
+    /// `Line` and writes `{gen}\t{pos}\t{text}` rows to `.mantra/`. The module
+    /// here widened past it -- a line is named by a pair and placed by a triple
+    /// -- and the two models have stood apart since, one guard holding the
+    /// disagreement under a ceiling (REDS %589). The open question was whether
+    /// closing that gap breaks the record already on disk. It does not, and
+    /// this function is the reason stated as code: the elder record is a
+    /// weave whose site and run happen to be constant, so it lifts rather
+    /// than converts, and every byte on disk reads the same document after.
+    ///
+    /// WHY DOCUMENT ORDER SURVIVES, which is the claim worth checking rather
+    /// than believing. `Place.less_than` reads run, then site, then position.
+    /// Hold the first two constant and it reduces to `pos <` -- which is
+    /// exactly the comparison the elder reader sorts by. So the lifted weave's
+    /// `current` returns the elder `current`'s sequence, line for line, with no
+    /// sort in the middle to disagree about.
+    ///
+    /// WHY IDENTITY SURVIVES. The elder writer hands out positions off one
+    /// counter that only rises, so no two rows of a record it wrote share a
+    /// position; pairing each with the one site makes `(pos, v1_site)` unique
+    /// by the same construction the module already relies on.
+    ///
+    /// The rows arrive in the record's own order and are NOT sorted here. A
+    /// record whose positions do not rise was not written by that counter, and
+    /// sorting it would hide that -- so it is refused by name, at the edge,
+    /// before a line is allocated. That refusal is the one thing the elder
+    /// reader has never had: `deserialize_weave` appends rows in blob order and
+    /// asks nothing, so a hand-edited blob reaches `current`'s ordering assert
+    /// as a crash rather than an error.
+    ///
+    /// The caller keeps ownership of each row's text; the lifted lines borrow
+    /// it, exactly as `apply` borrows a diff's insert text.
+    ///
+    /// Precondition:  the rows rise strictly by position and each carries a
+    ///   generation of at least one -- both refused by name rather than
+    ///   asserted, since a record is input from disk rather than a caller's
+    ///   promise.
+    /// Postcondition: the weave holds one line per row, in place order, every
+    ///   line at `v1_site` and `v1_run`; `next_pos` stands above every position
+    ///   held and `next_run` at one, so the next edit follows the whole block.
+    pub fn from_v1(allocator: std.mem.Allocator, rows: []const V1Row) !Weave {
+        // The bound is read at the edge, before anything is allocated, so a
+        // record too large to hold is named rather than half-lifted.
+        if (rows.len > max_weave_lines) return WeaveError.TooManyLines;
+
+        // usize lives at the inherited-std seam alone: a slice counts in usize,
+        // and the bound just checked is what makes the cast safe.
+        const row_count: u32 = @intCast(rows.len);
+
+        var next_pos: u32 = 0;
+        var seen_any = false;
+        var previous_pos: u32 = 0;
+        for (rows) |row| {
+            if (row.gen == 0) return WeaveError.V1GenerationBelowOne;
+            // Read BEFORE the counter below rises off this position: the line
+            // that follows is `row.pos + 1`, and at the u32 ceiling that
+            // addition is an overflow rather than a number. A lawful elder
+            // record cannot reach here, since its writer appends one row per
+            // position off a counter that starts at zero and the record stands
+            // inside `max_weave_lines` rows.
+            if (row.pos >= max_weave_lines) return WeaveError.CounterPastCeiling;
+            if (seen_any and row.pos <= previous_pos) return WeaveError.V1PositionsDoNotRise;
+            previous_pos = row.pos;
+            seen_any = true;
+            // A position counter that only rises means the last row carries the
+            // highest position, so the floor for the next line is one above it.
+            next_pos = row.pos + 1;
+        }
+
+        var lifted: Weave = .{ .lines = .empty, .next_pos = next_pos, .next_run = 1 };
+        errdefer lifted.lines.deinit(allocator);
+        try lifted.lines.ensureTotalCapacity(allocator, row_count);
+        for (rows) |row| {
+            lifted.lines.appendAssumeCapacity(.{
+                .text = row.text,
+                .gen = row.gen,
+                .pos = row.pos,
+                // A v1 record predates the order key, and its lines were placed
+                // by the monotone counter, so the order IS the position.
+                .ord = row.pos,
+                .site = v1_site,
+                .run = v1_run,
+            });
+        }
+
+        for (lifted.lines.items, 0..) |line, i| {
+            // invariant: every lifted line stands below the weave's own counter,
+            // which is what lets a later apply hand out a position no line here
+            // already answers to
+            assert(line.pos < lifted.next_pos);
+            // invariant: a generation counts from one, so a lifted line never
+            // predates the weave that now holds it
+            assert(line.gen >= 1);
+            // invariant: every lifted line stands below the weave's run counter as
+            // well as its position counter -- the third of the weave's three declared
+            // counter invariants, said at the third constructor so all three say the
+            // same three things.
+            //
+            // NAME WHAT THIS ASSERT IS NOT: it is a restatement, and no control phase
+            // isolates it. The lift control's `next_run` plant rewrites the counter
+            // from 1 to 0, and the witness's own `lifted.next_run == 1` fires on that
+            // whatever this line does -- proven on `20260908` by running that plant
+            // with this assert removed, which exits 134 either way. It is kept for
+            // uniformity across the constructors rather than for a break it catches
+            // alone, and the merge assert one function over is the opposite case.
+            assert(line.run < lifted.next_run);
+            if (i + 1 < lifted.lines.items.len) {
+                // invariant: the backing list comes out in strictly increasing
+                // place order, which is the precondition `current` asserts --
+                // proven here at the lift rather than discovered there
+                assert(line.place().less_than(lifted.lines.items[i + 1].place()));
+            }
+        }
+
+        return lifted;
+    }
+
+    /// Write this weave back out as an elder `mantra-weave-v1` record.
+    ///
+    /// WHAT THIS ANSWERS, and why `from_v1` alone did not answer it. The lift
+    /// proved that an elder record READS the same after the widening: site and
+    /// run are constant across a record one hand wrote, so `Place.less_than`
+    /// reduces to `pos <` and the lifted document is the elder document. That
+    /// is half of the port. `mantra/src/main.rye` writes the record on every
+    /// commit, so the other half is whether a weave the module has since
+    /// advanced can still be WRITTEN as three fields -- and until both halves
+    /// stand, "the port moves no byte on disk" is a claim about reading wearing
+    /// the clothes of a claim about the record.
+    ///
+    /// WHY THE RUN IS DROPPED RATHER THAN LOST. Every `apply` carrying inserts
+    /// advances `next_run`, so a weave edited after a lift holds several runs
+    /// and the elder record has no field for any of them. It does not need one:
+    /// inside ONE site, `next_run` and `next_pos` both only rise and both are
+    /// read at the same apply, so a line with a higher run always carries a
+    /// higher position. Order by `(run, pos)` and order by `pos` alone are the
+    /// same order over such a weave, which is why the run can be dropped
+    /// without the document moving. The round trip is therefore identity on the
+    /// DOCUMENT and not on the weave -- the runs come back collapsed to
+    /// `v1_run`, and the next edit follows the whole record as one block.
+    ///
+    /// WHAT IT REFUSES, and why each refusal is the record's own limit rather
+    /// than this function's caution. A line carrying a site of its own means a
+    /// second hand has merged in, and the record has no field to tell the two
+    /// apart -- so two lines at one position would come back as one, which is
+    /// the outcome a weave exists to prevent. Positions that do not rise mean
+    /// position order and document order have parted, which happens exactly
+    /// when two records of one site merge; writing the position alone would
+    /// then hand the elder reader a different document. Both are read at the
+    /// edge, over the whole weave, before a row is allocated.
+    ///
+    /// The caller keeps ownership of each line's text; the rows borrow it, the
+    /// same way `from_v1`'s lifted lines borrow the rows'.
+    ///
+    /// Precondition:  every line stands at `v1_site` and the positions rise --
+    ///   both refused by name rather than asserted, since the weave may have
+    ///   reached here through a merge the caller never inspected.
+    /// Postcondition: one row per line, in the weave's own order, every row
+    ///   carrying a generation of at least one and a position above the row
+    ///   before it -- which is exactly what `from_v1` demands of a record, so
+    ///   what this writes is a record that lifts.
+    pub fn to_v1(self: *const Weave, allocator: std.mem.Allocator) ![]const V1Row {
+        // invariant: the weave stands inside its own ceiling, so the record this
+        // writes is bounded by max_weave_lines rather than by whoever calls it
+        assert(self.lines.items.len <= max_weave_lines);
+
+        // Both refusals are read over the whole weave BEFORE anything is
+        // allocated, so a record too wide for the format is named rather than
+        // half-written.
+        var seen_any = false;
+        var previous_pos: u32 = 0;
+        for (self.lines.items) |line| {
+            if (line.site != v1_site) return WeaveError.V1SiteNotConstant;
+            if (seen_any and line.pos <= previous_pos) return WeaveError.V1PositionsDoNotRise;
+            previous_pos = line.pos;
+            seen_any = true;
+        }
+
+        // usize lives at the inherited-std seam alone: a slice counts in usize,
+        // and the ceiling asserted above is what makes the cast safe.
+        const line_count: u32 = @intCast(self.lines.items.len);
+
+        var rows: std.ArrayListUnmanaged(V1Row) = .empty;
+        errdefer rows.deinit(allocator);
+        try rows.ensureTotalCapacity(allocator, line_count);
+        for (self.lines.items) |line| {
+            // invariant: a generation counts from one, so a row this writes never
+            // predates the weave it came out of -- and never trips `from_v1`'s own
+            // reserved-generation refusal on the way back
+            assert(line.gen >= 1);
+            rows.appendAssumeCapacity(.{ .text = line.text, .gen = line.gen, .pos = line.pos });
+        }
+        const result = try rows.toOwnedSlice(allocator);
+
+        // invariant: one row per line, since a record that dropped or invented a
+        // row would make every later reading a reading of a different document
+        assert(result.len == self.lines.items.len);
+        for (result, 0..) |row, i| {
+            // invariant: every row carries a real generation, which is the parity
+            // the record uses as its tombstone
+            assert(row.gen >= 1);
+            if (i + 1 < result.len) {
+                // invariant: the rows rise strictly by position, which is what
+                // `from_v1` demands of a record -- so what this writes lifts
+                assert(row.pos < result[i + 1].pos);
+            }
+        }
+        return result;
+    }
+
+
+    /// Write this weave out as a wide `mantra-weave-v2` record.
+    ///
+    /// WHAT THIS ANSWERS, and it is the half `to_v1` names as beyond it. The
+    /// elder record refuses a second site by name, because three fields have no
+    /// place to say whose hand wrote a line -- and a second site is exactly what
+    /// `merge` produces. So the module could merge two histories and then had
+    /// nowhere to put the result: `mantra/src/main.rye` writes the elder record
+    /// on every commit, and a merged weave handed to it comes back
+    /// `V1SiteNotConstant`. A weave that can merge and cannot be saved is a
+    /// weave that has not finished being one.
+    ///
+    /// THIS FUNCTION REFUSES NOTHING, and the absence is the finding rather than
+    /// an oversight. Every refusal `to_v1` carries is the elder format meeting a
+    /// history wider than three fields; widen the format to the five a line
+    /// actually holds and there is nothing left to refuse. It allocates and
+    /// copies, so it returns an error union for the allocation alone.
+    ///
+    /// The round trip is identity on the WEAVE rather than only on the document,
+    /// which is the other thing `to_v1` could not promise: the runs come back as
+    /// they went, since the record has a field for them, and both counters come
+    /// back exactly rather than derived.
+    ///
+    /// The caller keeps ownership of each line's text; the rows borrow it, the
+    /// same way `to_v1`'s rows and `from_v1`'s lifted lines borrow theirs.
+    ///
+    /// Precondition:  none the caller must meet -- every weave this module can
+    ///   build is a weave this record can hold.
+    /// Postcondition: one row per line, in the weave's own order, every row
+    ///   carrying a generation of at least one and standing under both counters
+    ///   the record carries -- which is exactly what `from_v2` demands, so what
+    ///   this writes lifts.
+    /// Write this weave as a `mantra-weave-20260916.101910` record -- every field a line
+    /// carries, including the order key v2 has no room for.
+    ///
+    /// The same asserts v2 makes, for the same reasons, and one difference that
+    /// is the whole point: the place a row reports reads its own order key, so
+    /// a replacement writes and lifts at the position it inherited.
+    pub fn to_order_record(self: *const Weave, allocator: std.mem.Allocator) !OrderRecord {
+        // invariant: the weave stands inside the ceiling a record may hold, so a
+        // record this writes can always be read back.
+        assert(self.lines.items.len <= max_weave_lines);
+        const line_count: u32 = @intCast(self.lines.items.len);
+        var rows: std.ArrayListUnmanaged(OrderRow) = .empty;
+        errdefer rows.deinit(allocator);
+        try rows.ensureTotalCapacity(allocator, line_count);
+        for (self.lines.items) |line| {
+            // invariant: a generation counts from one, so a row this writes never
+            // predates the weave it came out of.
+            assert(line.gen >= 1);
+            rows.appendAssumeCapacity(.{
+                .text = line.text,
+                .gen = line.gen,
+                .pos = line.pos,
+                .site = line.site,
+                .run = line.run,
+                .ord = line.ord,
+            });
+        }
+        const result = try rows.toOwnedSlice(allocator);
+        // invariant: one row per line, since a record that dropped or invented a
+        // row would make every later reading a reading of a different document.
+        assert(result.len == self.lines.items.len);
+        for (result, 0..) |row, i| {
+            // invariant: every row stands under both counters the header carries.
+            assert(row.pos < self.next_pos);
+            assert(row.run < self.next_run);
+            if (i + 1 < result.len) {
+                // invariant: the rows rise strictly in place order, which is what
+                // `from_order_record` demands of a record -- so what this writes lifts.
+                assert(row.place().less_than(result[i + 1].place()));
+            }
+        }
+        return .{ .rows = result, .next_pos = self.next_pos, .next_run = self.next_run };
+    }
+
+    /// Read a `mantra-weave-20260916.101910` record back into a weave, refusing by name on
+    /// every shape v2 refuses plus nothing new: the order key is a field rather
+    /// than a constraint, and the place order the rows must rise in already
+    /// reads it.
+    pub fn from_order_record(allocator: std.mem.Allocator, record: OrderRecord) !Weave {
+        if (record.rows.len > max_weave_lines) return WeaveError.TooManyLines;
+        if (record.next_pos > max_weave_lines) return WeaveError.CounterPastCeiling;
+        if (record.next_run > max_weave_lines) return WeaveError.CounterPastCeiling;
+        // invariant: the bound just checked is what makes the cast safe.
+        assert(record.rows.len <= max_weave_lines);
+        const row_count: u32 = @intCast(record.rows.len);
+
+        var seen_any = false;
+        var previous: Place = .{ .run = 0, .site = 0, .pos = 0, .ord = 0 };
+        for (record.rows) |row| {
+            if (row.gen == 0) return WeaveError.V2GenerationBelowOne;
+            if (row.pos >= record.next_pos) return WeaveError.V2CounterBelowLine;
+            if (row.run >= record.next_run) return WeaveError.V2CounterBelowLine;
+            if (seen_any and !previous.less_than(row.place())) return WeaveError.V2PlaceOrderNotRising;
+            previous = row.place();
+            seen_any = true;
+        }
+
+        var restored: Weave = .{
+            .lines = .empty,
+            .next_pos = record.next_pos,
+            .next_run = record.next_run,
+        };
+        errdefer restored.lines.deinit(allocator);
+        try restored.lines.ensureTotalCapacity(allocator, row_count);
+        for (record.rows) |row| {
+            restored.lines.appendAssumeCapacity(.{
+                .text = row.text,
+                .gen = row.gen,
+                .pos = row.pos,
+                .ord = row.ord,
+                .site = row.site,
+                .run = row.run,
+            });
+        }
+        // invariant: one line per row, for the same reason `to_order_record` asserts it.
+        assert(restored.lines.items.len == record.rows.len);
+        return restored;
+    }
+
+    pub fn to_v2(self: *const Weave, allocator: std.mem.Allocator) !V2Record {
+        // invariant: the weave stands inside its own ceiling, so the record this
+        // writes is bounded by max_weave_lines rather than by whoever calls it
+        assert(self.lines.items.len <= max_weave_lines);
+
+        // usize lives at the inherited-std seam alone: a slice counts in usize,
+        // and the ceiling asserted above is what makes the cast safe.
+        const line_count: u32 = @intCast(self.lines.items.len);
+
+        var rows: std.ArrayListUnmanaged(V2Row) = .empty;
+        errdefer rows.deinit(allocator);
+        try rows.ensureTotalCapacity(allocator, line_count);
+        for (self.lines.items) |line| {
+            // invariant: a generation counts from one, so a row this writes never
+            // predates the weave it came out of -- and never trips `from_v2`'s own
+            // reserved-generation refusal on the way back
+            assert(line.gen >= 1);
+            rows.appendAssumeCapacity(.{
+                .text = line.text,
+                .gen = line.gen,
+                .pos = line.pos,
+                .site = line.site,
+                .run = line.run,
+            });
+        }
+        const result = try rows.toOwnedSlice(allocator);
+
+        // invariant: one row per line, since a record that dropped or invented a
+        // row would make every later reading a reading of a different document
+        assert(result.len == self.lines.items.len);
+        for (result, 0..) |row, i| {
+            // invariant: every row stands under both counters the header carries,
+            // which is the pair of weave invariants `from_v2` reads back at its edge
+            assert(row.pos < self.next_pos);
+            assert(row.run < self.next_run);
+            if (i + 1 < result.len) {
+                // invariant: the rows rise strictly in place order, which is what
+                // `from_v2` demands of a record -- so what this writes lifts
+                assert(row.place().less_than(result[i + 1].place()));
+            }
+        }
+        return .{ .rows = result, .next_pos = self.next_pos, .next_run = self.next_run };
+    }
+
+    /// Read a wide `mantra-weave-v2` record back as the weave that wrote it.
+    ///
+    /// WHERE THIS DIFFERS FROM THE LIFT. `from_v1` is a lift: it reads a record
+    /// written before the module widened and supplies the two fields that record
+    /// holds constant. This is a restoration -- the record already carries every
+    /// field a line has, and the two counters besides, so the weave that comes
+    /// back is the weave that went in rather than a document that reads the same.
+    ///
+    /// FOUR REFUSALS, and each is a thing the elder record could not get wrong.
+    /// A generation of zero is reserved, the same way the lift reserves it. Rows
+    /// out of place order would hand `current` a list whose document order was
+    /// already broken. Two rows sharing an identity would make a later merge keep
+    /// one line and drop the other -- ruled out for free in a record whose
+    /// positions rise under one site, and a real possibility once place order
+    /// reads the run ahead of the position. And a line at or above either counter
+    /// would let the next edit reissue a name already taken.
+    ///
+    /// THE IDENTITY READING SORTS, and it sorts here rather than through
+    /// `sort_by_id`, whose strictness is an assert. A record arrives from disk,
+    /// where a repeated name is an error to name rather than a caller's broken
+    /// promise to crash on -- so the names are copied out, sorted on their own
+    /// order, and read for an adjacent pair. Cost is one sort of the names beside
+    /// the single walk the other three refusals take.
+    ///
+    /// The caller keeps ownership of each row's text; the restored lines borrow
+    /// it, exactly as `from_v1`'s lifted lines borrow a record's.
+    ///
+    /// Precondition:  the rows rise strictly in place order, name each line once,
+    ///   carry a generation of at least one, and stand under both counters --
+    ///   all four refused by name rather than asserted, since a record is input
+    ///   from disk rather than a caller's promise.
+    /// Postcondition: the weave holds one line per row, in place order, with both
+    ///   counters exactly as the record carried them.
+    pub fn from_v2(allocator: std.mem.Allocator, record: V2Record) !Weave {
+        // The bound is read at the edge, before anything is allocated, so a
+        // record too large to hold is named rather than half-read.
+        if (record.rows.len > max_weave_lines) return WeaveError.TooManyLines;
+        // The counters are read at the same edge and for the same reason: the
+        // row loop below proves every line stands under them, so a header at
+        // the u32 ceiling would restore a weave whose next `apply` overflows.
+        // A counter may stand AT `max_weave_lines` -- that is the number a full
+        // weave's counter reads -- and never above it.
+        if (record.next_pos > max_weave_lines) return WeaveError.CounterPastCeiling;
+        if (record.next_run > max_weave_lines) return WeaveError.CounterPastCeiling;
+
+        // usize lives at the inherited-std seam alone: a slice counts in usize,
+        // and the bound just checked is what makes the cast safe.
+        const row_count: u32 = @intCast(record.rows.len);
+
+        var seen_any = false;
+        var previous: Place = .{ .run = 0, .site = 0, .pos = 0, .ord = 0 };
+        for (record.rows) |row| {
+            if (row.gen == 0) return WeaveError.V2GenerationBelowOne;
+            if (row.pos >= record.next_pos) return WeaveError.V2CounterBelowLine;
+            if (row.run >= record.next_run) return WeaveError.V2CounterBelowLine;
+            if (seen_any and !previous.less_than(row.place())) {
+                return WeaveError.V2PlaceOrderNotRising;
+            }
+            previous = row.place();
+            seen_any = true;
+        }
+
+        // The names are read on their own order, because place order reads the
+        // run first and two rows may therefore rise strictly while carrying one
+        // identity between them.
+        const names = try allocator.alloc(LineId, record.rows.len);
+        defer allocator.free(names);
+        for (record.rows, 0..) |row, i| names[i] = row.id();
+        std.mem.sort(LineId, names, {}, struct {
+            fn less_than(_: void, a: LineId, b: LineId) bool {
+                return a.less_than(b);
+            }
+        }.less_than);
+        for (names, 0..) |name, i| {
+            if (i + 1 < names.len and name.eq(names[i + 1])) {
+                return WeaveError.V2IdentityRepeated;
+            }
+        }
+
+        var restored: Weave = .{
+            .lines = .empty,
+            .next_pos = record.next_pos,
+            .next_run = record.next_run,
+        };
+        errdefer restored.lines.deinit(allocator);
+        try restored.lines.ensureTotalCapacity(allocator, row_count);
+        for (record.rows) |row| {
+            restored.lines.appendAssumeCapacity(.{
+                .text = row.text,
+                .gen = row.gen,
+                .pos = row.pos,
+                // A v2 row predates the order key; its order is its position.
+                .ord = row.pos,
+                .site = row.site,
+                .run = row.run,
+            });
+        }
+
+        for (restored.lines.items, 0..) |line, i| {
+            // invariant: every restored line stands below the weave's position
+            // counter, which is what lets a later apply hand out a position no
+            // line here already answers to
+            assert(line.pos < restored.next_pos);
+            // invariant: a generation counts from one, so a restored line never
+            // predates the weave that now holds it
+            assert(line.gen >= 1);
+            // invariant: every restored line stands below the run counter as well
+            // -- the third of the weave's three declared counter invariants, said
+            // at this constructor as it is said at the other two
+            assert(line.run < restored.next_run);
+            if (i + 1 < restored.lines.items.len) {
+                // invariant: the backing list comes out in strictly increasing
+                // place order, which is the precondition `current` asserts --
+                // proven here at the read rather than discovered there
+                assert(line.place().less_than(restored.lines.items[i + 1].place()));
+            }
+        }
+
+        return restored;
+    }
+
+    /// Advance the weave by one diff. Deletes remove lines by toggling their
+    /// generation to even (gone); inserts append new lines at the current
+    /// generation (1 = first time seen). Position counters are assigned
+    /// monotonically and never reused, and each insert is stamped with the
+    /// diff's site, so the pair the line is named by is unique across every
+    /// weave that will ever hold it.
+    ///
+    /// COST IS LINEAR IN THE WEAVE, which it was not until `20260907`. Both
+    /// halves of this function walked the whole weave once per item the diff
+    /// carried -- each delete searching for its target, each insert asking
+    /// every held line whether it already answered to the new name -- so one
+    /// apply cost |lines| x |diff|. `merge` carried the same shape one function
+    /// over and was repaired the same day; this is its other half.
+    ///
+    /// Measured on this pier, ReleaseSafe -- the checked build a witness
+    /// actually runs -- as three applies in sequence: insert n lines into an
+    /// empty weave, delete half of them by identity, then insert n more.
+    /// Wall time for each apply, walking then reading:
+    ///
+    ///   n = 16,384    insert    83ms -> 10ms
+    ///                 delete    59ms -> under the timer's floor
+    ///                 insert   262ms -> under the timer's floor
+    ///   n = 131,072   insert 5,764ms -> 29ms
+    ///                 delete 2,957ms -> 5ms
+    ///                 insert 16,693ms -> 28ms
+    ///
+    /// The walk rose about 3.9x per doubling, which is the quadratic the shape
+    /// predicts. At **524,288** lines -- half the ceiling -- the first apply
+    /// alone took **109,506ms** walking and takes **97ms** reading, so the
+    /// declared ceiling was again one the operation could not serve. The bound
+    /// did not move; the two loops did.
+    ///
+    /// Two different repairs, because the two halves fail for two reasons.
+    /// The delete pass sorts its own TARGETS and walks the weave once, since a
+    /// merged weave comes back in place order and cannot itself be searched by
+    /// identity; that costs |lines| x log |deletes|. The insert check needed no
+    /// search at all: positions come off a counter that only rises, and the
+    /// weave's own invariant already holds every line below it, so a new
+    /// identity is fresh by construction and one floor read replaces the walk.
+    ///
+    /// THE TWO HALVES DISAGREED ABOUT WHOSE DATA A DIFF IS until `20260912`.
+    /// The insert half read its two bounds at the edge and refused by name;
+    /// the delete half stated the same three conditions and ASSERTED them, so
+    /// a caller handing a stale or hand-built diff met `exit 134` where the
+    /// insert half would have handed back an error. Both halves read one
+    /// argument, and a `Diff` is a caller's data on both of them -- which is
+    /// the reading this module already wrote down for a record arriving from
+    /// disk, one constructor over. All three are refusals now.
+    ///
+    /// Precondition:  every delete names a line the weave holds and that is
+    ///   present (odd gen), and no two deletes name one line -- each refused
+    ///   by its own name, `DeleteNamesNoLine`, `DeleteNamesGoneLine` and
+    ///   `DeleteNamesOneLineTwice`, and all three read BEFORE a generation
+    ///   moves, so a refused apply leaves the weave exactly as it arrived.
+    /// Postcondition: all inserted lines carry gen == 1 and odd (present);
+    ///   all deleted lines carry gen % 2 == 0 (gone).
+    pub fn apply(self: *Weave, allocator: std.mem.Allocator, diff: Diff) !void {
+        // invariant: the weave already stands inside its own ceiling, so the
+        // refusal just below names the diff rather than covering for a weave
+        // that was over the ceiling before this call arrived
+        assert(self.lines.items.len <= max_weave_lines);
+        // invariant: the position counter stands inside the same ceiling, which is
+        // what makes the subtraction below a real number rather than a wrap. Every
+        // constructor holds it -- `empty` at zero, `from_v1` and `from_v2` refusing
+        // past it by name, `merge` taking the max of two that already do
+        assert(self.next_pos <= max_weave_lines);
+        // invariant: and so does the run counter, said separately because the two
+        // rise at different rates -- one per line against one per inserting edit
+        assert(self.next_run <= max_weave_lines);
+
+        // The weave grows by exactly the diff's inserts, so the sum is what the
+        // ceiling reads -- at the edge, before a single line is appended.
+        if (self.lines.items.len + diff.inserts.len > max_weave_lines) {
+            return WeaveError.TooManyLines;
+        }
+
+        // The COUNT is bounded above; the two counters are bounded here, and
+        // the pair is one bound said in two units. A weave lifted from a sparse
+        // record holds fewer lines than its counter has spent, so the line
+        // reading above can pass while the position reading below refuses --
+        // which is the case the elder bound could not see, and the one that
+        // reached `next_pos += 1` at the u32 ceiling as a panic.
+        //
+        // Written as a subtraction rather than a sum on purpose: both counters
+        // stand at or under `max_weave_lines` by the weave's own invariant, so
+        // the difference is a real number where the sum is what overflows.
+        if (diff.inserts.len > max_weave_lines - self.next_pos) {
+            return WeaveError.CounterPastCeiling;
+        }
+        // The run counter rises once for the whole edit, and only when the edit
+        // places a line -- so it is read under exactly that condition.
+        if (diff.inserts.len > 0 and self.next_run >= max_weave_lines) {
+            return WeaveError.CounterPastCeiling;
+        }
+
+        // Process deletes first: bump each named line's gen to even. Identity
+        // rather than position, since a position alone names a line in one
+        // weave and a merged weave holds lines from several.
+        //
+        // THE TARGETS ARE SORTED AND THE WEAVE IS WALKED ONCE, rather than the
+        // weave being walked once per target. The pass costs |lines| x
+        // log |deletes| where the walk cost |lines| x |deletes|. The weave is
+        // the side that cannot be searched: `merge` returns its lines in PLACE
+        // order, and place order is not identity order, so the side put in
+        // identity order is the small one the caller handed in.
+        if (diff.deletes.len > 0) {
+            // invariant: a diff names no more lines than the weave can hold, since
+            // every target must name a line this weave already carries -- and this is
+            // the bound the scratch slice just below is sized by
+            assert(diff.deletes.len <= max_weave_lines);
+
+            const targets = try allocator.alloc(LineId, diff.deletes.len);
+            defer allocator.free(targets);
+            for (targets, diff.deletes) |*into, from| into.* = from;
+            std.mem.sort(LineId, targets, {}, struct {
+                fn less_than(_: void, a: LineId, b: LineId) bool {
+                    return a.less_than(b);
+                }
+            }.less_than);
+            // The targets are distinct, which is what lets the hit count below
+            // prove every one of them was found. They are sorted, so two equal
+            // targets are neighbours and one pass reads the whole question.
+            // Read at the edge rather than asserted: a diff is a CALLER'S data,
+            // and the three readings from here to the mark loop each answer
+            // something a caller can get wrong without corrupting anything.
+            for (targets, 0..) |_, i| {
+                if (i + 1 < targets.len and !targets[i].less_than(targets[i + 1])) {
+                    return WeaveError.DeleteNamesOneLineTwice;
+                }
+            }
+
+            // NOTHING BELOW MOVES A BYTE OF THE WEAVE until every target has
+            // been read. The walk records WHERE each target sits and the second
+            // loop is what raises a generation, so a refusal leaves the weave
+            // exactly as it arrived -- where a walk that bumped as it went would
+            // leave half a diff applied and a named error to explain it.
+            const marks = try allocator.alloc(u32, diff.deletes.len);
+            defer allocator.free(marks);
+
+            var hits: u32 = 0;
+            for (self.lines.items, 0..) |line, at| {
+                if (std.sort.binarySearch(LineId, targets, line.id(), search_by_name) == null) continue;
+                // An odd generation means present -- the parity IS the tombstone, so
+                // an even one here is a line this weave already let go. Refused rather
+                // than asserted because a stale diff is ordinary: two branches drop one
+                // line, and the second delete to arrive finds it gone.
+                if (line.gen % 2 == 0) return WeaveError.DeleteNamesGoneLine;
+                // invariant: one mark per target, since the targets are distinct and a
+                // weave holds one line per identity -- so the scratch sized by the
+                // delete count can never be written past its end
+                assert(hits < marks.len);
+                // usize lives at the inherited-std seam alone: a slice counts in usize,
+                // and the weave's own ceiling, asserted at the head of this function, is
+                // what makes the cast safe.
+                marks[hits] = @intCast(at);
+                hits += 1;
+            }
+
+            // usize lives at the inherited-std seam alone: a slice counts in usize, and
+            // the bound asserted above is what makes the cast safe.
+            // Every delete must name a line the weave holds, since deleting one that is
+            // not there would report success for a change that never happened. The
+            // targets are distinct, so one hit apiece is exactly this count.
+            if (hits != @as(u32, @intCast(diff.deletes.len))) {
+                return WeaveError.DeleteNamesNoLine;
+            }
+
+            // Past the last refusal: now the generations rise.
+            for (marks[0..hits]) |at| {
+                // invariant: the line under each mark is still present, which the walk
+                // above read and nothing between here and there could change -- this
+                // loop is the weave's only mutation on the delete path
+                assert(self.lines.items[at].gen % 2 == 1);
+                self.lines.items[at].gen += 1;       // odd -> even: mark gone
+            }
+        }
+
+        // Process inserts: each new line enters at generation 1 (first appearance,
+        // present). Position is assigned from the monotone counter, and the whole
+        // run of them carries ONE run number -- read before the loop, so every
+        // line this edit adds sorts as one block rather than each line taking its
+        // chances against the other side's lines separately.
+        const run = self.next_run;
+        // The floor every identity this edit hands out stands above, read once
+        // before a line is added. Positions come off a counter that only rises,
+        // and the weave's own invariant holds every line it already carries
+        // BELOW that counter -- so a new line's position is above every held
+        // position, and the identity is therefore fresh whatever its site.
+        const floor = self.next_pos;
+        // invariant: every line the weave already holds sits below the counter the
+        // inserts are about to draw from. This is the weave's declared invariant,
+        // checked here at the edge because the uniqueness asserted inside the loop
+        // rests on it -- one pass, where asking each new line against every held
+        // line cost |inserts| x |lines| and was the second quadratic this function
+        // carried.
+        for (self.lines.items) |held| assert(held.pos < floor);
+        for (diff.inserts, 0..) |text, insert_at| {
+            // A REPLACEMENT INHERITS THE ORDER KEY OF THE LINE IT REPLACES, on
+            // the maintainer's word `20260916` (REDS %680). It keeps its own fresh
+            // position, so its identity is new and the weave's uniqueness holds;
+            // only WHERE it goes is inherited. A fresh insert orders where it is
+            // placed, so its order key is its position, which is what every line
+            // written before this field carries.
+            //
+            // The pairing arrives on the diff rather than being guessed here: a
+            // replacement is the nth arrival in a gap answering the nth
+            // departure, and only the diff can see the gaps.
+            var ord_for = self.next_pos;
+            var run_for = run;
+            // AN ORDINARY INSERT TAKES THE PLACE OF THE LINE IT COMES AFTER
+            // (REDS %689). It carries a fresh position, which is higher than the
+            // anchor's, so the position tiebreak sorts it JUST PAST the anchor
+            // and before whatever follows -- a line placed between two others
+            // without a denser number than a `u32` can hold. Two inserts after
+            // one anchor keep the order they were written in, for the same
+            // reason. An insert opening the document has no anchor and keeps the
+            // counter's own answer, which is the one case still landing at the
+            // end; a document that grows at its head wants its own lap. First
+            // place is unreachable from an anchor too -- an insert anchored on
+            // the first line inherits its run and order key and draws a higher
+            // position, and the position is the last tiebreak, so it lands
+            // second. Claim 9 of weave_apply_witness.rye holds both readings.
+            if (insert_at < diff.after.len) {
+                if (diff.after[insert_at]) |anchor| {
+                    for (self.lines.items) |held| {
+                        if (held.id().eq(anchor)) {
+                            ord_for = held.ord;
+                            run_for = held.run;
+                            break;
+                        }
+                    }
+                }
+            }
+            // A REPLACEMENT names a line outright and overrides the anchor, on
+            // the maintainer's word: it inherits the place of the line it REPLACES.
+            if (insert_at < diff.replaces.len) {
+                if (diff.replaces[insert_at]) |replaced| {
+                    for (self.lines.items) |held| {
+                        if (held.id().eq(replaced)) {
+                            // The RUN is inherited beside the order key, and it
+                            // has to be: the run is read first of all, so a
+                            // replacement carrying a fresh run sorts after every
+                            // line of the run it meant to stand inside, however
+                            // its order key reads. Inheriting both is what "the
+                            // place" means here; only the identity stays fresh.
+                            ord_for = held.ord;
+                            run_for = held.run;
+                            break;
+                        }
+                    }
+                }
+            }
+            const line = Line{
+                .text = text,
+                .gen   = 1,
+                .pos   = self.next_pos,
+                .ord   = ord_for,
+                .site  = diff.site,
+                .run   = run_for,
+            };
+            // invariant: an odd generation means present -- the parity IS the tombstone, so an
+            // even one reaching here would be a deleted line treated as live
+            assert(line.gen % 2 == 1);
+            // invariant: the identity being handed out is one this weave does not already
+            // hold. This is what the pair buys, asserted where it is created rather than
+            // trusted: its position stands at or above the floor every held line sits
+            // below, so no held line can answer to this name whatever its site, and a
+            // counter that repeated itself is caught right here.
+            assert(line.pos >= floor);
+            // THE LINE GOES WHERE ITS PLACE SAYS, rather than at the end. The
+            // backing list is held in place order -- `current` asserts it on
+            // every read and returns document order without sorting because of
+            // it -- and an appended line kept that true only while positions
+            // rose monotonically. A replacement inherits an order key from the
+            // middle, so it must be placed in the middle.
+            //
+            // Linear rather than binary on purpose: the list is bounded by
+            // `max_weave_lines`, a replacement is the only line that ever lands
+            // anywhere but the end, and a binary search over a list this walk
+            // just proved ordered would be a second reading of the same order.
+            var at: u32 = @intCast(self.lines.items.len);
+            for (self.lines.items, 0..) |held, idx| {
+                if (line.place().less_than(held.place())) {
+                    at = @intCast(idx);
+                    break;
+                }
+            }
+            try self.lines.insert(allocator, at, line);
+            self.next_pos += 1;
+        }
+
+        // The run counter advances once for the whole edit, and only when the
+        // edit actually placed a line. A delete-only diff leaves it alone: it
+        // stamped nothing, so burning a number would open a gap that a
+        // concurrent edit on the other side could never be compared against.
+        if (diff.inserts.len > 0) self.next_run += 1;
+
+        // Postcondition: every line in the weave has a valid, assigned position.
+        for (self.lines.items) |line| {
+            // invariant: a line carries a real generation and a position inside the weave's own
+            // counter, so neither ordering nor identity is left to the caller
+            assert(line.gen >= 1);
+            assert(line.pos < self.next_pos);
+            // invariant: a line's run stands under the weave's own run counter, so the next
+            // edit is handed a number no line already carries -- which is what makes two
+            // sides' concurrent runs comparable rather than merely different
+            assert(line.run < self.next_run);
+        }
+    }
+
+    /// Return the lines currently present (odd generation), in document order.
+    /// The caller owns the returned slice; it is allocated from `allocator`.
+    ///
+    /// THE BACKING LIST IS ALREADY IN PLACE ORDER, so this reads it once and
+    /// sorts nothing. It sorted every call until `20260908`, which was the
+    /// third and last of the three quadratic-or-worse shapes this module
+    /// carried -- `merge` was repaired on `20260907`, `apply` the same night,
+    /// and this one is the read the other two are measured through.
+    ///
+    /// The order is held by all three of the ways a weave can come to exist,
+    /// which is why it is an invariant rather than a hope:
+    ///
+    ///   `empty`  starts with no lines, so it is ordered trivially.
+    ///   `apply`  appends its inserts carrying `next_run`, and every line the
+    ///            weave already holds carries a run BELOW that -- asserted in
+    ///            that function's own postcondition -- so an appended line
+    ///            sorts after every held line whatever its site, and the run
+    ///            of them sorts among itself by a position counter that only
+    ///            rises. Deletes change a generation and move nothing.
+    ///   `merge`  sorts its result by place and asserts places strictly
+    ///            increase before it returns.
+    ///
+    /// So the order is established where a line is placed rather than
+    /// re-established where a line is read, and the walk below asserts it
+    /// rather than trusting it: a caller reaching past the module's own API to
+    /// push a line onto `lines` is caught at the next read.
+    ///
+    /// NAME WHAT THAT ASSERT IS NOT: it is a restatement, and no control phase
+    /// isolates it. Planting a disorder means removing `merge`'s place sort,
+    /// and `merge`'s own postcondition then fires first; removing that assert
+    /// too still reds the pen through the field-for-field equality claim, which
+    /// two differently-ordered merges fail whatever the read does. Both plants
+    /// were built and run on `20260908` and both exited 134 with the sort here
+    /// and without it, so the isolating phase was declined rather than written
+    /// -- a plant that reds for a reason the phase did not name proves the same
+    /// nothing as a plant that matched no line, which is the fault the merge
+    /// control already warns about in its own comments. The honest claim is the
+    /// narrow one: this read no longer TIDIES a disorder it did not create.
+    ///
+    /// Measured on this pier, ReleaseSafe -- the checked build a witness
+    /// actually runs -- as twenty reads of a weave holding n present lines,
+    /// best of three runs, sorting then reading:
+    ///
+    ///   n =  16,384    0.4ms ->  0.4ms
+    ///   n = 131,072    3.3ms ->  2.7ms
+    ///   n = 524,288   25.3ms -> 13.3ms
+    ///
+    /// SAY THE SHAPE HONESTLY: this is a factor of two at half the ceiling and
+    /// nothing at all at sixteen thousand, where the sort sat inside the
+    /// timing noise. What remains dominates -- the read copies every present
+    /// line into a slice the caller owns, which at 524,288 lines is about
+    /// sixteen megabytes of Line, and no ordering change touches that. The
+    /// win worth naming is the one that is not a number: document order is now
+    /// something the module HOLDS rather than something each read rebuilds, so
+    /// a caller that corrupts it is caught here instead of being tidied over.
+    ///
+    /// Precondition:  the backing list is in strictly increasing place order --
+    ///   asserted below, over the whole list.
+    /// Postcondition: every returned line is present, and places strictly
+    ///   increase.
+    pub fn current(self: *const Weave, allocator: std.mem.Allocator) ![]const Line {
+        // invariant: the weave stands inside its own ceiling, so the slice this
+        // returns is bounded by max_weave_lines rather than by whoever calls it
+        assert(self.lines.items.len <= max_weave_lines);
+        var out: std.ArrayListUnmanaged(Line) = .empty;
+        for (self.lines.items, 0..) |line, i| {
+            if (i + 1 < self.lines.items.len) {
+                // invariant: the backing list is in place order already, which is
+                // what lets this read return document order without sorting. Held
+                // over the whole list rather than over the filtered result, because
+                // a filter can hide a disorder that a later delete would reveal.
+                assert(line.place().less_than(self.lines.items[i + 1].place()));
+            }
+            if (line.gen % 2 == 1) { // odd = present
+                try out.append(allocator, line);
+            }
+        }
+        // A subsequence of an ordered list is ordered, so the filter above
+        // carries document order out with it and nothing is sorted here.
+        const result = try out.toOwnedSlice(allocator);
+
+        // Postcondition: result is sorted and all entries are present.
+        for (result) |line| {
+            // invariant: an odd generation means present -- the parity IS the tombstone, so an
+            // even one reaching here would be a deleted line treated as live
+            assert(line.gen % 2 == 1);
+        }
+        for (result, 0..) |line, i| {
+            if (i + 1 < result.len) {
+                // invariant: the result comes out ordered by identity, which is what makes a
+                // weave readable as a document rather than a bag of lines
+                assert(result[i].place().less_than(result[i + 1].place()));
+            }
+            _ = line;
+        }
+
+        return result;
+    }
+
+    /// Fold one weave's lines into a list already holding the other's: a line
+    /// whose identity is already held joins by the higher generation, and one
+    /// whose identity is new is appended.
+    ///
+    /// Two branches that each inserted therefore keep BOTH lines, since their
+    /// sites differ even where their positions agree. That is the whole reason
+    /// identity is a pair.
+    ///
+    /// The caller has already ensured capacity for the whole union, so nothing
+    /// here allocates and the only way out is the refusal.
+    ///
+    /// THE HELD SIDE ARRIVES SORTED BY IDENTITY, so a lookup is a
+    /// binary search rather than a walk. That is the whole difference between
+    /// a merge that serves the module's declared ceiling and one that does
+    /// not. Walking cost |self| x |other| identity comparisons; searching
+    /// costs |other| x log |self|.
+    ///
+    /// A line this fold APPENDS can never be a later lookup's answer, so the
+    /// sorted prefix stays the whole search space for the whole fold. That
+    /// holds because `apply` hands out each identity once per weave and
+    /// asserts it at the point of creation: `incoming` therefore carries no
+    /// two lines of one name, and a miss is a miss for every line after it.
+    ///
+    /// Precondition:  `out` has room for every line of `incoming`, and its
+    ///   first `sorted_len` entries are sorted by identity.
+    /// Postcondition: every identity of `incoming` is held by `out` exactly once.
+    fn union_into(out: *std.ArrayListUnmanaged(Line), sorted_len: u32, incoming: []const Line) WeaveError!void {
+        // invariant: the list can take the whole union without growing, which is
+        // what lets this fold run with no allocator and no error but the refusal
+        assert(out.capacity >= out.items.len + incoming.len);
+        // invariant: the union stays inside the weave's own ceiling, so the
+        // append below can never carry the list past what merge already checked
+        assert(out.items.len + incoming.len <= max_weave_lines);
+        // invariant: the searched prefix is one the list actually holds, since
+        // a search past the end would read whatever the capacity left behind
+        assert(sorted_len <= out.items.len);
+
+        const sorted = out.items[0..sorted_len];
+        for (incoming) |line| {
+            const found = std.sort.binarySearch(Line, sorted, line.id(), search_by_id);
+            if (found) |at| {
+                const held = &sorted[at];
+                if (!std.mem.eql(u8, held.text, line.text)) {
+                    return WeaveError.PositionTextDisagrees;
+                }
+                // The join itself. Max carries parity with it, so a delete on
+                // either side survives a merge with a side still holding the
+                // line -- gone is a larger count than present, and larger wins.
+                held.gen = @max(held.gen, line.gen);
+            } else {
+                out.appendAssumeCapacity(line);
+            }
+        }
+    }
+
+    /// Merge another weave into this one, returning a new weave and leaving
+    /// both arguments exactly as they were.
+    ///
+    /// An identity names a line for all time. So an identity both weaves hold
+    /// is one line seen twice, and an identity only one of them holds is a line
+    /// the other has not seen yet. The rule is therefore a union over
+    /// identities where the HIGHER GENERATION wins -- no commit identifier is
+    /// consulted, only the counts in front of it, which keeps the merge
+    /// structural.
+    ///
+    /// Two branches that each inserted are exactly the second case, twice over:
+    /// their sites differ, so their identities differ, so the union keeps both
+    /// lines and the merge succeeds. That is the ordinary case of parting and
+    /// coming back, and it is the case this merge was named for.
+    ///
+    /// Three operations sit underneath: union of the identities, max on the
+    /// generation, max on next_pos, max on next_run. Each of the four is
+    /// commutative, associative, and idempotent, so the merge is all three as
+    /// well -- by construction rather than by care. Sorting the result by place
+    /// makes that structural rather than merely visible: `a.merge(alloc, b)`
+    /// and `b.merge(alloc, a)` come out equal field for field, rather than only
+    /// equal once they are read as a document. The site earns its keep twice
+    /// here: it separates two branches' lines through the identity, AND it
+    /// orders their runs through the place, so a total order leaves nothing for
+    /// a tiebreak to invent.
+    ///
+    /// Cost is one sort of this side plus |other| x log |self| searches. It
+    /// was |self| x |other| walks until `20260907`, on the reasoning that an
+    /// index earns its place when a measurement asks for one rather than
+    /// before -- and then the measurement asked, in these numbers.
+    ///
+    /// Measured on this pier, ReleaseFast, two disjoint sides of equal size so
+    /// no identity joins and the fold does its whole work. Wall time for one
+    /// merge, walking then searching: 16,384 lines a side **387ms -> 7ms**;
+    /// 32,768 **1,522ms -> 10ms**; 65,536 **6,004ms -> 17ms**; 131,072
+    /// **24,310ms -> 28ms**. The walk rose 3.95x then 4.05x across those
+    /// doublings, which is the quadratic the shape predicts.
+    ///
+    /// At the LARGEST MERGE THE BOUND PERMITS -- 524,288 a side, a union of
+    /// exactly `max_weave_lines` -- the walk **did not finish inside ten
+    /// minutes** and was stopped there; the search takes **162ms**, and
+    /// **1,376ms** in the checked build a witness runs. So the declared
+    /// ceiling was one the operation could not serve, which makes it a ceiling
+    /// named for the allocator alone. The fold changed rather than the bound.
+    ///
+    /// The order is a sort this merge already had to take, so no index is
+    /// stored and no structure outlives the call.
+    ///
+    /// Refusal keeps that order-independence. Weaves that pairwise agree on
+    /// their shared positions are closed under merge -- the merged text at a
+    /// position comes from one of the two sides, and both already agreed with
+    /// the third -- so no grouping can hide a disagreement from a later one.
+    ///
+    /// Precondition:  an identity held by both weaves carries the same text --
+    ///   refused by name. With the site in the identity this is corruption
+    ///   rather than ordinary branching: one site issued one name twice.
+    /// Postcondition: places strictly increase, every line keeps a real
+    ///   generation, next_pos and next_run stand above every position and
+    ///   run in the result, and both counters stand at or above BOTH SIDES'
+    ///   -- the last of those said separately from `20260915`, because the
+    ///   walk over the result cannot see it when a side stands several above
+    ///   its own highest line. `V2Record` admits exactly that weave on
+    ///   purpose; the four counter asserts below are where the max is held to
+    ///   rather than inferred from what the lines happen to carry.
+    ///
+    /// THAT POSTCONDITION NAMED FOUR THINGS AND ASSERTED THREE until
+    /// `20260908`. The run was the one that passed, and it is the field
+    /// `Place.less_than` reads FIRST. Two things rest on it: the next `apply`
+    /// stamps its whole insert block with `next_run` and appends, and
+    /// `current` reads the backing list without sorting. Both were argued from
+    /// `apply`'s postcondition, which does assert all three -- so the argument
+    /// cited a post standing on one path into a weave rather than on this one.
+    ///
+    /// The plant isolates the line rather than reaching an assert already
+    /// there: the control rewrites the max below to `@min`, and that pen exits
+    /// 134 with the assert and 0 without it, every other claim passing.
+    pub fn merge(self: *const Weave, allocator: std.mem.Allocator, other: *const Weave) !Weave {
+        // invariant: each weave already stands inside the named bound, so a
+        // refusal below names the union rather than covering for an input that
+        // was over the ceiling before a merge was ever asked for
+        assert(self.lines.items.len <= max_weave_lines);
+        assert(other.lines.items.len <= max_weave_lines);
+
+        // The union holds at most the sum, so checking the sum checks the union
+        // -- at the edge, before a single line is copied.
+        if (self.lines.items.len + other.lines.items.len > max_weave_lines) {
+            return WeaveError.TooManyLines;
+        }
+
+        // usize lives at the inherited-std seam alone: ArrayListUnmanaged counts
+        // in usize, and the bound just checked is what makes the cast safe.
+        const self_len: u32 = @intCast(self.lines.items.len);
+        const other_len: u32 = @intCast(other.lines.items.len);
+
+        var out: std.ArrayListUnmanaged(Line) = .empty;
+        errdefer out.deinit(allocator);
+        try out.ensureTotalCapacity(allocator, self_len + other_len);
+        for (self.lines.items) |line| {
+            out.appendAssumeCapacity(line);
+        }
+
+        // The fold below searches this side rather than walking it, so the side
+        // arrives in identity order. Sorting here rather than inside the fold
+        // keeps the fold allocation-free and states the precondition where a
+        // reader can see it being met.
+        sort_by_id(out.items);
+        try union_into(&out, self_len, other.lines.items);
+
+        std.mem.sort(Line, out.items, {}, struct {
+            fn less_than(_: void, a: Line, b: Line) bool {
+                return a.place().less_than(b.place());
+            }
+        }.less_than);
+
+        const merged = Weave{
+            .lines = out,
+            .next_pos = @max(self.next_pos, other.next_pos),
+            // Max on the run counter for the same reason as max on the position
+            // counter: the next edit made on the merged weave must take a number
+            // NEITHER side has spent, or it would read as concurrent with a run
+            // that has already happened.
+            .next_run = @max(self.next_run, other.next_run),
+        };
+
+        // invariant: the merged weave's two counters each stand at or above
+        // BOTH sides', so the next edit made on the result takes a position
+        // and a run number neither side has already spent.
+        //
+        // Postcondition on the COUNTERS THEMSELVES, said apart from the walk
+        // below because the walk cannot see it. The walk holds every held LINE
+        // under the merged counters, and that reading is exactly as tight as
+        // the tightest side: a weave standing one above its highest line proves
+        // its own counter by carrying it. A weave standing SEVERAL above does
+        // not, and `V2Record` admits one on purpose -- its own head says the
+        // record declines to inherit the tightness, and `from_v2` refuses only
+        // a counter at or below a row it holds. So a restored weave may declare
+        // `next_pos` at 5 while holding position 2, and a counter DERIVED from
+        // the result's lines would hand the next `apply` a position that record
+        // already declared spent, with every line still standing under the
+        // fallen counter and nothing in the walk able to say so. The merge
+        // control's `pos_derived` phase plants exactly that, and it passes every
+        // other claim in the witness.
+        //
+        // NAME WHAT THESE FOUR ARE NOT: an isolated catch. Claim 11 reads the
+        // merged counters directly, so the pen reds with these lines deleted --
+        // measured `20260915`, exit 134 either way. What they buy is the reading
+        // for EVERY caller rather than for the witness's one input, which is the
+        // difference between a module holding its own postcondition and a
+        // witness holding it on the module's behalf. The lift's run assert one
+        // constructor over is named the same way and for the same reason.
+        //
+        // Four asserts rather than two compound ones, because a compound
+        // `assert(a and b)` names the pair and not the side that failed.
+        assert(merged.next_pos >= self.next_pos);
+        assert(merged.next_pos >= other.next_pos);
+        assert(merged.next_run >= self.next_run);
+        assert(merged.next_run >= other.next_run);
+
+        for (merged.lines.items, 0..) |line, i| {
+            // invariant: a line carries a real generation, since zero is
+            // reserved and a merge must never invent one
+            assert(line.gen >= 1);
+            // invariant: every position stays under the merged counter, so the
+            // next insert is handed one neither side has ever used
+            assert(line.pos < merged.next_pos);
+            // invariant: every run stays under the merged counter too, which is
+            // the third of the weave's three declared counter invariants and the
+            // one `Place.less_than` reads FIRST. The next `apply` stamps its whole
+            // insert block with `next_run` and appends it, and `current` reads the
+            // backing list without sorting -- both rest on every held run standing
+            // below that number. Max carries it here, and this is where the max is
+            // held to rather than trusted.
+            assert(line.run < merged.next_run);
+            if (i + 1 < merged.lines.items.len) {
+                // invariant: identities strictly increase, which both orders the
+                // document and proves the union kept exactly one line per
+                // identity -- two branches' concurrent inserts share a position
+                // and are separated here by their sites
+                assert(merged.lines.items[i].place().less_than(merged.lines.items[i + 1].place()));
+            }
+        }
+
+        return merged;
+    }
+
+    /// Append one note per position the LEFT holds, carrying the right's count
+    /// beside it -- zero when the right has never seen it. The text comparison
+    /// lives here, so the fold below reads positions alone.
+    ///
+    /// The caller has already ensured capacity for the whole union, so nothing
+    /// here allocates and the only way out is the refusal. This is the same
+    /// shape `union_into` takes for `merge`, on purpose: two folds over one
+    /// union, and the reading differs only in what it writes down.
+    ///
+    /// `right_sorted` arrives in identity order for the same reason the merge's
+    /// held side does: the lookup is a binary search rather than a walk, so the
+    /// reading costs what the merge costs and the two stay comparable at every
+    /// size rather than only at small ones.
+    ///
+    /// Precondition:  `out` has room for every line of `left`, and
+    ///   `right_sorted` is in identity order.
+    /// Postcondition: `out` holds one note per identity of `left`.
+    fn notes_from_left(
+        out: *std.ArrayListUnmanaged(Note),
+        left: []const Line,
+        right_sorted: []const Line,
+    ) WeaveError!void {
+        // invariant: the list can take the whole fold without growing, which is
+        // what lets this run with no allocator and no error but the refusal
+        assert(out.capacity >= out.items.len + left.len);
+        // invariant: the fold stays inside the weave's own ceiling, so the
+        // append below can never carry the list past what annotate checked
+        assert(out.items.len + left.len <= max_weave_lines);
+
+        for (left) |line| {
+            var right_gen: u32 = 0;
+            if (std.sort.binarySearch(Line, right_sorted, line.id(), search_by_id)) |at| {
+                const held = right_sorted[at];
+                if (!std.mem.eql(u8, held.text, line.text)) {
+                    return WeaveError.PositionTextDisagrees;
+                }
+                right_gen = held.gen;
+            }
+            out.appendAssumeCapacity(.{
+                .pos = line.pos,
+                .site = line.site,
+                .run = line.run,
+                .ord = line.ord,
+                .left_gen = line.gen,
+                .right_gen = right_gen,
+            });
+        }
+    }
+
+    /// Append a note for each line only the RIGHT has seen. Every shared
+    /// identity already had its text compared by the fold above, so this one
+    /// reads identities alone and cannot refuse.
+    ///
+    /// Precondition:  `out` has room for every line of `right`, and
+    ///   `left_sorted` is in identity order.
+    /// Postcondition: every identity of `right` is held by `out` exactly once.
+    fn notes_from_right(
+        out: *std.ArrayListUnmanaged(Note),
+        left_sorted: []const Line,
+        right: []const Line,
+    ) void {
+        // invariant: the list can take the whole fold without growing, which is
+        // what lets this run with no allocator at all
+        assert(out.capacity >= out.items.len + right.len);
+        // invariant: the fold stays inside the weave's own ceiling, so the
+        // append below can never carry the list past what annotate checked
+        assert(out.items.len + right.len <= max_weave_lines);
+
+        for (right) |line| {
+            const shared = std.sort.binarySearch(Line, left_sorted, line.id(), search_by_id) != null;
+            if (!shared) {
+                out.appendAssumeCapacity(.{
+                    .pos = line.pos,
+                    .site = line.site,
+                    .run = line.run,
+                    .ord = line.ord,
+                    .left_gen = 0,
+                    .right_gen = line.gen,
+                });
+            }
+        }
+    }
+
+    /// Read two weaves side by side: for every line either one holds, what each
+    /// side did there, in document order.
+    ///
+    /// `merge` answers *what is the one state*. This answers *what did each
+    /// side do to reach it* -- the story the weave was named to be able to
+    /// tell, where two branches that touched one line are SHOWN doing so
+    /// rather than handed back as two opaque blobs.
+    ///
+    /// It reads exactly the inputs `merge` accepts and refuses exactly what
+    /// `merge` refuses, by the same names and at the same edge, because a
+    /// story about a merge that cannot happen is a story about nothing. That
+    /// shared precondition is the whole seam between the two: the reading is
+    /// the merge's own arithmetic printed instead of applied, so
+    /// `note.gen()` is the generation `merge` lands on at that position and a
+    /// witness holds the two to each other line for line.
+    ///
+    /// What this cannot yet tell, said here so the head promises no more than
+    /// the code does: the reading names what each side did to each line, and
+    /// not where a new line sits relative to the other side's delete. The
+    /// anchor that would answer the second story LANDED on `20260916`
+    /// (REDS %689) -- `Diff.after` names the kept line each insert follows,
+    /// and `apply` sorts it just past that anchor -- so a note now stands over
+    /// a position whose place is meaningful. Reading the two sides' PLACES
+    /// against each other is the lap this header still defers; the elder text
+    /// called the anchor a seam rather than a lap, and kept saying so for the
+    /// hours after it landed. That is this header's second such stay: the
+    /// paragraph below records the first.
+    ///
+    /// Cost is one sort of each side plus one binary search per line of the
+    /// union -- the same shape `merge` takes, and for the same reason: both
+    /// folds search the side they do not walk.
+    ///
+    /// It was |self| x |other| text comparisons until `20260907`, when
+    /// `union_into` and both folds below were repaired in one commit. This
+    /// header kept the elder claim for a day, and kept the elder REASON with
+    /// it -- that a weave carries no index, and a map earns its place when a
+    /// measurement asks for one -- three lines above code that now builds two
+    /// sorted copies per call. The measurement had asked and been answered;
+    /// only the sentence had not moved (`20260908.031547`).
+    ///
+    /// Measured on this pier, two disjoint sides of equal size so no identity
+    /// joins and both folds do their whole work. One annotate per run, best of
+    /// three, ReleaseFast then the checked build a witness actually runs:
+    ///
+    ///   n =  16,384      3ms /     37ms
+    ///   n =  32,768      6ms /     76ms
+    ///   n =  65,536     13ms /    154ms
+    ///   n = 131,072     28ms /    322ms
+    ///   n = 524,288    132ms /  1,464ms
+    ///
+    /// Each doubling costs about 2.1x, and the last row is four times the size
+    /// of the one above it at 4.7x -- the linearithmic shape the sort and the
+    /// searches predict, rather than the quadratic the elder claim described.
+    /// At 524,288 a side the union is exactly `max_weave_lines`, so the largest
+    /// reading the bound permits is one this operation can serve.
+    ///
+    /// The caller owns the returned slice; it is allocated from `allocator`.
+    ///
+    /// Precondition:  an identity held by both weaves carries the same text --
+    ///   refused by name, and by the same reading `merge` takes: with the site
+    ///   in the identity, one name on two lines is corruption rather than the
+    ///   ordinary parting of two branches.
+    /// Postcondition: identities strictly increase, and every note names a line
+    ///   at least one side has seen.
+    pub fn annotate(self: *const Weave, allocator: std.mem.Allocator, other: *const Weave) ![]const Note {
+        // invariant: each weave already stands inside the named bound, so the
+        // refusal below names the union rather than covering for an input that
+        // was over the ceiling before a reading was ever asked for
+        assert(self.lines.items.len <= max_weave_lines);
+        assert(other.lines.items.len <= max_weave_lines);
+
+        // One note per position in the union, and the union holds at most the
+        // sum -- so checking the sum checks the notes, at the edge, before a
+        // single one is written.
+        if (self.lines.items.len + other.lines.items.len > max_weave_lines) {
+            return WeaveError.TooManyLines;
+        }
+
+        // usize lives at the inherited-std seam alone: ArrayListUnmanaged counts
+        // in usize, and the bound just checked is what makes the cast safe.
+        const self_len: u32 = @intCast(self.lines.items.len);
+        const other_len: u32 = @intCast(other.lines.items.len);
+
+        var out: std.ArrayListUnmanaged(Note) = .empty;
+        errdefer out.deinit(allocator);
+        try out.ensureTotalCapacity(allocator, self_len + other_len);
+
+        // Each fold searches the side it does not iterate, so each side is put
+        // in identity order once. The copies are scratch for this call and are
+        // freed with it -- neither weave is touched, which is the promise the
+        // head above makes, and a sorted copy is how it is kept while the
+        // lookup still costs a search rather than a walk.
+        const left_sorted = try allocator.alloc(Line, self_len);
+        defer allocator.free(left_sorted);
+        copy_lines(left_sorted, self.lines.items);
+        sort_by_id(left_sorted);
+
+        const right_sorted = try allocator.alloc(Line, other_len);
+        defer allocator.free(right_sorted);
+        copy_lines(right_sorted, other.lines.items);
+        sort_by_id(right_sorted);
+
+        try notes_from_left(&out, self.lines.items, right_sorted);
+        notes_from_right(&out, left_sorted, other.lines.items);
+
+        const result = try out.toOwnedSlice(allocator);
+        std.mem.sort(Note, result, {}, struct {
+            fn less_than(_: void, a: Note, b: Note) bool {
+                return a.place().less_than(b.place());
+            }
+        }.less_than);
+
+        for (result, 0..) |note, i| {
+            // invariant: a note names a line at least one side has seen,
+            // since an identity neither weave holds never enters the union
+            assert(note.left_gen != 0 or note.right_gen != 0);
+            if (i + 1 < result.len) {
+                // invariant: identities strictly increase, which orders the
+                // reading as a document and proves the union kept exactly one
+                // note per identity -- the reading stays line for line with the
+                // merge it describes, which is the seam between the two
+                assert(result[i].place().less_than(result[i + 1].place()));
+            }
+        }
+
+        return result;
+    }
+};

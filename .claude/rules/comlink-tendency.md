@@ -1,0 +1,31 @@
+# The Comlink Tendency -- Name for Clarity, Fun, and Safety, at Any Length
+
+**Seated:** `20260808.205404` on the maintainer's word - **Status:** Living - **Cites, never restates**
+
+Canon: `external-research/20260808-204505_the-best-name-period-vanes-ancestry-and-our-own-merit.md` (Movement I).
+
+When a **new module, aspect, or concept** is named in this tree, reach first for the **clearest, most fun, safest word** -- at whatever length that word wants to be. Named after the favorite that wears it plainest (Comlink), and read from the maintainer's own list -- Comlink, Mantra, Caravan, Tally, Pond, Tablecloth, Skate, Nib, Rye, Rishi, Brushstroke, Amphora, resins, Aurora, Brix, **Kyri**, and **baton** (Kyri and baton added `20260810` on the maintainer's word) -- each of them a plain word or a clear metaphor a newcomer grasps at once, rather than a forced four-letter coinage.
+
+## The three tests a name passes
+
+- **Clear** -- a newcomer grasps it, or grasps it the instant its plain function is named on first use.
+- **Fun** -- a pleasure to say and to type; a name lived with for years should be warm.
+- **Safe** -- collides with nothing seated (grep the tree), borrows no sacred word, and can never parse as a real network address (`placeholder-ship-names.md`).
+
+A name runs to whatever length its meaning wants, and the three tests above are the whole list. The four-letter-vane scheme -- borrowed from Urbit's vanes and the three-letter `@p` syllables -- is released, because clarity comes from the word itself rather than from the count of its letters. An abstract coinage (a four-letter draw among them) is now the **exception that must justify itself**, and the clear warm word is the default, standing on its own.
+
+## Boundaries -- what this does not touch
+
+- **Waymark ladders keep their own law.** `waymark-ladders.md` still governs **ladder rung names** (a chapter or initiative's `X0`/`X1` rungs), drawn four-letter by SHA3. The Comlink tendency governs **module / aspect / concept names**, not ladder rungs. Two domains, two disciplines.
+- **Nib and the seated vocabulary stand.** `vocabulary-nib.md`, `vocabulary-survey.md`, and every seated term keep their words; this rule names how the *next* thing is named.
+- **Reviving still replaces renaming.** A module earns a new name by being re-grown beside its elder, born-named (`active-reviving/`), not by a mass rename. The Comlink tendency chooses *what* the born name is; it does not license churn.
+
+## Accrete-never-break
+
+This keeps every name already loved. Names seated and lived-with stay; dated testimony keeps every word it ever wrote. The tendency governs what is **born from here forward**, and frees whatever is still soft -- which, in this crashed-wave phase, is still most of it.
+
+## Why the tendency exists
+
+A name owes everything to two readers rather than to an alphabet: the person who meets it on their first day, and the one who types it on their ten-thousandth. The clearest, warmest, safest word serves both.
+
+*Cursor twin retired* `20260920.135100` -- this rule once mirrored to a `.cursor/rules/*.mdc` file; the whole family is archived, unmodified, at [`.cursor-archive/rules/`](../../.cursor-archive/rules/README.md).

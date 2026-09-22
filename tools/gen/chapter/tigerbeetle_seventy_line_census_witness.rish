@@ -1,0 +1,38 @@
+# tools/gen/chapter/tigerbeetle_seventy_line_census_witness.rish -- e34 seventy-line bound.
+#
+#   rishi/bin/rishi run tools/gen/chapter/tigerbeetle_seventy_line_census_witness.rish
+#
+# Requires gratitude/tigerbeetle submodule present.
+# Clean-room: presence only - never copies into rye/.
+# Leaf only -- no nested elder choirs.
+
+say "tb-seventy-line: Language EN — seventy lines; the screen is the bound."
+say "tb-seventy-line: Style Radiant — art is born of constraints."
+say "tb-seventy-line: Lens TAME — e34 · clean-room study · almanac seat 40."
+
+# AN ABSENT OPTIONAL GITLINK IS A FACT ABOUT THE HOST, NEVER A DEFECT (`20260908.202239`).
+# `gratitude/tigerbeetle` is a submodule this tree STUDIES and never links, so a clone that has not
+# initialised it is a correct clone. The hard assert this replaces made the witness UNROSTABLE: a
+# row would red the fleet on every machine without the checkout, which is why it was never rostered
+# -- and an unrostered witness runs nowhere, so the assert bought a red nobody would ever hear.
+#
+# The census script already answers in three ways: exit 2 `absent`, exit 1 `thin`, exit 0 `ok`.
+# Only `thin` is a defect. Reading `census.ok` cannot tell 1 from 2, so the SKIP is decided here on
+# the clone and the failure is asserted below as a negative on `thin`.
+let clone = run ["test" "-d" "gratitude/tigerbeetle/src"]
+if (clone.ok == false) then say "tb-seventy_line: SKIP -- gratitude/tigerbeetle is an uninitialised submodule here; run git submodule update --init gratitude/tigerbeetle to read this census"
+if (clone.ok == false) then say "GREEN: tb-seventy_line -- skipped honestly, the clone this census reads is absent"
+if (clone.ok == false) then exit 0
+
+let census = run ["sh" "tools/fixtures/t/tigerbeetle_seventy_line_census.sh"]
+say census.out
+assert census.ok else "tb-seventy-line: census failed or thin"
+assert census.out contains "CLONE=present" else "tb-seventy-line: want CLONE=present"
+assert census.out contains "verdict=ok" else "tb-seventy-line: want verdict=ok"
+assert census.out contains "GUIDE_SEVENTY=yes" else "tb-seventy-line: held guide must name seventy"
+assert census.out contains "TAME_SEVENTY=yes" else "tb-seventy-line: TAME must hold functions to seventy"
+assert census.out contains "SUPPLEMENT_SEVENTY=yes" else "tb-seventy-line: supplement must name the hard limit"
+assert census.out contains "TIDY=yes" else "tb-seventy-line: tidy.zig must enforce seventy"
+assert census.out contains "RATCHET=yes" else "tb-seventy-line: tidy ratchet min must be seventy"
+
+say "GREEN: tb-seventy-line — guide·TAME·supplement·style·tidy·ratchet ok"

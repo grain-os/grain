@@ -1,0 +1,79 @@
+//! mantra/src/receipt_offer_witness.rye -- admission, deterministic replay, and refusal stillness.
+//!
+//! Replay determinism is read with `receipt.fact_eql`, which compares every field the offer fact
+//! publishes. Comparing `receipt_id` alone -- one field of fifteen -- passed against a replay that
+//! dropped `purpose`, mangled `value_amount`, or moved `expires_at`, and its passing was evidence
+//! about one string. The sibling `receipt_refusal_witness.rye` says the same thing about a refusal
+//! line in its own comment; this is that reading, arriving at the replay.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const receipt = @import("receipt_offer.rye");
+
+// Force every declaration in the claimed module through semantic analysis. Rye
+// otherwise checks only the functions this witness happens to call.
+comptime {
+    for (@typeInfo(receipt).@"struct".decls) |decl| {
+        _ = &@field(receipt, decl.name);
+    }
+}
+
+fn fixture() receipt.ReceiptOfferFact {
+    return .{
+        .schema = receipt.schema_v1,
+        .receipt_id = "receipt:sample-pollinator-counts:20260912",
+        .holder_id = "person:sample-holder", .recipient_id = "org:sample-steward",
+        .product_id = "data:weekly-pollinator-counts",
+        .product_digest = "7f2d5e4b3b7f4d9ca1e8bfe4dcbddf40e67a4a880f961c27ee6a28c92f17e8a1",
+        .purpose = "habitat-planning", .value_amount = 1200,
+        .value_unit = "USD-cent-simulated", .value_basis = "one-purpose license offer",
+        .return_kind = "service-credit", .issued_at = 1_789_228_800,
+        .expires_at = 1_791_820_800, .signer_id = "person:sample-holder",
+        .signature = "fixture-signature-v1",
+    };
+}
+
+fn unchanged(log: *const receipt.Log) void {
+    // invariant: a refused admission leaves the sole durable slot empty.
+    assert(log.offer == null);
+    // invariant: the typed durable slot has a concrete, nonzero representation.
+    assert(@sizeOf(receipt.Log) > 0);
+}
+
+pub fn main(_: std.process.Init) !u8 {
+    const fact = fixture();
+    var log = receipt.Log{};
+    try log.append(fact, 512, true);
+    const first = try log.replay(fact.issued_at);
+    const second = try log.replay(fact.issued_at);
+    assert(first.status == .offered);
+    assert(second.status == .offered);
+    // invariant: two replays of one log hand back the same fact in every published field.
+    assert(receipt.fact_eql(first.offer, second.offer));
+    // invariant: a replayed fact matches the one admitted, field for field.
+    assert(receipt.fact_eql(first.offer, fact));
+    const expired = try log.replay(fact.expires_at);
+    assert(expired.status == .expired);
+    // invariant: expiration moves the status and leaves every published field alone.
+    assert(receipt.fact_eql(expired.offer, fact));
+
+    if (log.append(fact, 512, true)) |_| unreachable else |err| assert(err == error.TooManyFacts);
+    // invariant: a refused second append leaves the elder fact whole, not merely identified.
+    assert(receipt.fact_eql((try log.replay(fact.issued_at)).offer, fact));
+
+    var refused = receipt.Log{};
+    var bad = fact;
+    bad.purpose = "";
+    if (refused.append(bad, 512, true)) |_| unreachable else |err| assert(err == error.Empty);
+    unchanged(&refused);
+    bad = fact;
+    bad.value_amount = 9_000_000_001;
+    if (refused.append(bad, 512, true)) |_| unreachable else |err| assert(err == error.AmountTooLarge);
+    unchanged(&refused);
+    if (refused.append(fact, 512, false)) |_| unreachable else |err| assert(err == error.InvalidSignature);
+    unchanged(&refused);
+
+    print("GREEN: receipt offer -- bounded admission, deterministic replay, expiration, refusal stillness.\n", .{});
+    return 0;
+}

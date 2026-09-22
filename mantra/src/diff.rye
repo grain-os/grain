@@ -1,0 +1,401 @@
+//! mantra/src/diff.rye -- pure diff: old weave state -> new text -> Diff.
+//!
+//! A Diff names exactly what changed between the weave's current view and a
+//! new version of the text. It is pure: same inputs produce the same Diff,
+//! every time. The algorithm is a simple LCS (longest common subsequence) over
+//! line text equality -- small, correct, and determinable.
+//!
+//! Public surface:
+//!   max_diff_lines           -- the per-side ceiling, read from the weave's own
+//!   max_diff_table_bytes     -- the largest table this module will allocate
+//!   max_diff_table_cells     -- derived from the two above, never spelled twice
+//!   DiffError                -- what this module refuses, by name
+//!   check_bounds(m, n)       -- the refusal, decided before anything allocates
+//!   diff(alloc, site, old, new) !Diff
+//!   split_lines(alloc, text) ![]const []const u8
+//!
+//! THE TERMINATOR IS A LINE (REDS %689, closed `20260917`). `split_lines` kept
+//! every token but the last until that day, which made it non-injective: `x\ny`
+//! and `x\ny\n` split to one list, so a content-addressed store gave two
+//! documents one address and `mantra status` called the changed file clean in
+//! both directions. the maintainer ruled door 2 on `20260916.000449` -- a weave records
+//! the terminator as HISTORY -- so the empty token a trailing newline produces
+//! is kept and appending a newline is an INSERT like any other edit. The price
+//! was named in the door before it was chosen: a terminated document weaves one
+//! line longer than a hand counts, and every weave already on disk drifts by one
+//! on its next add. Empty text still answers zero lines, since a file with no
+//! bytes has no terminator to record.
+//!
+//! THE REPAIR WAITED ON ITS SIBLING. This change was built, proven and withdrawn
+//! on `20260916`, because keeping the terminator turns every APPEND into a
+//! MIDDLE INSERT -- the new line lands before the terminator rather than at the
+//! end -- and a middle insert was `%680`'s own defect. `Diff.after` and the
+//! anchor read in `Weave.apply` closed that on `20260916.061223`, and this
+//! landed on that footing.
+//!
+//! THE TABLE IS QUADRATIC, and until `20260907` nothing named its ceiling. The
+//! LCS table is `(m + 1) * (n + 1)` cells of `u32`, allocated in one call from
+//! two lengths the caller chooses, and this module held no named max, no named
+//! error, and no edge check -- while the `usize -> u32` seam casts below it ran
+//! with the bound that makes them safe unstated. `weave.rye` one seam over
+//! names `max_weave_lines` and reads it at the edge of both `apply` and
+//! `merge`; the module that feeds it did not. The fence is here now, and it is
+//! read at the edge, before a single cell is allocated.
+//!
+//! WHY THE CEILING IS WHERE IT IS. The per-side bound is the weave's own
+//! `max_weave_lines`, IMPORTED rather than restated: a diff's old side comes
+//! from `Weave.current`, so a side larger than a weave can hold is a side this
+//! module will never legitimately be handed, and two constants naming one
+//! quantity are two constants that will one day disagree. The table bound is
+//! stated in BYTES, because bytes are what the machine actually has, and the
+//! cell count is derived from it by `@sizeOf(u32)`. One gibibyte admits 16,384
+//! lines against 16,384 -- above this tree's own largest tracked `.rye` at
+//! 11,665 lines (measured `20260907`), and far below the point where the
+//! machine is in trouble.
+//!
+//! THE REFUSAL IS A FUNCTION, so it can be pressed by hand. `check_bounds`
+//! takes two lengths and decides, allocating nothing, which is what lets
+//! `diff_witness.rye` prove the boundary AT the ceiling and one cell past it
+//! without building a million-line document to do it. `diff` calls the same
+//! function at its own edge, so the proven decision and the applied decision
+//! are one decision rather than two that agree today.
+//!
+//! The resulting Diff may be applied to the weave with Weave.apply.
+//! Pure functions -- no file I/O, no side effects.
+const std   = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const Weave = @import("weave.rye").Weave;
+const Line   = @import("weave.rye").Line;
+const Diff   = @import("weave.rye").Diff;
+const LineId = @import("weave.rye").LineId;
+
+/// The largest number of lines this module will diff on either side, read from
+/// the weave rather than restated here.
+///
+/// A diff's old side comes from `Weave.current`, so a side larger than a weave
+/// can hold is a side this module will never legitimately be handed -- and one
+/// quantity spelled in two files is one quantity two files will one day
+/// disagree about, which for a bound means the checked ceiling and the real
+/// ceiling parting company in silence.
+pub const max_diff_lines: u32 = @import("weave.rye").max_weave_lines;
+
+/// The largest transient allocation this module will make, in bytes.
+///
+/// Stated in bytes because bytes are what the machine actually has. One
+/// gibibyte admits 16,384 lines against 16,384, which stands above this tree's
+/// own largest tracked `.rye` at 11,665 lines (measured `20260907`) with room
+/// to spare, and far below the point where the machine is in trouble. A
+/// ceiling that refuses a file the tree itself writes is a ceiling somebody
+/// turns off.
+pub const max_diff_table_bytes: u64 = 1 << 30;
+
+/// The table ceiling in cells, derived from the byte ceiling rather than
+/// spelled beside it, so the two can never drift apart.
+pub const max_diff_table_cells: u64 = max_diff_table_bytes / @sizeOf(u32);
+
+/// What this module refuses, by name. Both are read at the edge -- before an
+/// allocation is made, rather than after one has grown.
+pub const DiffError = error{
+    /// One side names more lines than a weave can hold, so the `usize -> u32`
+    /// cast below it would be a cast whose bound nobody checked, and the diff
+    /// would name identities no weave could accept.
+    TooManyLines,
+    /// The two sides are each inside the per-side ceiling and their PRODUCT is
+    /// not: the LCS table grows as `(m + 1) * (n + 1)`, so two documents that
+    /// are individually ordinary can ask for an allocation that is not.
+    TableTooLarge,
+};
+
+/// Whether a diff of these two lengths may be attempted, decided before
+/// anything is allocated.
+///
+/// This is a function rather than a pair of `if`s inside `diff` so the boundary
+/// can be pressed by hand: `diff_witness.rye` proves the answer AT the ceiling
+/// and one cell past it without building a million-line document to do it, and
+/// `diff` reads the same function at its own edge -- so the decision that is
+/// proven and the decision that is applied are one decision.
+///
+/// The arithmetic runs in `u64` on purpose. The product of two `u32` lengths
+/// overflows a `u32`, and a bound check that overflows is a bound check that
+/// reports the wrong answer in the one direction that matters.
+///
+/// Precondition:  none -- any two lengths are a fair question to ask.
+/// Postcondition: returning means the table fits both ceilings, so every
+///   allocation and every seam cast below is already proven safe.
+pub fn check_bounds(old_len: u64, new_len: u64) DiffError!void {
+    // invariant: each side stands inside the weave's own ceiling, so the casts
+    // to u32 further down are casts whose bound has been read
+    if (old_len > max_diff_lines) return DiffError.TooManyLines;
+    if (new_len > max_diff_lines) return DiffError.TooManyLines;
+
+    // invariant: both sides are now inside a u32, so the product below is a u64
+    // product of two u32 quantities and cannot overflow
+    assert(old_len <= max_diff_lines);
+    assert(new_len <= max_diff_lines);
+
+    // The table is one cell per (old prefix, new prefix) pair, both counting the
+    // empty prefix -- so the sum is what the ceiling reads, at the edge.
+    const cells: u64 = (old_len + 1) * (new_len + 1);
+    if (cells > max_diff_table_cells) return DiffError.TableTooLarge;
+}
+
+/// Compute the diff between `old_lines` (the weave's current view) and
+/// `new_text` (the desired lines of the file as it is now), as an edit
+/// authored by `site`.
+///
+/// The site is carried rather than derived: a diff is one hand's edit, and
+/// every line it inserts is stamped with that hand so the identity is unique
+/// across every weave the edit will ever reach. `Weave.apply` reads it off the
+/// Diff, so this is the one place a caller says who is editing.
+///
+/// Refusal:       `DiffError.TooManyLines` when either side passes
+///   `max_diff_lines`, and `DiffError.TableTooLarge` when the two are each
+///   inside that ceiling and their product asks for a table past
+///   `max_diff_table_cells`. Both are read by `check_bounds` at the edge,
+///   before a single cell is allocated.
+/// Precondition:  old_lines is sorted by identity (guaranteed by Weave.current).
+/// Postcondition: the returned Diff names exactly the lines that changed --
+///   every old line absent from the LCS by its stable identity, and every new
+///   line absent from it in new-text order.
+///
+/// What this deliberately does NOT promise, because it cannot: that applying
+/// the Diff reproduces `new_text` in order. `Diff.inserts` is `[]const []const u8`
+/// -- text and nothing else -- so an insert carries WHAT was added and never
+/// WHERE, and `Weave.apply` appends every insert at the end. The round trip is
+/// therefore exact for an append-shaped edit and reorders for a middle one:
+/// old `a c` against new `a b c` inserts `b` and reads back `a c b`. Proven
+/// both ways in `diff_witness.rye`. Closing it wants an anchor per insert,
+/// which widens a structure Glow's shape is pinned against -- a seam, and so
+/// the maintainer's word rather than a lap's.
+///
+/// The returned Diff borrows its insert strings from `new_text` -- the caller
+/// must ensure `new_text` outlives the Diff, or copy as needed.
+pub fn diff(
+    allocator: std.mem.Allocator,
+    site:      u32,
+    old_lines: []const Line,
+    new_text:  []const []const u8,
+) !Diff {
+    // The refusal, at the edge, before a single cell is allocated. Both
+    // ceilings are read by the one function a witness presses directly, so the
+    // decision proven there is the decision taken here.
+    try check_bounds(old_lines.len, new_text.len);
+
+    // LCS table over (old_lines, new_text) using line text equality.
+    const m = old_lines.len;
+    const n = new_text.len;
+
+    // invariant: the check above passed, so each side stands inside the weave's
+    // own ceiling and the casts to u32 further down are casts whose bound has
+    // been read rather than assumed -- usize lives at the inherited-std seam
+    // alone, and this is where that seam is proven
+    assert(m <= max_diff_lines);
+    assert(n <= max_diff_lines);
+
+    // lcs[i][j] = length of LCS of old_lines[0..i] and new_text[0..j].
+    // Allocate as a flat array: lcs[i * (n+1) + j].
+    const table = try allocator.alloc(u32, (m + 1) * (n + 1));
+    defer allocator.free(table);
+    @memset(table, 0);
+
+    for (1..m + 1) |i| {
+        for (1..n + 1) |j| {
+            if (std.mem.eql(u8, old_lines[i - 1].text, new_text[j - 1])) {
+                table[i * (n + 1) + j] = table[(i - 1) * (n + 1) + (j - 1)] + 1;
+            } else {
+                const up   = table[(i - 1) * (n + 1) + j];
+                const left = table[i * (n + 1) + (j - 1)];
+                table[i * (n + 1) + j] = if (up >= left) up else left;
+            }
+        }
+    }
+
+    // Back-track to find which old lines are in the LCS (kept) and which are
+    // not (deleted), and which new lines are not in the LCS (inserted).
+    var kept_old = try allocator.alloc(bool, m); // true = matched in LCS
+    var kept_new = try allocator.alloc(bool, n); // true = matched in LCS
+    defer allocator.free(kept_old);
+    defer allocator.free(kept_new);
+    @memset(kept_old, false);
+    @memset(kept_new, false);
+
+    var i: u32 = @intCast(m);
+    var j: u32 = @intCast(n);
+    while (i > 0 and j > 0) {
+        if (std.mem.eql(u8, old_lines[@intCast(i - 1)].text, new_text[@intCast(j - 1)])) {
+            kept_old[@intCast(i - 1)] = true;
+            kept_new[@intCast(j - 1)] = true;
+            i -= 1;
+            j -= 1;
+        } else if (table[@intCast((i - 1) * (@as(u32, @intCast(n)) + 1) + j)] >= table[@intCast(i * (@as(u32, @intCast(n)) + 1) + (j - 1))]) {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
+    }
+
+    // Collect deletes: old lines not in the LCS, by their stable identity.
+    // Identity rather than position, since old_lines may come from a merged
+    // weave holding lines of several sites, where a position alone names two.
+    var deletes: std.ArrayListUnmanaged(LineId) = .empty;
+    for (old_lines, 0..) |line, idx| {
+        if (!kept_old[idx]) {
+            try deletes.append(allocator, line.id());
+        }
+    }
+
+    // Collect inserts: new lines not in the LCS, in new-text order, and beside
+    // each the line it REPLACES (REDS %680).
+    //
+    // THE PAIRING IS BY GAP, which is how a diff tool decides a hunk is a
+    // replacement rather than a delete standing next to an insert. Both walks
+    // count the kept lines behind them; two unkept lines with the same count
+    // behind them fall in the same gap between anchors, and inside one gap the
+    // nth departure is replaced by the nth arrival. A gap holding more
+    // departures than arrivals leaves those deletes unpaired, and one holding
+    // more arrivals leaves those inserts fresh -- both are ordinary and neither
+    // is a replacement.
+    //
+    // Pairing decides WHICH line a replacement stands in for. Where it then
+    // goes is `Weave.apply`'s answer, and it answers with the `ord` this names.
+    var gap_of_delete: std.ArrayListUnmanaged(u32) = .empty;
+    var seen_kept: u32 = 0;
+    for (old_lines, 0..) |_, idx| {
+        if (kept_old[idx]) {
+            seen_kept += 1;
+        } else {
+            try gap_of_delete.append(allocator, seen_kept);
+        }
+    }
+
+    // THE ANCHOR EACH GAP SITS BEHIND, read off the old side: the last kept line
+    // before the gap opens. An insert with no replacement takes its place and
+    // sorts just past it, which is what puts a middle insert in the middle.
+    var anchor_of_gap: std.ArrayListUnmanaged(?LineId) = .empty;
+    try anchor_of_gap.append(allocator, null); // gap 0 opens the document
+    for (old_lines, 0..) |line, idx| {
+        if (kept_old[idx]) try anchor_of_gap.append(allocator, line.id());
+    }
+
+    var inserts: std.ArrayListUnmanaged([]const u8) = .empty;
+    var replaces: std.ArrayListUnmanaged(?LineId) = .empty;
+    var after: std.ArrayListUnmanaged(?LineId) = .empty;
+    var taken: u32 = 0;
+    seen_kept = 0;
+    for (new_text, 0..) |text, idx| {
+        if (kept_new[idx]) {
+            seen_kept += 1;
+            // A gap closes at an anchor, so the count of departures already
+            // spoken for resets to whatever this gap has consumed.
+            taken = 0;
+            continue;
+        }
+        try inserts.append(allocator, text);
+        // The nth arrival in this gap answers to the nth departure in the same
+        // gap, when there is one.
+        var found: ?LineId = null;
+        var seen_in_gap: u32 = 0;
+        for (gap_of_delete.items, 0..) |gap, d| {
+            if (gap != seen_kept) continue;
+            if (seen_in_gap == taken) {
+                found = deletes.items[d];
+                break;
+            }
+            seen_in_gap += 1;
+        }
+        taken += 1;
+        try replaces.append(allocator, found);
+        // invariant: every gap has an anchor recorded for it, the document head
+        // included, so this read can never run past the list it walks.
+        assert(seen_kept < anchor_of_gap.items.len);
+        try after.append(allocator, anchor_of_gap.items[seen_kept]);
+    }
+    // invariant: one answer per insert, so a reader walking the two together
+    // can never run off the end of one while the other still has entries.
+    assert(replaces.items.len == inserts.items.len);
+    // invariant: and one anchor per insert, for the same reason.
+    assert(after.items.len == inserts.items.len);
+
+    // Postcondition: applying the diff is a net transformation -- not necessarily
+    // fewer lines, yet never a negative-length insert or delete.
+    const result = Diff{
+        .site    = site,
+        .inserts = try inserts.toOwnedSlice(allocator),
+        .deletes = try deletes.toOwnedSlice(allocator),
+        .replaces = try replaces.toOwnedSlice(allocator),
+        .after = try after.toOwnedSlice(allocator),
+    };
+    // invariant: a diff inserts no more than the new document holds and deletes no more than
+    // the old one did, so neither side can be asked to apply a change to a line that never
+    // existed
+    assert(result.inserts.len <= n);
+    assert(result.deletes.len <= m);
+    return result;
+}
+
+/// Split `text` into lines on `\n`, returning a slice of string slices. The
+/// returned slice and all strings within it are allocated from `allocator`.
+/// A trailing newline produces a final empty line, which is how the terminator
+/// reaches the weave as a fact rather than as a byte nobody records.
+///
+/// THE TERMINATOR IS A LINE (REDS %689, the maintainer's word `20260916.000449`, door
+/// 2 -- a weave records the terminator as HISTORY). This split dropped that
+/// empty token until `20260917`, and dropping it made the function
+/// non-injective: `x\ny` and `x\ny\n` split to one list, so a
+/// content-addressed store gave two documents one address and `mantra status`
+/// called the changed file clean in both directions. The token is kept now, so
+/// appending a newline is an INSERT and removing one is a DELETE, each a line
+/// of the history like any other edit.
+///
+/// EMPTY TEXT STILL ANSWERS ZERO, and the guard is at the head rather than in
+/// the loop: `splitScalar` over an empty string yields one empty token, and a
+/// file holding no bytes has no terminator to record. Kept, that token would
+/// make an empty file and a file holding a single newline the same document --
+/// the very collision this change exists to close.
+///
+/// Refusal: `DiffError.TooManyLines` on the line that would carry the document
+/// past `max_diff_lines` -- `diff`'s own ceiling, since this slice is what a
+/// caller hands to `diff`.
+pub fn split_lines(allocator: std.mem.Allocator, text: []const u8) ![]const []const u8 {
+    maybe(text.len == 0); // empty text is valid; yields zero lines
+
+    // The one case decided before the walk, for the reason the head gives: no
+    // bytes means no terminator, and the splitter's own empty token would
+    // otherwise stand in for one.
+    if (text.len == 0) return &.{};
+
+    // THE CEILING IS READ IN THE LOOP RATHER THAN AT THE EDGE, and the reason is
+    // worth saying: a text's line count is not knowable from its byte length
+    // without walking it, so deriving the count ahead of the split would mean
+    // walking twice to learn one number. The ceiling itself is `diff`'s own,
+    // because this slice is what a caller hands to `diff`: refusing here
+    // refuses the document one call before a quadratic table has been asked
+    // for.
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    var it = std.mem.splitScalar(u8, text, '\n');
+    while (it.next()) |line| {
+        // The refusal, taken before the append rather than after it, so the
+        // list never holds a line past the ceiling even transiently.
+        if (lines.items.len >= max_diff_lines) return DiffError.TooManyLines;
+        // invariant: the split stays inside the ceiling `diff` will read, so a
+        // document that survives this call is a document that may be diffed
+        assert(lines.items.len < max_diff_lines);
+        try lines.append(allocator, line);
+    }
+
+    const result = try lines.toOwnedSlice(allocator);
+    // invariant: no returned line carries the separator it was split on, which
+    // is what makes the result a document rather than a re-parseable blob
+    for (result) |line| assert(std.mem.indexOfScalar(u8, line, '\n') == null);
+    // invariant: the result stands inside the ceiling `diff` reads, so the two
+    // functions of this module agree about what a document is
+    assert(result.len <= max_diff_lines);
+    return result;
+}
+
+/// maybe: a named acknowledgement of legitimately variable input. Compiles to
+/// nothing in release builds -- same weight as assert.
+inline fn maybe(condition: bool) void {
+    _ = condition;
+}

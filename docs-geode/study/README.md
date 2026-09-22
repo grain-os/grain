@@ -1,0 +1,67 @@
+# Study -- how to read this tree
+
+*New to computing itself? Eight reading walks start at [`../lessons/README.md`](../lessons/README.md),
+written for someone who has never written a line of code and trusted with the whole truth anyway.*
+
+**Where this sits:** home is [`../../README.md`](../../README.md) - a first hour in your hands is
+[`../tutorials/the-first-hour.md`](../tutorials/the-first-hour.md) - the whole
+path from nothing to a signed, sandboxed home is [`../../SOURCE.md`](../../SOURCE.md)
+
+*Not a tour of the code. A short account of how the reading is meant to go, and which room answers which kind of question.*
+
+**Language:** EN - **Style:** Bhakta at the Door setting (guide at `context/BHAKTA_STYLE.md`, named rather than linked -- it stays in the field)
+**Written:** `20260821.190149` - **Last refreshed:** `20260916.183325` (the gratitude room's typed count leaves; it read *more than two hundred* from its birth commit, when the room held 110) - **Status:** Living - **Kind:** crushed study guide
+
+---
+
+## Four questions, four rooms
+
+Welcome. This page is for someone who has just arrived and would like a way in, and it assumes you
+have never read a codebase before. That is a fine place to start.
+
+A tree this size reads beautifully by question, the way a library does, and it reads poorly cover to
+cover for the same reason. So ask your question first and let it choose the room for you.
+
+**"What is this *for*?"** -> [`foundations/`](../../foundations/README.md). The why beneath the craft -- work as offering, custody before capability, why a front door is the most Lindy-exposed thing a project owns. Each page takes one question and gives you a place to begin.
+
+**"How do I *use* it?"** -> [`../tutorials/the-first-hour.md`](../tutorials/the-first-hour.md), then [`../api/rishi-language-reference.md`](../api/rishi-language-reference.md), then [`../libraries/README.md`](../libraries/README.md). Path, reference, index -- in that order.
+
+**"Why is it built *this way*?"** -> [`active-designing/`](../../active-designing/README.md) for the essays and [`context/specs/`](../../context/specs/) for the settled decisions. When you want the reasoning rather than the ruling, the essay is the one you want.
+
+**"What actually *happened*?"** -> [`session-logs/`](../../session-logs/README.md). Every round since the tree began, with its reasoning and its mistakes. It is long because it is complete.
+
+## The names themselves
+
+Before any of those rooms answers you, its filenames will. A dated piece here is called
+`20260905-154954_the-clock-and-the-mark.md`, and a ledger row is called `%438`, and both forms say
+something exact. [**Reading a name**](reading-a-name.md) teaches the two marks in about five
+minutes, and it is the shortest way to feel at home on this shelf.
+
+## Two habits worth borrowing before you read anything
+
+These two are the difference between reading this tree and trusting it, and both take a minute to
+learn.
+
+**Read the witness rather than the claim.** A thing here earns the word working when a program has checked it. Files whose names end in `_witness.rish` describe those checks. Run the witness for the claim you need, then read its result and any limits it reports. When a page and a witness disagree, the witness is right and the page is a red.
+
+**Read the reds.** [`construction/REDS.md`](../../construction/REDS.md) records what this tree got wrong, in three fields: what went wrong, what caught it, what it taught. It is the fastest way to learn how a project actually thinks, because nobody polishes a mistake. Start at the newest and read backward.
+
+## The teachers, kept in their own room
+
+[`gratitude/`](../../gratitude/README.md) holds what this tree learned from elsewhere -- a study for each teacher, naming them plainly. It is a **reading library, never a dependency**: concepts enter through the clean room, code never does. If you want to know where an idea came from, it is named there rather than absorbed silently.
+
+The room keeps growing, so count it rather than trusting a sentence:
+
+```sh
+git ls-files 'gratitude/*.md' | wc -l
+```
+
+This line used to say *more than two hundred pages*, and it said so from the commit that wrote it, when the room held 110. Practice what the habit above asks: a page can be wrong the day it ships, and the reading beside it is what tells you.
+
+## The compass, when you are lost
+
+[`foundations/20260826-024943_follow-our-compass.md`](../../foundations/20260826-024943_follow-our-compass.md) is the return habit: foundations, then the grain, then the two rooms, then what is being designed, then what is being done now. Walking it in order is how this tree re-finds its own direction, and it works just as well for a reader.
+
+---
+
+*May you find the room that answers your question, and may the answer be one a witness already proved.*

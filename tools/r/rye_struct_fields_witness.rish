@@ -1,0 +1,102 @@
+# tools/r/rye_struct_fields_witness.rish -- the field reader, and the four claims it lets be checked.
+#
+# WHY THIS RUNG EXISTS (REDS %500). Four rostered tier-lap guards -- mantra_glow_tend_limb1
+# through limb4 -- each carried a Glow placard declaring that a structure "carries exactly N
+# fields", and each proved that claim with N `grep -Fq` calls for N field lines. Presence is not a
+# count. A fifth field passes every one of them, a reorder passes every one of them, and all four
+# refused with the words "missing or reordered". Two named movements of the Mantra arc were
+# recorded on the operator card and in a commit body as waiting on that pin: the identity gap,
+# which wants a fourth field on `Line`, and the diff anchor, which wants one on `Diff`. Both were
+# waiting on a lock with no bolt in it.
+#
+# WHAT THIS PROVES. tools/fixtures/r/rye_struct_fields_scan.sh reads a named struct's declared
+# fields out of a named Rye file, in declaration order, and says by name when it cannot. The
+# control breaks it twenty-five ways in a throwaway pen, and two of those breaks run the ELDER
+# predicate verbatim beside the new reading on the same mutated file -- a fourth field and a
+# reorder, each of which the elder waves through and the scan sees. Those two passes are the
+# sharpest phases here, in the tree's own shape: every other phase proves the reader bites, and
+# these two prove what the form it replaces did not.
+#
+# WHAT IT DOES NOT REACH. Whether a struct SHOULD carry the fields it carries, and whether the
+# placard's number is the right number. This proves the claim and the code can be compared, and
+# stops there; the four limbs are where the comparison is made.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/r/rye_struct_fields_witness.rish
+
+say "rye-struct-fields: Language EN -- how many fields does that struct actually declare?"
+say "rye-struct-fields: Style Gauge, Meter -- a count and an order, or a refusal by name."
+say "rye-struct-fields: Lens TAME -- three named refusals, each proven from both sides."
+
+say "rye-struct-fields: the reader answers the four structures the limbs stand over..."
+let line = run ["sh" "tools/fixtures/r/rye_struct_fields_scan.sh" "--fields" "mantra/src/weave.rye" "Line"]
+assert line.ok else "rye-struct-fields: the reader refused on Line -- ${line.out_brief}"
+let line_fields = trim line.out
+# Line took `site` on 20260906.212206: a position counter runs inside one weave, so `pos`
+# alone names a line there and nowhere else, and the pair is what lets two branches merge.
+# It took `run` on 20260907.173200, when document order moved out of `LineId` into `Place`:
+# every line of one `apply` carries one run, so a hand's whole paragraph sorts as a block
+# and the site tie is broken once for the run rather than at each line inside it.
+# It took `ord` on 20260916, the order key held apart from the identity `pos` and `site`
+# spell, so a line can be PLACED without being RENAMED -- which is what lets an insert sit
+# between two others. A line written before the v3 record carries `ord == pos`.
+# The ORDER is held as hard as the count, since a reorder is a silent wire change.
+assert line_fields == "text gen pos site run ord" else "rye-struct-fields: Line no longer reads text gen pos site run ord -- ${line_fields}"
+
+let weave = run ["sh" "tools/fixtures/r/rye_struct_fields_scan.sh" "--fields" "mantra/src/weave.rye" "Weave"]
+assert weave.ok else "rye-struct-fields: the reader refused on Weave -- ${weave.out_brief}"
+let weave_fields = trim weave.out
+# Weave took `next_run` in the same round Line took `run`, and this pin read `lines next_pos`
+# for a lap while it did -- not because the pin was stale, yet because the reader stopped at
+# the doc comment above the new field and never saw it. The reader reads past `///` now, so
+# this line is a claim about the struct again rather than about the walk's blind spot.
+assert weave_fields == "lines next_pos next_run" else "rye-struct-fields: Weave no longer reads lines next_pos next_run -- ${weave_fields}"
+
+let diff = run ["sh" "tools/fixtures/r/rye_struct_fields_scan.sh" "--fields" "mantra/src/weave.rye" "Diff"]
+assert diff.ok else "rye-struct-fields: the reader refused on Diff -- ${diff.out_brief}"
+let diff_fields = trim diff.out
+# Diff took `site` first on the same lap -- the hand that authored the edit, stamped on every
+# insert. It sits on the edit rather than on the weave, so a merge has no site to reconcile.
+# It took `replaces` and then `after` by 20260916, both optional with `= &.{}` defaults so a
+# caller building a Diff by hand still compiles. `replaces` pairs each insert with the line it
+# stands in for, which is what lets a replacement inherit a place; `after` names the kept line
+# each insert FOLLOWS, which is the diff anchor this rung's own head recorded as waiting on a
+# lock with no bolt in it (REDS %500). Both landed and this placard stayed behind for a day,
+# hidden underneath `Line`'s own drift -- one assert refusing before the other could be read.
+assert diff_fields == "site inserts deletes replaces after" else "rye-struct-fields: Diff no longer reads site inserts deletes replaces after -- ${diff_fields}"
+
+let store = run ["sh" "tools/fixtures/r/rye_struct_fields_scan.sh" "--fields" "mantra/src/store.rye" "Store"]
+assert store.ok else "rye-struct-fields: the reader refused on Store -- ${store.out_brief}"
+let store_fields = trim store.out
+assert store_fields == "root mantra_dir blobs_dir" else "rye-struct-fields: Store no longer reads root mantra_dir blobs_dir -- ${store_fields}"
+
+say "rye-struct-fields: breaking the reader in a throwaway pen, twenty-five ways..."
+let control = run ["sh" "tools/fixtures/r/rye_struct_fields_control.sh"]
+assert control.ok else "rye-struct-fields: the control must complete -- a reader nobody has watched fail is a reader nobody has tested -- ${control.out_brief}"
+assert control.out contains "verdict=ok" else "rye-struct-fields: a planted case behaved wrongly -- ${control.out_brief}"
+assert control.out contains "failed=0" else "rye-struct-fields: a planted case behaved wrongly -- ${control.out_brief}"
+assert control.out contains "behaviors=25" else "rye-struct-fields: the control ran a different number of behaviors than this rung names -- ${control.out_brief}"
+
+# The pen proven innocent first, so every refusal below reads as the break speaking.
+assert control.out contains "ok    clean/count -- 3" else "rye-struct-fields: the clean pen must read its own three fields"
+assert control.out contains "ok    clean/fields -- text gen pos" else "rye-struct-fields: the clean pen must read its fields in order"
+
+# The two phases that are the whole finding. Each is a PASS of the elder predicate, which is what
+# makes it evidence: the form these guards used could not see either break.
+assert control.out contains "ok    fourth_field/count -- 4" else "rye-struct-fields: a fourth field must be counted"
+assert control.out contains "ok    fourth_field/elder -- pass" else "rye-struct-fields: the elder predicate must be shown waving a fourth field through -- without this leg the finding is a claim"
+assert control.out contains "ok    reordered/fields -- pos text gen" else "rye-struct-fields: a reorder must be read in the order it stands"
+assert control.out contains "ok    reordered/elder -- pass" else "rye-struct-fields: the elder predicate must be shown waving a reorder through, though it refused in those words"
+
+# The half the elder did hold, kept visible so this rung is not read as calling it worthless.
+assert control.out contains "ok    renamed/elder -- fail" else "rye-struct-fields: the elder caught a rename, and that honest half belongs in the record"
+
+# The three refusals, each by name, and a method body never read as a field list.
+assert control.out contains "ok    method_body/count -- 3" else "rye-struct-fields: a method body must never be counted as fields"
+assert control.out contains "ok    no_fields/verdict -- no_fields" else "rye-struct-fields: an opener with no field under it must refuse by name"
+assert control.out contains "ok    no_fields/exit -- 1" else "rye-struct-fields: a refusal must exit non-zero, or a caller reads zero as an answer"
+assert control.out contains "ok    no_struct/verdict -- no_struct" else "rye-struct-fields: an absent struct must refuse by name"
+assert control.out contains "ok    no_file/verdict -- no_file" else "rye-struct-fields: an absent file must refuse by name"
+assert control.out contains "ok    no_file/exit -- 1" else "rye-struct-fields: an absent file must exit non-zero"
+
+say "GREEN: the field reader counts and orders, refuses by name, and the elder grep is on record waving two breaks through."

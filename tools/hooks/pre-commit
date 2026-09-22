@@ -1,0 +1,528 @@
+#!/bin/sh
+# pre-commit -- a generated page is refreshed by the commit that moves the numbers it shows.
+#
+# WHY THIS WALL. Two pages in this tree are GENERATED and compared against a fresh render by a
+# standing guard: README.md's four front-door numbers (tools/r/readme_metrics.rish) and the crushed
+# library index docs-geode/libraries/README.md (tools/g/geode_libraries.rish). Both count witnesses
+# and Rye modules, which is precisely what most laps here add. So a page goes stale inside the very
+# commit that made it stale, and the guard reds on the NEXT cold start rather than on the lap that
+# earned it. That happened three times across two days: REDS %151 found the front door reading a
+# fascia grade the tree had left, %152 found it one witness behind seventeen minutes after a repair,
+# and the roster's very next run caught the library index the same way, on the lap that added this
+# hook's own witness.
+#
+# The discipline was already written, in a comment at the head of
+# tools/fixtures/r/readme_metrics_scan.sh: "Add a witness or a module and this block goes stale, so it
+# is regenerated in the same commit." A rule living in a comment is a rule no program runs, which is
+# the lesson REDS %150 paid for about a roster in prose. This is that comment, made executable.
+#
+# A THIRD PAGE JOINED THEM on 20260825: construction/REDS.md opens with three numbers about its own
+# row spine, and REDS %127, %141, and %229 are the same fault three times -- a hand books a row and
+# republishes the total, and one of those two acts carries no guard at the moment it happens. So
+# the ledger's headline is generated here too, by tools/fixtures/r/reds_ledger_headline_write.sh.
+#
+# A FOURTH DUTY, AND A DIFFERENT KIND, joined on 20260828: the living pins' byte bounds. The three
+# rules above regenerate a page; this one refuses a commit and regenerates nothing, because a pin
+# over its bound is prose somebody has to choose to spend and no generator can choose for them.
+# REDS %293 named this exact reading in its own third field -- "git diff --cached --name-only piped
+# against the pin roster answers the question mechanically rather than from a reader's sense of what
+# the round was about" -- and left it unbuilt. The next day construction/REDS.md stood 3,992 bytes
+# over and construction/ITINERARY.md 3 bytes over, and four commits shipped across a red roster row
+# (REDS %316). A lantern that fires twice becomes a loom.
+#
+# A FIFTH DUTY, AND THE SECOND OF THE REFUSING KIND, joined on 20260831: a day-shelf row opens the
+# log it names. A session log is born on session-logs/date/YYYYMMDD/ and its row is prepended to
+# session-logs/date/README-index-YYYYMMDD.md, one directory ABOVE the log, so a row written
+# `](YYYYMMDD-HHMMSS_sprig.kyri)` resolves to nowhere. On 20260830 FOURTEEN rows of that shape stood
+# on one shelf from four hands in one evening, and eleven of the same shape had been repaired by
+# hand the lap before (REDS %383). Both guards that catch it -- readme_reach, and reds_fold running
+# the same scan -- run only inside a 45-minute roster pass, so every hand wrote its row, passed a
+# roster, and learned about the row an hour later from somebody else's repair. The repair rate
+# matched the writing rate exactly, which is a lantern rather than a loom.
+#
+# A SIXTH DUTY joined on 20260907: every living link this commit will carry. REDS %524 fired four
+# times with one mechanism -- a fold that a rebase reshapes leaves every citation of its planned
+# shelf name pointing at a file nobody wrote -- and each firing was found by the roster at the
+# next cold pass, half an hour after the push. The reading was never expensive; it was simply
+# never asked here.
+#
+# A SEVENTH DUTY joined on 20260908: a shell source this commit carries runs on both piers. The
+# whole dialect law already exists and stands at `tier lap` inside a roster pass of roughly half an
+# hour, so the lap that breaks a family is structurally never the lap that hears it. Measured that
+# morning: two GNU-only `sed -i` plants landed at 01:59 and were first heard at a DIFFERENT ship's
+# cold open at 02:42 -- 43 minutes and one ship later -- after which two hands cured the same two
+# sites in parallel and one cure withdrew whole. A lantern that fires twice becomes a loom.
+#
+# AN EIGHTH DUTY joined on 20260910: a document this commit carries holds something. The whole
+# empty-document law has stood at `tier lap` since 20260823, and two session logs shipped at zero
+# bytes anyway in the eighteen days after it was seated -- the second one losing its own `loom`
+# lines outright, because a lap's writing session is gone by the time a roster pass half an hour
+# later says the file is hollow. A lantern that fires twice becomes a loom.
+#
+# EIGHT RULES. Four carry their own trigger, because the pages go stale for different reasons and a
+# single trigger would either miss one or fire on everything; four rest cheaply on every commit:
+#
+#   rule one   the fast front-door numbers -- README.md and docs-geode/libraries/README.md.
+#              Trigger: a tools/*_witness.rish or a *.rye file ARRIVES or LEAVES, OR a debt stands
+#              in the git directory because a commit landed by a path git skips this hook for
+#              (REDS %337; tools/hooks/post-commit records it).
+#   rule two   the ledger's headline -- construction/REDS.md.
+#              Trigger: the ledger or one of its fold shelves is staged at all.
+#   rule three the living pins' byte bounds -- every page on the pin roster.
+#              Trigger: this commit stages a rostered pin at all, OR a pin debt stands in the git
+#              directory because a commit landed by a path git skips this hook for. The debt widens
+#              the reading from the staged pins to EVERY rostered one, off the index
+#              (REDS 20260906.211529; tools/hooks/post-commit records it). Refuses, never regenerates.
+#   rule four  a day-shelf row's link -- every shelf index this commit stages.
+#              Trigger: none of its own; the scan reads the staged set and rests at zero shelves.
+#              Refuses rather than regenerates, and names the one repair it can compute.
+#   rule five  a page this commit ADDS names its room at the door -- context/TWO_ROOMS.md.
+#              Trigger: none of its own; the scan reads the staged set and rests at zero pages.
+#              Refuses the ratchet's RISE only; a page the commit MODIFIES is reported and free.
+#   rule six   every living link this commit will carry -- readme_reach_scan.sh --store index.
+#              Trigger: none of its own, deliberately. The class arrives by REBASE rather than by
+#              staging, so no staged-set trigger could see it; the whole index crawl costs 544ms.
+#              Refuses rather than regenerates -- only the author knows which end of a link moved.
+#   rule seven a shell source this commit carries speaks both dialects -- shell_dialect_touch_scan.sh.
+#              Trigger: none of its own; the scan reads the staged set and rests at zero files.
+#              Refuses rather than regenerates. Gates only the five families whose TREE ceiling
+#              stands at zero, read from the elder scan, so no author is refused for a lawful line.
+#   rule eight a document this commit carries holds something -- empty_document_scan.sh staged.
+#   rule nine  no file this commit carries holds a conflict marker -- conflict_marker_scan.sh staged.
+#              Trigger: none of its own; the scan reads the staged set and rests at zero documents.
+#              Refuses rather than regenerates -- only the author knows what the page was to say.
+#
+# WHAT EACH RULE DOES, in order:
+#   1. Rests unless rishi is executable here. A tree without it -- the depersonalized seed, a
+#      shallow checkout -- commits exactly as it always has. This gate covers both rules, and it
+#      is what keeps the seed's single root commit free of a generator it does not carry.
+#   2. Rests unless its own trigger fired. A ten-second render on every commit is a hook the bench
+#      would learn to route around.
+#   3. For each generated page whose generator and page are both on disk: renders it afresh. When
+#      the page already matched, nothing happens.
+#   4. When a page changed and it held no unstaged edits, stages it -- the regeneration is the only
+#      thing staged, so nothing of the author's is swept in.
+#   5. When a page changed and it DID hold unstaged edits, refuses the commit and says so plainly.
+#      The refreshed page is already in the worktree; the author stages it.
+#
+# WHAT IS NOT COVERED, said plainly: this hook runs for `git commit` and `git commit --amend` and
+# for no other path -- `git cherry-pick` and `git rebase` skip it, and tools/hooks/post-commit is
+# the sibling that notices and records the debt rule one pays here. `git merge --no-ff` skips both,
+# and this tree's seated send merges --ff-only, which creates no commit and stales nothing. The
+# fascia grade and the rooms-over-bound count can drift from a commit that adds no witness and no
+# module, and this hook is silent about both. Rule three reads a pin only when the round stages it
+# or while a pin debt stands, so a pin that crosses its bound by a hand editing it outside a commit
+# goes unread here until some later unseen landing widens the reading. And the pin debt refuses the
+# NEXT commit, so a rebase followed straight by a push with nothing between them ships an
+# over-bound pin once; the tree's own send puts a Git-nib amend there, which git DOES run this hook
+# for. The rostered guards still catch all three at a cold start -- and on
+# this bench a cold roster pass runs for roughly half an hour, which is the whole reason the fast,
+# frequent half is worth closing here.
+#
+# Proven both ways by tools/g/generated_page_freshness_witness.rish over
+# tools/fixtures/g/generated_page_freshness_control.sh, on a throwaway repository; the ledger rule's
+# own writer is proven by tools/r/reds_ledger_headline_witness.rish.
+# Armed by rishi/bin/rishi run tools/i/install_hooks.rish.
+
+set -eu
+
+[ -x rishi/bin/rishi ] || exit 0
+
+refused=no
+staged=""
+
+# One page, one generator, one render. The caller has already decided the trigger fired; this
+# knows only how to refresh a page and how to behave about the author's own unstaged edits.
+refresh_page() {
+  generator=$1
+  page=$2
+  shift 2
+
+  [ -f "$generator" ] || return 0
+  [ -f "$page" ] || return 0
+
+  if git diff --quiet -- "$page"; then dirty=no; else dirty=yes; fi
+  before=$(git hash-object "$page")
+
+  # The generator's own words ride the refusal -- a jailed hook is the one
+  # place nobody can rerun the command by hand, and two seats once stood
+  # twelve hours on an error this line used to discard (20260831).
+  gen_out=$("$@" 2>&1) && gen_ok=yes || gen_ok=no
+  if [ "$gen_ok" = no ]; then
+    echo "pre-commit: $generator is present and failed -- its own last words:" >&2
+    printf '%s\n' "$gen_out" | tail -12 >&2
+    echo "pre-commit: rerun by hand: $*" >&2
+    exit 1
+  fi
+
+  after=$(git hash-object "$page")
+  [ "$before" = "$after" ] && return 0
+
+  if [ "$dirty" = yes ]; then
+    echo "pre-commit: this commit moves the numbers $page shows, so it was refreshed in the" >&2
+    echo "worktree. It carries unstaged edits of your own, so it was left unstaged rather than" >&2
+    echo "swept into this commit. Stage $page and commit again." >&2
+    refused=yes
+    return 0
+  fi
+
+  git add "$page"
+  staged="$staged $page"
+}
+
+# RULE ONE -- the fast front-door numbers. They move only when a witness or a module arrives or
+# leaves, which is precisely what most laps here do.
+#
+# THE SECOND TRIGGER, added 20260829 (REDS %337): a debt recorded by tools/hooks/post-commit. Git
+# runs pre-commit for `git commit` and `git commit --amend` and for nothing else, so a commit made
+# by `git rebase` or `git cherry-pick` -- which the twice-pulled send REQUIRES whenever the anointed
+# remote moved -- lands without this hook ever seeing it. post-commit notices that and writes
+# `derived-pages-owed` in the git directory; this reads it, so the next ordinary commit here pays
+# the debt whether or not it moves a witness of its own. The marker is cleared by post-commit when
+# a commit actually LANDS, never here, since a refusal further down would otherwise forget a debt
+# that is still owed.
+moved=$(git diff --cached --name-only --diff-filter=AD -- 'tools/*_witness.rish' '*.rye')
+owed="$(git rev-parse --git-dir)/derived-pages-owed"
+if [ -n "$moved" ] || [ -f "$owed" ]; then
+  refresh_page tools/r/readme_metrics.rish README.md \
+    rishi/bin/rishi run tools/r/readme_metrics.rish write
+  refresh_page tools/g/geode_libraries.rish docs-geode/libraries/README.md \
+    rishi/bin/rishi run tools/g/geode_libraries.rish write
+fi
+
+# The scan shell is probed, never assumed (20260829 -- Mind and Mystery, one root, two crashed
+# loops): macOS /bin/sh is the selector wrapper -- it reads /private/var/select/sh at start, and
+# a jail that denies that read leaves it half-alive, garbling exactly the substitution-plus-cd
+# shape the scans open with -- while bare `sh` from PATH was the same wrapper by another name
+# (the 20260828 deaths the pin-wall comment below records). /bin/bash consults nothing and ran
+# the full pin scan clean inside the same jail, so each candidate proves the failing shape
+# itself -- a substitution, a CDPATH-clean cd, a pwd -- before it is trusted; a bench where only
+# the wrapper answers keeps the elder spelling and refuses honestly downstream.
+scan_shell=/bin/sh
+for cand in /bin/bash bash /bin/sh; do
+  if "$cand" -c '_r=$(CDPATH= cd -- tools/fixtures/p && pwd) && [ -d "$_r" ]' 2>/dev/null; then
+    scan_shell=$cand
+    break
+  fi
+done
+
+# RULE TWO -- the ledger's headline. It moves whenever a row is booked or a fold shelf lands, so
+# the first trigger is the ledger itself being staged in any way, rather than a file kind arriving.
+#
+# THE SECOND TRIGGER, added 20260908 -- the same debt rule one reads, for the same reason, and it
+# was missing here alone. Rule one learned on 20260829 (REDS %337) that git runs pre-commit for
+# `git commit` and `--amend` and for nothing else, so a row booked inside a commit that lands by
+# `git rebase` or `git cherry-pick` -- which the twice-pulled send REQUIRES whenever the anointed
+# remote moved -- never reaches this rule, records nothing, and leaves the headline reciting a
+# total the spine has already passed. Rule three took the same lesson as `living-pins-owed`. Rule
+# two took neither, so it held one law with two derivations and the blind one gated: measured
+# 20260908.011500, the headline read 598 against a measured 599 and reddened BOTH
+# reds_ledger_headline and reds_ledger_monotone on every ship that fetched it, while nothing in
+# any tree could say why. `derived-pages-owed` is the honest marker to read rather than a third
+# file of its own: this rule's own note above calls the headline generated, the debt names
+# exactly the fact all three rules ask about -- a commit landed without this hook -- and a fourth
+# name for one fact is the braid single-strandedness refuses. A clean ledger costs nothing here,
+# since refresh_page compares the page hash and returns without staging when the writer moved
+# nothing.
+ledger_moved=$(git diff --cached --name-only -- construction/REDS.md 'construction/archive/REDS-*.md')
+if [ -n "$ledger_moved" ] || [ -f "$owed" ]; then
+  refresh_page tools/fixtures/r/reds_ledger_headline_write.sh construction/REDS.md \
+    "$scan_shell" tools/fixtures/r/reds_ledger_headline_write.sh write
+fi
+
+# RULE THREE -- the living pins' byte bounds. Trigger: a rostered pin is staged at all. This rule
+# refuses rather than regenerating, and it reads the INDEX rather than the worktree, because
+# `git cat-file -s :<path>` is the size of the blob this commit will actually carry.
+# The scan runs under the probed $scan_shell above: bare `sh` was the selector wrapper by
+# another name (four deaths refused a lap of 20260828 with this rule's own over-bound prose),
+# and the fixed /bin/sh that repaired that fell to the same wrapper's denied read inside the
+# 20260829 jail. A crash is told from a measurement: the pin prose is spoken only when the report carries the RED
+# detail; a scan that could not measure refuses honestly in its own words, still failing closed.
+#
+# THE SECOND TRIGGER, added 20260906 (REDS 20260906.211529), and it changes WHICH PINS ARE READ
+# rather than whether the rule runs. `staged` weighs a pin only when this commit's own diff names
+# it, and a `git rebase` makes commits that never reach this hook -- so a pin can cross its bound
+# in a replayed commit and be named by no later diff. tools/hooks/post-commit records
+# `living-pins-owed` when a commit lands without this hook running; while that debt stands, the
+# reading widens to `index`: every rostered pin, weighed off the index, which is the state this
+# commit will actually land. The debt is cleared by post-commit when a commit LANDS, never here,
+# for rule one's own reason -- a refusal further down would otherwise forget a debt still owed.
+pin_mode=staged
+if [ -f "$(git rev-parse --git-dir)/living-pins-owed" ]; then
+  pin_mode=index
+fi
+if [ -f tools/fixtures/p/pin_bound_touch_scan.sh ] && [ -f tools/fixtures/l/living_pin_guard_roster.txt ]; then
+  if ! pin_report=$("$scan_shell" tools/fixtures/p/pin_bound_touch_scan.sh "$pin_mode" 2>&1); then
+    if echo "$pin_report" | grep -q '^detail=RED_touched_pin_over_bound'; then
+      if [ "$pin_mode" = index ]; then
+        echo "pre-commit: a commit landed here by a path this hook never sees -- a rebase, a" >&2
+        echo "cherry-pick -- and it left a living pin over the byte bound its own header declares." >&2
+        echo "This commit is refused until the pin is lawful, because the next push makes it public." >&2
+      else
+        echo "pre-commit: this commit stages a living pin that is over the byte bound its own header" >&2
+        echo "declares. A pin is read in one breath beside a lap, so the overage is spent back out of" >&2
+        echo "the prose rather than carried. Trim the page, or fold it, and commit again." >&2
+      fi
+      echo "$pin_report" | grep -E '^(detail_path|detail_bytes|detail_bound|detail_over_by|pin_over)=' >&2
+    else
+      echo "pre-commit: the pin wall could not MEASURE the staged set, and a wall that cannot" >&2
+      echo "measure refuses rather than waves through. This is an environment fault, never an" >&2
+      echo "over-bound pin -- read the scan's own words below and repair the bench or the jail." >&2
+      echo "$pin_report" | head -4 >&2
+    fi
+    echo "  full reading: $scan_shell tools/fixtures/p/pin_bound_touch_scan.sh $pin_mode" >&2
+    refused=yes
+  fi
+fi
+
+# RULE FOUR -- a day-shelf row opens the log it names. It refuses rather than regenerating, for the
+# same reason rule three does: a row whose link is wrong may carry the wrong day room or the wrong
+# filename, and only the author knows which. The wall names the one answer it can compute -- the
+# shelf's own day room, which is a pure function of the target's stamp -- and leaves the writing to
+# a hand.
+#
+# NO TRIGGER OF ITS OWN, deliberately. Rules one and two gate on a trigger because a render costs
+# ten seconds; this reading costs one `git diff --cached` and a grep, and it rests at
+# `shelves_read=0` on the many commits that stage no shelf. Spelling the shelf pattern here as well
+# as in the scan would put one rule in two files, which is the fault REDS %382 booked one room over.
+# The scan holds the pattern; this holds the refusal's words.
+#
+# THE READING IS OFF THE INDEX, so `git cat-file -e :<target>` asks whether the commit being made
+# actually carries the log the row names -- a round that stages the row and forgets the log reads
+# green off a worktree that still holds both.
+if [ -f tools/fixtures/s/shelf_link_touch_scan.sh ]; then
+  if ! shelf_report=$("$scan_shell" tools/fixtures/s/shelf_link_touch_scan.sh staged 2>&1); then
+    if echo "$shelf_report" | grep -q '^detail=RED_shelf_row_link_absent'; then
+      echo "pre-commit: this commit stages a day-shelf row that links a file this commit does not" >&2
+      echo "carry. A shelf sits one directory above the logs it lists, so a bare filename resolves" >&2
+      echo "beside the shelf rather than inside the day room. The repair is named below." >&2
+      echo "$shelf_report" | grep -E '^(detail_shelf|detail_target|detail_repair|detail_repair_exists|bare_stamped_absent)=' >&2
+    else
+      echo "pre-commit: the shelf-row wall could not MEASURE the staged set, and a wall that cannot" >&2
+      echo "measure refuses rather than waves through. This is an environment fault, never a broken" >&2
+      echo "row -- read the scan's own words below and repair the bench or the jail." >&2
+      echo "$shelf_report" | head -4 >&2
+    fi
+    echo "  full reading: $scan_shell tools/fixtures/s/shelf_link_touch_scan.sh staged" >&2
+    refused=yes
+  fi
+fi
+
+
+# RULE FIVE -- a page this commit ADDS names its room at the door. `context/TWO_ROOMS.md` asks a
+# forward-facing page to name its register in its own Status line -- checkable, vision, mixed, or
+# research for understanding -- and settled on 20260907 that `proposed` answers a different
+# question and leaves the register open. The whole reading exists already and stands at
+# `tier cadence`: it walks 978 pages, costs a minute, and speaks hours after the page was written.
+# On 20260907 four pages landed in one day naming no room, three of them after the canon and the
+# room's front door both taught the token that morning, and a hand swept the ratchet back by
+# reading four sentences that were already on the pages. That is a lantern; this is the loom.
+#
+# ONLY WHAT THE COMMIT ADDS IS GATED. A brand-new page has no accreted testimony to protect and
+# exactly one person who knows its register -- the hand writing it, right now. A page the commit
+# MODIFIES is reported and walks free, because forty-four elder pages name no room and three of
+# them are dated testimony; refusing an unrelated commit for touching one would be a wall somebody
+# turns off. So this holds the ratchet's RISE at zero and leaves its fall to the cadence guard.
+#
+# NO TRIGGER OF ITS OWN, like rule four: the reading is one `git diff --cached` and a roster, and
+# it rests at `added_read=0` on the many commits that add no page.
+if [ -f tools/fixtures/t/two_rooms_doorway_touch_scan.sh ]; then
+  if ! doorway_report=$("$scan_shell" tools/fixtures/t/two_rooms_doorway_touch_scan.sh staged 2>&1); then
+    if echo "$doorway_report" | grep -q '^detail=RED_added_page_names_no_room'; then
+      echo "pre-commit: this commit adds a forward-facing page whose Status names no room. A reader" >&2
+      echo "arriving at the door has to guess which register they are standing in, and only the hand" >&2
+      echo "writing the page knows. Name the room in the Status line -- the four tokens are below." >&2
+      echo "$doorway_report" | grep -E '^(detail_page|detail_said|detail_repair)=' >&2
+    else
+      echo "pre-commit: the doorway wall could not MEASURE the staged set, and a wall that cannot" >&2
+      echo "measure refuses rather than waves through. This is an environment fault, never a page --" >&2
+      echo "read the scan's own words below and repair the bench or the jail." >&2
+      echo "$doorway_report" | head -4 >&2
+    fi
+    echo "  full reading: $scan_shell tools/fixtures/t/two_rooms_doorway_touch_scan.sh staged" >&2
+    refused=yes
+  fi
+fi
+
+# RULE SIX -- a link this commit carries opens. `tools/fixtures/r/readme_reach_scan.sh` already
+# holds the whole law -- what a link is, what living means, what passes free -- and the roster
+# already gates `broken_in_living` at zero. What it never did was read at commit time, so the
+# reading arrived at the NEXT cold pass, half an hour after the push made the break public.
+#
+# REDS %524 fired FOUR times with one mechanism: a fold that a rebase reshapes leaves every
+# citation of its planned shelf name pointing at a file nobody wrote. Each firing came in by
+# rebase -- a commit landing by a path no hook sees -- so no staged-set reading could have caught
+# any of them. This rule reads the whole index instead, which is the tree the commit will actually
+# carry, and therefore sees a peer's reshaped fold the moment it lands here.
+#
+# IT READS THE INDEX, never disk, for the reason rules three and four do. A crawl off the worktree
+# at commit time answers about a tree nobody is committing: it refuses for an unstaged edit and
+# waves a staged deletion through while the worktree still holds the target. `--store index` is
+# one option on the one scan; a second reader would put one rule in two files (REDS %382).
+#
+# NO TRIGGER OF ITS OWN, like rules four and five. Measured 20260907 on this pier: the index crawl
+# reaches 1,884 documents in 544ms, two subprocesses rather than one per document. That is cheap
+# beside rule one's ten-second render, and a trigger would have to guess which staged path could
+# strand a link somewhere else -- which is the guess that made the class invisible.
+#
+# WHAT IS GATED: broken relative links in LIVING files, at zero, exactly as the roster gates them.
+# Dated testimony is reported and never gated here, because accrete-never-break keeps it as
+# written and `tools/d/dated_path_resolve.rish` recovers it.
+if [ -f tools/fixtures/r/readme_reach_scan.sh ]; then
+  if ! link_report=$("$scan_shell" tools/fixtures/r/readme_reach_scan.sh --store index 2>&1); then
+    if echo "$link_report" | grep -q '^verdict=living_link_broken'; then
+      echo "pre-commit: this commit carries a living document whose relative link opens nothing." >&2
+      echo "A link is a promise, and the index below is the tree this commit will actually ship." >&2
+      echo "Repoint it, or stage the file it names, and commit again. Dated testimony is exempt." >&2
+      echo "$link_report" | grep -E '^(living:|broken_in_living|living_files_affected)' >&2
+    else
+      echo "pre-commit: the link wall could not MEASURE the index, and a wall that cannot measure" >&2
+      echo "refuses rather than waves through. This is an environment fault, never a broken link --" >&2
+      echo "read the scan's own words below and repair the bench or the jail." >&2
+      echo "$link_report" | head -4 >&2
+    fi
+    echo "  full reading: $scan_shell tools/fixtures/r/readme_reach_scan.sh --store index" >&2
+    refused=yes
+  fi
+fi
+
+# RULE SEVEN -- a shell source this commit carries runs on both piers. `shell_dialect_scan.sh` holds
+# the whole law -- six GNU-only families, five of them at a ceiling of ZERO because this tree runs on
+# a NixOS VPS with GNU coreutils and a macOS bench with BSD ones. What it never did was read at
+# commit time, so the reading arrived inside a roster pass of roughly half an hour.
+#
+# THE COST, MEASURED. On 20260908 two GNU-only `sed -i` plants landed in
+# tools/am/amphora_mark_wreck_witness.rish at 01:59 and were first heard at a DIFFERENT ship's cold
+# open at 02:42 -- 43 minutes and one ship later. Two hands then cured the same two sites in
+# parallel and one cure withdrew whole. The lap that breaks this family is structurally never the
+# lap that hears it, which is a lantern; this asks the same question while the hand is still here.
+#
+# WHY A WHOLE-BLOB READING IS SAFE HERE, and it is the one thing that makes this rule honest. A
+# ceiling of ZERO means no lawful site stands anywhere in the tree, so every hit in a staged file is
+# a rise -- no author is ever refused for a line somebody else wrote. The scan reads each family's
+# ceiling out of the elder and gates only the ones still at zero, so a family whose ceiling later
+# rises goes quiet by itself rather than on the strength of a sentence here.
+#
+# NO TRIGGER OF ITS OWN, like rules four, five and six. The reading is one `git diff --cached` and a
+# grep per staged shell source, and it rests at `files_read=0` on the many commits that stage none.
+#
+# WHAT IS GATED: the five zero-ceiling families -- xargs -a/-d, date -d, grep -P, stat -c, sed -i --
+# at zero, exactly as the roster gates them. `readlink -f` stands at seven and is reported here,
+# because five of its sites are in a control that calls the elder spelling on purpose.
+if [ -f tools/fixtures/s/shell_dialect_touch_scan.sh ]; then
+  if ! dialect_report=$("$scan_shell" tools/fixtures/s/shell_dialect_touch_scan.sh staged 2>&1); then
+    if echo "$dialect_report" | grep -q '^detail=RED_staged_gnu_only_idiom'; then
+      echo "pre-commit: this commit carries a shell source written in one host's dialect. It runs" >&2
+      echo "here and reads EMPTY on the other pier, where an empty reading counts as a healthy zero." >&2
+      echo "The portable spelling is in tools/fixtures/s/shell_portable.sh; the site is below." >&2
+      echo "$dialect_report" | grep -E '^(detail_family|detail_path|detail_site|detail_repair|staged_gated_sites)=' >&2
+    else
+      echo "pre-commit: the dialect wall could not MEASURE the staged set, and a wall that cannot" >&2
+      echo "measure refuses rather than waves through. This is an environment fault, never a GNU-only" >&2
+      echo "idiom -- read the scan's own words below and repair the bench or the jail." >&2
+      echo "$dialect_report" | head -4 >&2
+    fi
+    echo "  full reading: $scan_shell tools/fixtures/s/shell_dialect_touch_scan.sh staged" >&2
+    refused=yes
+  fi
+fi
+
+# RULE EIGHT -- a document this commit carries holds something. `empty_document_scan.sh` holds the
+# whole law -- a tracked `.md`, `.kyri` or `.txt` that is zero bytes or whitespace alone --
+# and it has stood at `tier lap` inside a roster pass since 20260823. What it never did was read at
+# COMMIT time, so the reading arrived after the commit had already shipped the hole.
+#
+# THE COST, MEASURED on the tree's own history. Five empty documents exist across every commit this
+# tree has ever made, and TWO of them landed AFTER the guard was seated, both session logs:
+# 20260828.142844 shipped at 15:55 and was filled at 17:26, 91 minutes and a second commit later,
+# once another ship's cold open caught it; 20260910.054448 shipped at 05:59 with a commit body
+# describing two `loom` lines and a search record, and by the time a cold open read it the writing
+# session was gone and those values are lost outright. A lantern that fires twice becomes a loom.
+#
+# WHY THE STAGED READING IS SAFE, and it is the one thing that makes this rule honest. It asks only
+# about the paths THIS commit stages, so an empty document standing anywhere else -- including the
+# one that is standing right now -- refuses no author. That is a placement of an existing reading
+# rather than a new instrument, exactly as rule seven is.
+#
+# NO TRIGGER OF ITS OWN, like rules four, five, six and seven. The reading is one `git diff --cached`
+# and a `git cat-file --batch-check` over what it names, and it rests at `staged_documents=0` on a
+# commit that stages no document at all.
+if [ -f tools/fixtures/e/empty_document_scan.sh ]; then
+  if ! empty_report=$("$scan_shell" tools/fixtures/e/empty_document_scan.sh staged 2>&1); then
+    if echo "$empty_report" | grep -q '^detail=RED_staged_empty_document'; then
+      echo "pre-commit: this commit stages a document that holds nothing. Every guard this tree owns" >&2
+      echo "reads it as correct, because a check phrased as 'nothing here is wrong' is answered" >&2
+      echo "perfectly by nothing. Only the hand that wrote it still knows what it was going to say." >&2
+      echo "$empty_report" | grep -E '^(empty:|detail_path|detail_repair)' >&2
+    else
+      echo "pre-commit: the empty-document wall could not MEASURE the staged set, and a wall that" >&2
+      echo "cannot measure refuses rather than waves through. This is an environment fault, never a" >&2
+      echo "hollow page -- read the scan's own words below and repair the bench or the jail." >&2
+      echo "$empty_report" | head -4 >&2
+    fi
+    echo "  full reading: $scan_shell tools/fixtures/e/empty_document_scan.sh staged" >&2
+    refused=yes
+  fi
+fi
+
+
+# RULE NINE -- no file this commit carries holds an unresolved conflict marker.
+# `conflict_marker_scan.sh` holds the whole law -- a line beginning `<<<<<<< `, `||||||| ` or
+# `>>>>>>> `, the three LABELLED markers -- and it has stood at `tier lap` since 20260906.105500.
+# What it never did was read at COMMIT time, so its answer arrived at the next lap's open, which is
+# after the push.
+#
+# THE COST, MEASURED on this tree's own history rather than argued. `construction/ITINERARY.md`
+# carried two markers around its Landed row through THREE commits -- adf682ac3404 at 09:50:57,
+# 151c129e8397 at 10:04:39, c027ae5d2bf2 at 10:17:03 on 20260906 -- 26 minutes published on the
+# anointed remote. Every ship in the fleet reads that card WHOLE at the open of every lap, and the
+# Standing block inside it is what steers an unattended round. The guard built in answer to that
+# red kept the same placement the red was made in.
+#
+# THE SAME MOVE AS RULE EIGHT, one guard over, and the pair is the finding: a fault CONTAINED in one
+# artifact's own bytes, walled at zero, read from the whole tree, answers after the push. A
+# relational fault -- a link whose target another commit deleted -- cannot narrow this way and is
+# correctly read at the tree. Containment is what decides the moment.
+#
+# WHY THE STAGED READING IS SAFE. It asks only about paths THIS commit stages, so a marker standing
+# anywhere else refuses no author; and it reads the INDEX alone, so a marker a hand left in the
+# working tree after staging a clean copy refuses nobody either, since those bytes will not land.
+# A placement of an existing reading rather than a new instrument, exactly as rules seven and eight.
+#
+# ONE FRICTION, NAMED. The scan excludes its three teaching files BY NAME (REDS %484), so a page
+# that must SHOW a marker at column zero is refused here until it joins that list in the same
+# commit. That is the same trade the census already makes, moved to where an author meets it.
+if [ -f tools/fixtures/c/conflict_marker_scan.sh ]; then
+  if ! marker_report=$("$scan_shell" tools/fixtures/c/conflict_marker_scan.sh staged 2>&1); then
+    if echo "$marker_report" | grep -q '^detail=RED_staged_conflict_marker'; then
+      echo "pre-commit: this commit stages a file carrying an unresolved conflict marker. git wrote" >&2
+      echo "those bytes and a hand never came back for them -- and once pushed, every ship reads" >&2
+      echo "them as content. The card stood published this way for 26 minutes on 20260906." >&2
+      echo "$marker_report" | grep -E '^(marked: |detail_path|detail_repair)' >&2
+    else
+      echo "pre-commit: the conflict-marker wall could not MEASURE the staged set, and a wall that" >&2
+      echo "cannot measure refuses rather than waves through. Read the scan's own words below." >&2
+      echo "$marker_report" | head -4 >&2
+    fi
+    echo "  full reading: $scan_shell tools/fixtures/c/conflict_marker_scan.sh staged" >&2
+    refused=yes
+  fi
+fi
+
+[ "$refused" = no ] || exit 1
+
+# Spelled as an `if` rather than `[ ... ] && echo ...`, because under `set -eu` a failing AND-list
+# is a shell-dialect question this hook has no reason to ask, and a line after it now depends on
+# reaching it. The control proves the resting path on metal either way; this makes it plain.
+if [ -n "$staged" ]; then
+  echo "pre-commit: regenerated and staged with this commit --$staged"
+fi
+
+# THE TOKEN, read by tools/hooks/post-commit. It is dropped only here, on the path where this hook
+# has actually had its say, so a commit that reaches post-commit without it is a commit git made by
+# a path that skips pre-commit entirely. Asking `did my sibling run` reads the property directly,
+# where probing for .git/rebase-merge and its three cousins infers it from a list somebody has to
+# keep current. A refusal above exits before this line, which is correct: no commit is made, so
+# nothing is owed and nothing is excused.
+: > "$(git rev-parse --git-dir)/pre-commit-ran"
+exit 0

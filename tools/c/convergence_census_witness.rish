@@ -1,0 +1,247 @@
+# tools/c/convergence_census_witness.rish -- how much of what this tree writes is proven to converge.
+#
+#   rishi/bin/rishi run tools/c/convergence_census_witness.rish
+#
+# `foundations/20260823-222019_what-brix-infuse-is.md` states this tree's own claim about change:
+# `declaration + world -> infusion -> world'`, and then the line that carries the weight --
+# `infusion(world') -> world'`, idempotent. Running a change twice does what running it once did.
+#
+# A tool that fails that corrupts on its SECOND run, and the second run is what an unattended loop
+# performs at three in the morning. Measured `20260907.234808`: **30 tools write to the tracked tree
+# rather than to a throwaway pen, and 3 of them prove convergence in an assertion.**
+#
+# THE POPULATION IS THE HARD PART AND A GREP NEVER SETTLED IT. The reading is named `candidates`
+# from `20260908.010852` for that reason: four refinements ran 392 -> 1200 -> 30 -> 7, and of that
+# seven THREE were still not writers -- two shared libraries and one scan. `convergence_prove.sh`
+# classifies by RUNNING, and its `inert` verdict exposed each in turn. Read this as an upper bound
+# on what might need proving; the prover's verdicts are the finding.
+#
+# THE EARLIER WRONG TURNS, kept because each looked exactly like a measurement. Counting every
+# tool that redirects anywhere gives 392, nearly all of them writing into their own pen -- a pen has
+# nothing to converge. Counting only tree-mutating writes gives 30. And the first census answered
+# `tools_read=1200` against its own bound of 1200: the corpus is 3,210, so the bound was silently
+# truncating two thirds of the tree and reporting one writer where thirty stand.
+#
+# THE FIFTH WRONG DENOMINATOR WAS A SOURCE ANSWERING FOR A TARGET (`20260908.154530`). The exclusion
+# tested the whole matched span, so `ca[t] "$tmp" > "$f"` was dropped on the `$tmp` sitting on its
+# SOURCE side -- and that shape is what `.claude/rules/exec-bit.md` prescribes, since writing through
+# the original inode preserves the mode the repository tracks. The census was therefore blind to the
+# writes this tree's own law requires, including `readme_metrics_splice.sh` and
+# `reds_ledger_headline_write.sh`, which `tools/hooks/pre-commit` runs on EVERY commit. The same
+# reading ran the other way too, admitting `dated_classify_seam.sh` on a `"$f"` that was a printf's
+# source while its target was a scratch file. The exclusion reads the target now; 7 -> 10 candidates,
+# 3 -> 5 proven, one false positive removed and four false negatives admitted.
+#
+# AND THE PREDICATE HAS A CONTROL NOW, which is what four of the five wrong denominators lacked:
+# `tools/fixtures/c/convergence_census_control.sh` plants both shapes in real repositories and
+# asserts the ELDER predicate disagrees on exactly the two legs the repair moves, because a repair
+# proven only in the passing direction cannot be told from a coincidence.
+#
+# THE OTHER COLUMN WAS NEVER READ AT ALL, AND ITS RULE WAS WRITTEN DOWN CORRECTLY THE WHOLE TIME
+# (`20260908.190452`). Every reading above defends the DENOMINATOR. The `proven` numerator ran on a
+# grep that took every tracked path holding the tool's stem -- the tool itself among them -- and
+# matched the word on any line, comment or not. The census header says the opposite in so many
+# words: *inside a check rather than a comment. Prose about idempotence is a claim; an assertion is
+# a proof.* Two of the five it called proven were certified by one sentence in their own header.
+#
+# The predicate drops the tool from its own sibling set and requires the match on a non-comment
+# line; proven reads **3 of 10** where it read 5, and both departures are that self-certifying pair.
+# Three legs prove it from the passing side and a fourth runs the ELDER numerator over the same
+# plant and asserts it called the self-certifying tool proven.
+#
+# A PROOF THAT RUNS EVERY LAP WAS INVISIBLE TO THE CENSUS THAT ASKS WHETHER PROOF EXISTS
+# (`20260908.215031`). `tools/c/convergence_prove.sh` invokes a tool with ONE path and
+# nine of the ten candidates take a flag instead, so the pen-TREE prover was built for them --
+# `tools/c/convergence_tree_prove.sh`, rostered `tier lap`, checking HEAD out into a `git worktree`
+# pen and comparing with `git write-tree`. Its own witness runs it on
+# `tools/fixtures/r/reds_ledger_headline_write.sh`, which `tools/hooks/pre-commit` runs on EVERY
+# commit this tree makes, and reads `verdict=converges` on every lap of every ship. That tool stood
+# in the UNPROVEN column here, because the numerator read a sibling assertion and nothing else.
+#
+# So the column reads two sources now and prints the split: `proven_by_sibling_assertion`, a hand
+# wrote a check, and `proven_by_prover_run`, somebody ran the question -- the second being the
+# stronger evidence. Both exclusions carry over: the tool is dropped from its own set, and a
+# comment naming a prover and a tool is a plan rather than a run. Proven reads **4 of 10** where it
+# read 3, and the arrival is the headline writer.
+#
+# REPORTED, NEVER GATED. A tool that legitimately runs once -- a publisher, a one-shot projection --
+# has nothing to converge, and no reading here can tell it from a tool that never checked.
+
+say "convergence-census: Language EN -- the tree's own claim about change, counted."
+# THE FOURTH STRAND: RISHI WRITES (`20260910.101500`). Every reading above draws its population
+# with three SHELL idioms, so a Rishi tool could rewrite the tracked tree all day and never be a
+# candidate -- the census header named that blindness on `20260909.185835` and left the repair for
+# a lap of its own. This is that lap, and measuring moved the finding twice.
+#
+# The gap is NOT `write-file`, Rishi's own write statement, which is where the elder paragraph
+# pointed: three tools call it with a literal target across all 2,450 tracked `.rish` sources, and
+# git tracks none of the three -- a `/tmp` diff, a jail config, an untracked fixture. It is a
+# redirect inside `run ["sh" "-c" ...]`, where the path is a bare literal in a Rishi string, and it
+# has exactly ONE member: `tools/g/geode_libraries.rish`, which `tools/hooks/pre-commit` runs on
+# EVERY commit this tree makes, and which this header already names as a tool the tree prover proves
+# on every lap and this census could not see. Candidates 12 -> 13, proven 10 -> 11,
+# `admitted_by_git_only` 4 -> 5, `proven_by_prover_run` 2 -> 3.
+#
+# `"sh" "-c"` IS THE FENCE, rather than the redirect alone. `sh -c` executes in this tool's own
+# working directory, so its redirect is this tool's write; a redirect handed to another tool as a
+# flag value is text. Dropping that fence admits `tools/c/convergence_tree_prove_witness.rish` on
+# the `> construction/REDS.md` inside its `--perturb` string, which runs against a `git worktree`
+# pen -- the third strand's own false positive, arriving in a language a shell lexer cannot read.
+#
+say "convergence-census: Style Gauge, Meter -- the denominator is defended before the fraction."
+say "convergence-census: Lens TAME -- safety first: an unproven writer is named, never gated."
+
+say "convergence-census: reading the tree..."
+let scan = run ["sh" "tools/c/convergence_census.sh"]
+assert scan.ok else "convergence-census: the census refused --\n${scan.out_brief}"
+assert scan.out contains "candidates=" else "convergence-census: the candidate population went unreported"
+assert scan.out contains "candidates_proven=" else "convergence-census: the proven count went unreported"
+assert scan.out contains "candidates_unproven=" else "convergence-census: the unproven count went unreported"
+
+# invariant: the corpus is printed and must exceed the writer population, since a writer is drawn
+# FROM it. A tools_read equal to the bound is the truncation this census was born from.
+assert scan.out contains "tools_read=" else "convergence-census: the corpus size went unreported -- a truncated corpus reads like a small tree"
+
+say "convergence-census: and the predicate is proven from both sides on planted repositories..."
+let control = run ["sh" "tools/fixtures/c/convergence_census_control.sh"]
+assert control.ok else "convergence-census: the control refused --\n${control.out_brief}"
+assert control.out contains "legs_fail=0" else "convergence-census: a planted leg disagreed --\n${control.out_brief}"
+assert control.out contains "exec_bit_idiom_counted -- yes" else "convergence-census: the exec-bit write idiom is unseen again"
+assert control.out contains "elder_dropped_the_exec_bit_idiom -- no" else "convergence-census: the elder predicate no longer fails the leg this repair exists for, so the repair proves nothing"
+# The leg count is PINNED so a leg that silently goes unrun is caught. It moved 52 -> 53 on
+# `20260910.153001`, when the write reading became one resident awk pass and
+# `second_write_on_a_line_read` was added: awk's `match()` returns one match where `grep -o` returns
+# all of them, and the loop taking the rest was exercised by nothing in this tree -- mutated to read
+# only the first match, the census held all 11 counts and all 22 list rows and this control held
+# `legs_fail=0`. Raising the pin is the second half of adding the leg, and the pin is what refused
+# the lap that added only the first.
+assert control.out contains "legs_pass=53" else "convergence-census: a leg went unrun --\n${control.out_brief}"
+
+# invariant: a tool may not certify itself. The plant's only idempotence sentence is a comment in
+# its own header, which is what two tracked tools carried when this column read them proven.
+assert control.out contains "self_certification_refused -- yes" else "convergence-census: a tool proves its own convergence by mentioning it again"
+
+# invariant: prose beside the tool is a claim, and the header says so. Only a non-comment line counts.
+assert control.out contains "prose_sibling_refused -- yes" else "convergence-census: a comment beside the tool counts as a proof again"
+
+# invariant: and the repair still MOVES something -- the elder numerator called the self-certifying
+# plant proven. Without this leg the three above pass for a reason nobody measured.
+assert control.out contains "elder_called_self_certification_proven -- yes" else "convergence-census: the elder numerator no longer admits self-certification, so this repair proves nothing"
+
+# invariant: a prover that RAN on this tool counts, which is the evidence the elder numerator could
+# not see at all. Without it a guard proving convergence every lap leaves its subject unproven here.
+assert control.out contains "prover_run_counted -- no" else "convergence-census: a tool a prover proved on metal reads unproven again"
+
+# invariant: and a comment naming a prover beside a tool is a plan rather than a run. The sibling
+# column paid for this distinction once; the prover column inherits it rather than relearning it.
+assert control.out contains "prover_run_in_comment_refused -- yes" else "convergence-census: a commented prover invocation counts as a proof"
+
+# invariant: the self-exclusion reaches the new source too -- a tool naming the prover and itself in
+# its own body certifies nothing about itself.
+assert control.out contains "prover_self_naming_refused -- yes" else "convergence-census: a tool proves its own convergence by naming a prover in its own source"
+
+# invariant: and the second source MOVES something -- the elder numerator called the prover-run
+# plant unproven, which is exactly how the headline writer stood in that column.
+assert control.out contains "elder_called_prover_run_unproven -- no" else "convergence-census: the elder numerator already admitted the prover-run plant, so this repair proves nothing"
+
+
+# invariant: a control named for the FAMILY proves the tool it runs twice. Both sources above search
+# by a spelling -- the tool's stem in a sibling's path, a prover's name on a line -- and three
+# tracked controls satisfy neither while running their tool a second time.
+assert control.out contains "family_control_counted -- no" else "convergence-census: a control named for the family, running the tool twice, reads as no proof again"
+
+# invariant: and this source keeps the non-comment discipline the other two hold. A file naming the
+# tool only in prose leaves it unproven, or the repair trades one self-certifying shape for another.
+assert control.out contains "family_named_in_comment_refused -- yes" else "convergence-census: naming a tool in a comment now counts as proving it"
+
+# invariant: the stem-only predicate, run over the same plants, must MISS the family-named control.
+# Without this the two legs above pass for a reason nobody measured.
+assert control.out contains "stem_only_missed_the_family_control -- no" else "convergence-census: the stem-only sibling search no longer misses the family-named control, so this source proves nothing"
+
+# invariant: all three splits are printed, since a tool proven more than one way counts once in the
+# total and a reader deserves to know which evidence stands behind the number.
+assert control.out contains "prover_run_split_printed -- printed" else "convergence-census: the prover-run split went unprinted"
+assert control.out contains "sibling_assertion_split_printed -- printed" else "convergence-census: the sibling-assertion split went unprinted"
+
+# invariant: THE COMMENT READING is proven from both sides. The two proof columns read past a
+# leading comment mark and the write column never did, so a file whose only admitting write sat in
+# a sentence ABOUT writing was counted as a writer -- 3 of 12 candidates on this tree. That column
+# reads live lines from `20260909.222142`, and it could only move together with the git strand
+# below: dropping comments alone was measured at 12 -> 9 and took the two busiest writers out with
+# the false one, which is the shape the census header calls two faults whose errors cancel.
+assert control.out contains "comment_alone_refused -- no" else "convergence-census: a write inside a comment admits a tool again"
+assert control.out contains "live_write_admitted -- yes" else "convergence-census: a write on a live line no longer admits, so the column refuses the thing it exists to count"
+assert control.out contains "elder_could_not_tell_prose_from_a_write -- yes" else "convergence-census: the elder write predicate now separates prose from a write on its own, so this repair proves nothing"
+assert control.out contains "comment_reading_retired -- retired" else "convergence-census: the elder comment column still prints, and a column that can only read zero is a tautology wearing a measurement's clothes"
+
+# THE GIT STRAND. `target_admits` answers by NAME, and four laps of refining that guess each read
+# worse. `git_admits` resolves the target through at most three in-file assignments and hands the
+# literal to `git ls-files`, so the tree answers which destination is tracked. The two are a UNION
+# and neither subsumes the other: the name strand sees an enumerated `"$f"` with no literal to
+# resolve, and the git strand sees a named `$LEDGER` the list never held.
+assert control.out contains "git_named_destination_admitted -- yes" else "convergence-census: a write to a variable resolving to a tracked path goes unseen again"
+assert control.out contains "git_pen_destination_refused -- no" else "convergence-census: a write to a mktemp pen is admitted, which is the fourth wrong denominator returning"
+assert control.out contains "git_override_hook_admitted -- yes" else "convergence-census: a destination sitting in an override hook's default goes unresolved"
+assert control.out contains "git_untracked_literal_refused -- no" else "convergence-census: an untracked literal inside a tracked room is admitted, so the reading is a dirname test rather than a question about the file"
+assert control.out contains "git_hop_bound_refuses_past_three -- no" else "convergence-census: the resolution bound went unenforced"
+assert control.out contains "name_strand_could_not_see_it -- no" else "convergence-census: the name strand now sees the git strand's plant, so the union proves nothing"
+assert control.out contains "git_split_printed -- printed" else "convergence-census: the strand split went unprinted"
+assert control.out contains "git_only_names_its_member -- named" else "convergence-census: the git-only reading names no member, and a count naming no member is a finding no ship can act on (REDS %671)"
+assert scan.out contains "admitted_by_git_only=" else "convergence-census: the git-only reading went unreported on this tree"
+assert scan.out contains "admitted_by_name_only=" else "convergence-census: the name-only reading went unreported on this tree"
+# THE ENCLOSURE STRAND (`20260909.233000`). Both strands above read a matched SPAN, and a span
+# carries no position, so neither can tell a write this tool performs from text it hands to another
+# command. `upstream_shape_scan.sh` stood a member on a `"$f"` inside a single-quoted
+# `--tree-filter` string run against filter-branch's own pen. `live_lines` walks the source as a
+# shell lexer -- single quotes, double quotes with backslash escapes, unquoted comments, and
+# heredocs including `<<-` and the quoted-delimiter form -- and reads a write only off a line
+# standing outside every quoted region. Candidates 13 -> 12 on this tree, the single departure
+# being that file.
+assert control.out contains "quoted_argument_write_refused -- no" else "convergence-census: a write inside another command's quoted argument admits the tool again"
+assert control.out contains "heredoc_body_write_refused -- no" else "convergence-census: a write inside a heredoc body admits the tool again"
+assert control.out contains "heredoc_dash_write_refused -- no" else "convergence-census: the tab-stripping heredoc form goes untracked, so its body reads as live code"
+assert control.out contains "live_write_still_admitted -- yes" else "convergence-census: a write on a live line no longer admits, so the enclosure fence refuses by text rather than by position"
+assert control.out contains "write_after_close_admitted -- yes" else "convergence-census: the walk never leaves a quoted region, so every line after one is withheld and an empty census reads as a clean tree"
+assert control.out contains "dquoted_region_closes -- yes" else "convergence-census: a multi-line double-quoted argument never closes, withholding every line after it"
+assert control.out contains "balanced_file_admitted -- yes" else "convergence-census: a balanced source is withheld, so the lexer drifts rather than tracks"
+assert control.out contains "elder_admitted_the_quoted_argument -- yes" else "convergence-census: the elder predicate now refuses a quoted-argument write on its own, so this strand proves nothing"
+assert control.out contains "elder_admitted_the_heredoc_body -- yes" else "convergence-census: the elder predicate now refuses a heredoc-body write on its own, so this strand proves nothing"
+assert control.out contains "family_control_split_printed -- printed" else "convergence-census: the family-control split went unprinted"
+
+# THE FOURTH STRAND: RISHI WRITES (`20260910.101500`). The population above is picked by three
+# SHELL idioms, so a Rishi tool rewriting the tree could never be a candidate however much of it it
+# rewrote -- the census header named that on `20260909.185835` and left the repair for its own lap.
+# Measuring moved the finding. The gap is NOT `write-file`, Rishi's own write statement: three
+# tools call it with a literal target and git tracks none. It is a redirect inside
+# `run ["sh" "-c" ...]`, and it has exactly one member -- `tools/g/geode_libraries.rish`, which
+# `tools/hooks/pre-commit` runs on EVERY commit and which this header already names as a tool the
+# tree prover proves and this census could not see.
+assert control.out contains "rish_sh_c_tracked_admitted -- yes" else "convergence-census: a Rishi tool redirecting into a tracked path is invisible again"
+# invariant: `sh -c` runs in this tool's own directory, so its redirect is this tool's write; a
+# redirect handed to another tool as a flag value is text. Without this the strand admits
+# `convergence_tree_prove_witness.rish` on a `--perturb` string that runs against a worktree pen.
+assert control.out contains "rish_flag_argument_refused -- no" else "convergence-census: a redirect inside another tool's flag argument counts as this tool's write"
+assert control.out contains "rish_sh_c_pen_refused -- no" else "convergence-census: a Rishi redirect into an untracked path is admitted, and a pen has nothing to converge"
+assert control.out contains "rish_write_file_admitted -- yes" else "convergence-census: Rishi's own write statement goes unread"
+assert control.out contains "rish_write_file_let_admitted -- yes" else "convergence-census: a write-file target bound by a let resolves to nothing, which is how this tree writes it"
+assert control.out contains "rish_write_file_pen_refused -- no" else "convergence-census: an untracked write-file target is admitted"
+# invariant: the comment fence reaches the new strand, or a header explaining the idiom admits the
+# tool that explains it -- the fault the write column paid for at `20260909.222142`.
+assert control.out contains "rish_comment_write_refused -- no" else "convergence-census: a Rishi write inside a comment admits the tool again"
+# invariant: an operand that resolves to no literal must not take the census down. A `while` loop
+# carries its last body command's status, so the first draft returned 1 whenever its final iteration
+# found nothing to emit, and `set -e` killed the run at the assignment. Every other leg was green
+# while that stood; a census that dies reports nothing, which reads like a tree with no writers.
+assert control.out contains "census_survives_unresolvable_operand -- ok" else "convergence-census: an unresolvable write-file operand takes the whole census down, and a dead census reads from outside like a clean tree"
+# invariant: and the strand MOVES something -- the elder shell-shaped predicate misses the writer
+# this one admits, or these legs pass for a reason nobody measured.
+assert control.out contains "elder_missed_the_rish_writer -- no" else "convergence-census: the elder shell predicate already saw the Rishi writer, so this strand proves nothing"
+
+assert scan.out contains "proven_by_prover_run=" else "convergence-census: the prover-run column went unreported on this tree"
+assert scan.out contains "proven_by_family_control=" else "convergence-census: the family-control column went unreported on this tree"
+
+say "convergence-census: and the foundation that states the claim still stands..."
+let found = run ["sh" "-c" "test -f foundations/20260823-222019_what-brix-infuse-is.md && echo present || echo absent"]
+assert (trim found.out) == "present" else "convergence-census: the infusion foundation is gone -- this census measures a claim nothing states"
+
+say "GREEN: convergence-census -- candidates counted against the tree's own idempotence claim, the denominator named as an upper bound rather than defended as a fact, and the numerator reading three sources: an assertion beside the tool, a prover that actually ran on it, and a control that names the tool rather than spelling its name."

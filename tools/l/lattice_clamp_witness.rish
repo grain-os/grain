@@ -1,0 +1,28 @@
+# lattice_clamp_witness.rish -- the Lattice clamp operation, proven on metal (landed `20260713.211127`).
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/l/lattice_clamp_witness.rish
+
+let zig = "vendor/zig-toolchain/zig"
+# THE BINARY LANDS IN A PEN, NEVER A SHARED PATH IN THE TREE (REDS %700). A fixed path is
+# one name every run in this checkout writes: one run EXECUTES it while another's linker
+# opens it, and the linker refuses with ETXTBSY -- so the guard answers differently on
+# bytes nobody changed. `printf %s` trims the newline a bare capture would keep.
+let pen = run ["sh" "-c" "printf %s $(mktemp -d)"]
+assert pen.ok else "could not make a build pen: ${pen.err_brief}"
+let bin = "${pen.out}/lattice"
+
+let build = run ["sh" "-c" "mkdir -p lattice/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh lattice/lattice.rye -femit-bin=${bin}"]
+assert build.ok else "Lattice build failed -- ${build.err_brief}"
+
+let selftest = run ["sh" "-c" "${bin} selftest 2>&1"]
+assert selftest.ok else "Lattice selftest exited non-zero -- ${selftest.err_brief}"
+assert selftest.out contains "GREEN" else "Lattice selftest not GREEN"
+assert selftest.out contains "clamp 2x2" else "Lattice missing clamp welcome"
+assert selftest.out contains "clamp shape mismatch" else "Lattice missing clamp unwelcome"
+
+say "GREEN: Lattice elementwise clamp with shape assert."
+
+# The pen is swept here rather than left for the next run to meet.
+let pen_swept = run ["sh" "-c" "rm -rf ${pen.out}"]
+assert pen_swept.ok else "the build pen outlived its witness: ${pen_swept.err_brief}"

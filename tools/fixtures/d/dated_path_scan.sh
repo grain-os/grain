@@ -1,0 +1,571 @@
+#!/bin/sh
+# tools/fixtures/d/dated_path_scan.sh -- the dated-reference census.
+#
+# WHY. Every folded room leaves references behind that point at the flat path a file used to
+# hold. This walks every dated reference in the field, resolves each the way a reader would,
+# and reports how many still land. Driven by tools/d/dated_path_witness.rish.
+#
+# WHAT A DATED REFERENCE IS. Any string shaped YYYYMMDD-HHMMSS_sprig.ext, with an optional
+# directory prefix and any number of leading ../ segments.
+#
+# HOW EACH ONE IS RESOLVED, first hit winning:
+#   1. relative to the file that cites it   -- how a Markdown link actually resolves
+#   2. root-relative, leading ../ stripped  -- how this tree's prose usually cites
+#   3. THE FOLD RULE: <room>/date/<YYYYMMDD>/<basename>, computed from the stamp alone -- and for
+#      a BARE basename, the same rule inside the CITING file own room, since a bare reference was
+#      a sibling and a day fold is what separated the siblings
+#   4. by basename across every tracked file -- the recovery the full stamp buys
+#
+# Reading 3 was missing here for one lap while `tools/d/dated_path_resolve.rish` already had it,
+# and the two instruments disagreed the moment four rooms folded: 82 references the resolver
+# recovers by computation were reported ambiguous by this scan, because the same basename exists
+# in two rooms and the scan had thrown away the room the reference itself names. A census that
+# grades by a weaker rule than the tool it measures is not measuring that tool.
+# A reference landing by 1 or 2 is HOME. One landing only by 3 is BROKEN and RECOVERABLE --
+# the file is here, the path is stale. One that lands nowhere is BROKEN and GONE.
+#
+# WHAT IS DELIBERATELY OUT OF SCOPE, and why the bound is named rather than assumed:
+#   seed/   -- the gitignored public-seed projection of this same tree; counting it would
+#              double every reference the projection carries (8,425 of them, measured).
+#   vendor/ -- third-party source held unmodified.
+#   .git/   -- object storage, not authored prose.
+#   INSTRUMENT FIXTURES -- files whose dated paths are selftest literals and demonstration
+#              examples rather than citations of the field. Counting the instrument inside its
+#              own measurement makes the meter rise every time a proof gets stronger, which is
+#              exactly backwards. Each is named with its reason rather than matched by a loose
+#              pattern, so the list stays short and every entry has to justify itself:
+#                dated_path_*             the resolver, this scan, its control, their witness --
+#                                         a resolver is demonstrated on paths that no longer
+#                                         stand, and its witness proves verdicts on exactly such
+#                                         paths
+#                room_bound_control.sh    builds a throwaway room under a mktemp root
+#                shipped_binary_claim_control.sh  plants a dated page to prove the guard allows it
+#                session_logs_archive.rye its selftest asserts on links inside a sandbox index
+#
+# USAGE
+#   sh tools/fixtures/d/dated_path_scan.sh            # census -- key=value lines
+#   sh tools/fixtures/d/dated_path_scan.sh list       # every broken reference, one per line
+#
+# Run from the repository root.
+
+set -eu
+
+verb="${1:-census}"
+
+# THE RATCHET, and what it is honestly a ratchet ON. Corrected `20260821.171500` before the first
+# fold ran, because the first shape of this gate would have red on the very move it was built to
+# make safe.
+#
+# Under the mark law a stale reference is RESOLVED, never repointed. So a reference the resolver
+# recovers is not damage -- it is the expected steady state, and it necessarily RISES when a room
+# folds, since folding is exactly what turns a flat path into a recoverable one. Gating on the
+# whole broken count would therefore punish the fold for working.
+#
+# What must never rise is what the resolver CANNOT recover: a basename that exists nowhere
+# (`gone`), and a basename at more than one path where no single answer is safe (`ambiguous`).
+# Together those are the LOST references, and they are the honest defect count. Moving a file
+# changes its path and never its basename, so a correct fold leaves this number exactly where it
+# stood. Set with no slack to the measured count: 199 when the resolver landed, lowered to 193, then 192
+# on `20260821` when the session-log fold surfaced six index rows pointing at files that were
+# never there and they were repaired. Lower it whenever a repair lands; never raise it.
+#
+# STILL 187 after the aperture widened on `20260824`, and that is the reading worth keeping. This
+# pattern required an underscore after the stamp, so it never saw a reference naming a sprigless
+# log (REDS %175). Widening it to accept the dot surfaced 488 more matches and 24 of them read as
+# lost -- then the boundary lookbehind above showed that 249 of the 488, including all 24, were
+# the stamp sitting inside a longer filename rather than a reference at all. What remains is
+# **239 genuine references** the census had never counted, every one of them landing. The number
+# a wider and tighter meter reports is the same number, which is the most one can ask of a repair.
+# THE CEILING ROSE ONCE, ON 20260826, AND ONLY A DEBRIDE CAN DO THAT. A ceiling that only falls is
+# a discipline against drift, and a custody-gated deep debride is the one act that is not drift: on
+# 20260825 the macOS bench removed counsel/date/20260730/20260730-150702_pole-bozo-djinn-murr-the-maintainer.md
+# from the tree and from every commit, on the maintainer's word. Three living files still cited it and were
+# repointed the next round; references in DATED TESTIMONY cite it still and always will, since
+# accrete-never-break holds their text and the page they name is gone by design. REDS %245.
+#
+# THE TWO NUMBERS WERE TRACED THE NEXT ROUND, and the answer was in the paragraph above this one.
+# Six runs across that round gave 178, then 182 three times, then 178 twice, and the round recorded
+# the shift as untraced. It reads two ways and both are measured (REDS %246):
+#
+#   182 -> 178, the LAST transition, is this comment block. Naming the removed page's full path
+#     here put a dated basename into authored code whose sprig names no file, so BOTH conjuncts of
+#     `dp_discovered_fixture_basenames` held and the census read the page as an instrument's
+#     planting. Five surviving references -- one in construction/REDS.md, three in
+#     expanding-prompts/date/20260730/, one in a session log -- stopped being counted, silently, on
+#     the same lap the ceiling rose to make room for them.
+#
+#   the FIRST transition is context/LEXICON.md, which carried exactly FOUR occurrences of that page
+#     at 7837b1d237 and carries none now. Repairing them lowered the count by four, which the round
+#     recorded as a rise because it read the direction from a story rather than from the diff.
+#
+# The census itself was never unstable: four consecutive runs on this tree, one of them beside a
+# live roster, produced byte-identical output at 178. It reported a tree that was being repaired
+# between readings. Discovery skips full-line comments now, and the page is LISTED in
+# dated_path_exclusions.sh by decision, so the subtraction is on the record and this comment is
+# free to name it. Proven both ways: remove the listing and the same tree reads 183.
+LOST_REFERENCE_BASELINE=85
+                   # Historical/testimony census baseline, reported rather than gated from
+                   # breakage. 88 of the 173 then standing were rows that name a log and say on
+                   # the same line that it never landed -- the exact repair the shelves' own
+                   # header asks for, counted as the wound it heals. The buckets are what prove
+                   # the narrowing honest: refs_total and refs_home did not move, so nothing
+                   # left the set the census walks and 88 references merely changed bucket.
+                   # 168 until 20260829.081500, when in-root git worktrees left the corpus and
+                   # the field's own reading stood alone: a peer's checkout was supplying 148
+                   # of 296 gone and 22 of 39 ambiguous, so this gate read 335 and the tree
+                   # read 165. A ceiling only falls, and the three it falls by are repairs
+                   # that landed since 20260826 and had nowhere to show.
+                   # 178 until 20260826.052900. The chapter molt of
+                   # 20260826 re-seated eleven foundations at fresh stamps and debrided the elder
+                   # ones, which took the census to 390: a MOLT changes a basename where a FOLD
+                   # keeps it, so the resolver recovers the second and can never recover the
+                   # first. Repointing every LIVING citer took it to 347, and listing the eleven
+                   # molted names plus one deleted manifest -- each with its forwarding address,
+                   # in dated_path_exclusions.sh -- took it to 167, below the ceiling it started
+                   # under. 197 of the references the molt stranded sit in session logs, which
+                   # accrete-never-break keeps word for word, so listing is the honest reading and
+                   # a rising ceiling would have been the lazy one (REDS %253). It reads 168
+                   # rather than 167 because row %253 NAMES an untraced basename so a later lap
+                   # can find it, and a row naming a lost reference is itself one -- the cost of
+                   # saying so, paid once and visible (REDS %245, %246, same shape).
+                   # that dated testimony still names;
+                   # 192 until 20260823.124407, when *_control.sh became a glob exclusion; 187
+                   # until 20260824.174500, when a citation swept by the Sala -> Seva rename was
+                   # repointed at the dated filename that correctly never followed it; 186 until
+                   # 20260824.193000, when planted fixture names began being DISCOVERED rather than
+                   # listed -- 47 found against a roster of 2, of which nine had been counted here
+                   # as breakage (REDS %203's named remainder, closed).
+
+# What is not the field -- read from ONE list that this tool and the repointer both source, since
+# a list kept in two places is two lists that happen to match today (REDS %121).
+# Sourced from THIS script's own directory rather than from the working directory. The control
+# corpus runs this scan from a throwaway tree, and a tool that can only find its own parts
+# when someone is standing in the repository fails exactly where it is used.
+. "$(CDPATH= cd "$(dirname "$0")" && pwd)/dated_path_exclusions.sh"
+set -f
+DP_GREP_EXCLUDES="$(dp_grep_excludes | tr '\n' ' ')"
+DP_PATHS_ROSTER="$(dp_paths_roster)"
+set +f
+
+# THE REFERENCE PATTERN, WRITTEN ONCE. The same shape is read three times below -- the main sweep,
+# the re-admit pass, and the asserted-absent subtraction -- and it stood spelled out at all three.
+# That is one rule three copies could come to disagree about, in the one place where disagreeing
+# means miscounting every dated reference in the tree.
+#
+# A REFERENCE BEGINS AT A BOUNDARY, which the leading group is here to say. Without it the stamp
+# may start in the middle of a longer filename, and the retired countdown-prefix names are exactly
+# that shape: `99991_YYYYMMDD-HHMMSS.md` contains `YYYYMMDD-HHMMSS.md`, and the rename mapping
+# that records those names quotes 251 of them. Measured `20260824`: 24 such substrings read as
+# lost references, every one of them inside a longer name that resolves perfectly well. The old
+# pattern hid this by requiring an underscore after the stamp -- the elder names put theirs
+# BEFORE it -- so widening the right side is what surfaced a looseness on the left.
+#
+# WHY THE BOUNDARY IS CONSUMED RATHER THAN LOOKED BEHIND. `grep -P` is a GNU extension and BSD
+# grep, which is what macOS ships, refuses it outright -- so this census read what it read because
+# of the pier it ran on. PCRE's `(?<![A-Za-z0-9_.-])` has no ERE spelling, and the same rule does:
+# match the boundary character too, then drop it. Under `-o` the two are identical, because a
+# match may begin only where the character before it sits outside the class, which is precisely
+# what the lookbehind asked. Proven on the whole tree `20260826.090745` under GNU grep 3.12:
+# 35,642 references, sorted byte-identical between the two spellings. The family is gated at zero
+# in `tools/fixtures/s/shell_dialect_scan.sh`.
+#
+# THE STRIP, and its one subtlety. The consumed character can itself be a colon -- `see:20260101-
+# 000000.md` is an ordinary way to write one -- so the strip removes exactly ONE character after
+# the FIRST colon rather than matching a class of separators, and a match that began at line start
+# consumed nothing and is left alone.
+#
+# ORDER IS NOT A PROPERTY OF THIS OUTPUT. `grep -r` walks directories in readdir order, which is
+# not stable between two invocations on this pier -- measured by running one pattern twice and
+# diffing. Every reader below is order-independent (`grep -v`, `grep -vxF -f`, an awk classifier),
+# so this is recorded to save the next reader a phantom diff rather than to warn of a fault.
+DP_REF_BODY='(\.\./)*([A-Za-z0-9_.-]+/)*[0-9]{8}-[0-9]{6}(_[A-Za-z0-9._-]+)?\.(md|kyri|kyri|rye|rish|tsv|brix|glow|sh)'
+DP_REF_RE="(^|[^A-Za-z0-9_.-])($DP_REF_BODY)"
+DP_REF_STRIP='s|^\([^:]*\):[^A-Za-z0-9_.-]|\1:|'
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# The tracked corpus is the existence oracle. Symlinked and untracked paths are re-checked on
+# disk afterward, so a path a reader can actually follow is never called broken.
+git ls-files > "$work/all.txt"
+
+# Globbing stays off across the whole invocation: the exclusion words carry patterns meant for
+# grep -- `dated_path_*` above all -- and the shell must hand them over rather than resolve them.
+#
+set -f
+grep -rIoE "$DP_REF_RE" \
+  --include=*.md --include=*.kyri --include=*.kyri --include=*.rish \
+  --include=*.rye --include=*.sh --include=*.brix --include=*.mdc \
+  $DP_GREP_EXCLUDES \
+  . 2>/dev/null | sed "s|^\./||; $DP_REF_STRIP" > "$work/pairs.txt"
+
+# The re-admit pass. grep prunes `seed` by NAME, which also prunes recursion-prompts/seed -- the
+# loop's own room, and nothing to do with the projection. Scanned here in its own pass and folded
+# back in, so the corpus holds the room rather than silently omitting it (REDS %122).
+for _rd in $(dp_readmit_dirs); do
+  [ -d "$_rd" ] || continue
+  grep -rIoE "$DP_REF_RE" \
+    --include=*.md --include=*.kyri --include=*.kyri --include=*.rish \
+    --include=*.rye --include=*.sh --include=*.brix --include=*.mdc \
+    "$_rd" 2>/dev/null | sed "s|^\./||; $DP_REF_STRIP" >> "$work/pairs.txt"
+done
+set +f
+
+# THE CITING CORPUS IS THE TRACKED TREE, and until `20260911.060000` only the existence oracle was.
+# `grep -r .` walks the filesystem, so every untracked room walks in with it -- and `.lap/`, the
+# per-ship scratch room seated by `.claude/rules/read-scope.md`, is exactly that: gitignored, one
+# per checkout, holding whatever a lap drafted an hour ago and let go. Measured on this pier,
+# `.lap/mine/convergence_tree_prove.sh` contributed a `gone` reading to `refs_lost`, a gate held at
+# a ceiling -- so eight checkouts answered this meter differently for a reason none of them shared,
+# and a lap could red the fleet's gate with a file no peer can see. That is the fault the worktree
+# pass below already names in its own words, *a meter whose reading depends on untracked scratch is
+# measuring the bench*, and it reached worktrees alone. The oracle and the corpus read one list now.
+# A lap's own new page rejoins the moment it is staged, since `git ls-files` reads the INDEX -- which
+# is before the hot roster pass every send runs, so a page is measured on the lap that writes it.
+awk '
+  NR == FNR { tracked[$0] = 1; next }
+  { p = $0; sub(/:.*/, "", p); if (p in tracked) print }
+' "$work/all.txt" "$work/pairs.txt" > "$work/pairs.tracked"
+mv "$work/pairs.tracked" "$work/pairs.txt"
+
+# EVERY IN-ROOT WORKTREE, filtered one step later for the same reason -- grep matches a directory
+# by NAME and a worktree is known by its PATH. A worktree is a second checkout of this same
+# repository, so counting it reads a photograph of the field as the field, and its commit is not
+# this one, so its references to any room folded since read GONE. Removing them is what lets this
+# census measure the tree rather than whichever peer happens to have a checkout open, which is the
+# deeper fault: a meter whose reading depends on untracked scratch is measuring the bench.
+# The derivation and its evidence live in dated_path_exclusions.sh beside the other exclusions.
+# Read line by line rather than word by word: a worktree is named by whoever ran `git worktree
+# add`, so its path may carry a space, and this loop sits below the `set +f` above where a glob
+# character would expand as well.
+dp_worktree_dirs | while IFS= read -r _wt; do
+  [ -n "$_wt" ] || continue
+  grep -v "^${_wt}/" "$work/pairs.txt" > "$work/pairs.nowt" 2>/dev/null || : > "$work/pairs.nowt"
+  mv "$work/pairs.nowt" "$work/pairs.txt"
+done
+
+# grep has no --exclude-path, so the path roster is applied here instead -- the same list, one step
+# later. A page that DEMONSTRATES recovery must quote a reference that no longer resolves, and
+# counting it would make the meter rise as the demonstration got better.
+if [ -n "${DP_PATHS_ROSTER:-}" ]; then
+  printf '%s\n' "$DP_PATHS_ROSTER" | while IFS= read -r _p; do
+    [ -n "$_p" ] || continue
+    grep -v "^${_p}:" "$work/pairs.txt" > "$work/pairs.filtered" 2>/dev/null || true
+    mv "$work/pairs.filtered" "$work/pairs.txt"
+  done
+fi
+
+# A PATH ASSERTED ABSENT IS NOT A REFERENCE (REDS %139). A guard that proves a fossil was shed
+# writes `test ! -f foundations/<stamp>_<sprig>.md`, and that path names a file which MUST NOT
+# exist. Counting it as a lost reference applies the exclusion list's own test backwards -- it is
+# the instrument, not the field -- and makes the meter rise exactly as the proof of a clean shed
+# gets stronger. Five such paths across two season witnesses were being counted as breakage.
+#
+# The match is anchored on the negation so it can never swallow an ordinary citation: only a path
+# standing immediately after `! -f` or `! -e`, with or without the leading `test`, is subtracted,
+# and it is subtracted for the citing file that wrote it rather than everywhere it appears.
+
+# HERE THE BOUNDARY IS ALREADY SPOKEN FOR, so this pattern reaches for the body alone. `! -[fe] +`
+# ends on one or more spaces, and a space sits outside the boundary class, so the lookbehind this
+# line once carried could never refuse anything. Dropping it changes no reading and removes the
+# last `grep -P` from the file.
+set -f
+grep -rIoE "! -[fe] +$DP_REF_BODY" \
+  --include=*.md --include=*.kyri --include=*.kyri --include=*.rish \
+  --include=*.rye --include=*.sh --include=*.brix --include=*.mdc \
+  $DP_GREP_EXCLUDES \
+  . 2>/dev/null | sed 's|^\./||; s|:! -[fe] *|:|' | sort -u > "$work/absent.txt"
+set +f
+if [ -s "$work/absent.txt" ]; then
+  grep -vxF -f "$work/absent.txt" "$work/pairs.txt" > "$work/pairs.kept" 2>/dev/null || : > "$work/pairs.kept"
+  mv "$work/pairs.kept" "$work/pairs.txt"
+fi
+
+# A PLANTED FIXTURE NAME IS NOT A REFERENCE EITHER, and for the same reason one step further out.
+# A control plants a name that must match nothing; the session log explaining the control then
+# quotes it, and the log is testimony rather than instrument, so no name-match on the control can
+# reach the quotation. The list subtracts the planted basename wherever it is quoted, which is safe
+# because such a name is built to name nothing -- a stamp of all zeros names no lap this tree ran.
+# Both halves: the names a debride or a fusion deliberately left absent, which only a hand can
+# know, and the names an instrument plants, which two passes can find (REDS %203's remainder,
+# counted 20260824.193000 at 47 against a roster of 2).
+{ dp_fixture_basenames; dp_discovered_fixture_basenames "."; } | sort -u > "$work/fixtures.txt"
+#
+# ONE PASS RATHER THAN ONE PER NAME. This subtraction once rewrote the whole pairs file once per
+# fixture basename -- 219 names against 28,396 pairs, a `grep` process and a full rewrite each
+# time. Measured `20260908.091312`: 8,976 ms inside the census and 5,179 ms in isolation, for a
+# subtraction that removed ZERO lines on this tree, since a planted name is built to name nothing
+# and the corpus rarely quotes one. `grep -f` takes the whole roster in one file, so the same
+# reading costs 397 ms -- and the semantics are identical BECAUSE the patterns stay patterns: a
+# basename carries a `.` that matches any character, and every one of these 219 does, so a rewrite
+# to a literal suffix test would have quietly changed the reading. Proven byte-identical on this
+# tree and on 30 planted lines -- exact suffix, `docs/` prefix, the regex-dot bite, a line with no
+# colon, and a trailing tail -- 18 of 30 removed the same way by both.
+#
+# A BLANK LINE WOULD BE CATASTROPHIC, which is why one is deleted before the pattern is built:
+# `:.*$` matches every pair, so an empty roster entry would empty the census. The elder loop was
+# safe by its own `[ -n "$_fb" ] || continue`, and that guard moves into the `sed` rather than
+# being dropped with the loop that held it.
+sed '/^$/d; s|^|:.*|; s|$|$|' "$work/fixtures.txt" > "$work/fixtures.pat"
+if [ -s "$work/fixtures.pat" ]; then
+  grep -v -f "$work/fixtures.pat" "$work/pairs.txt" > "$work/pairs.nofix" 2>/dev/null || : > "$work/pairs.nofix"
+  mv "$work/pairs.nofix" "$work/pairs.txt"
+fi
+
+# Six fields out, so no later step has to guess which path a column holds:
+#   verdict, citing file, reference as written, reading one, reading two, recovered home
+awk -F: '
+NR==FNR {
+  ex[$0] = 1; n = split($0, p, "/"); base = p[n]; cnt[base]++; where[base] = $0
+  # The stamp index, beside the basename index. A sprig is added only when two logs share a
+  # second, so a reference written before the collision names the stamp and nothing else. The
+  # stamp is what survived the rename, so it is the key a stale reference can still be read by.
+  if (base ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][_.]/) {
+    st = substr(base, 1, 15); scnt[st]++; swhere[st] = $0
+  }
+  next
+}
+{
+  file = $1; ref = $2
+  key = file "\t" ref; if (seen[key]++) next
+  dir = file; sub(/\/[^\/]*$/, "", dir); if (dir == file) dir = ""
+
+  cand = (dir == "" ? ref : dir "/" ref)
+  n = split(cand, seg, "/"); j = 0
+  for (i = 1; i <= n; i++) {
+    s = seg[i]
+    if (s == "." || s == "") continue
+    if (s == "..") { if (j > 0) j--; continue }
+    out[++j] = s
+  }
+  rel = ""; for (i = 1; i <= j; i++) rel = rel (i > 1 ? "/" : "") out[i]
+
+  root = ref; while (sub(/^\.\.\//, "", root)) ;
+
+  n = split(ref, p, "/"); base = p[n]
+  found = (base in cnt) ? where[base] : "-"
+
+  # The fold rule, computed rather than searched: a reference names its own room, and a folded
+  # file sits under that rooms own date/<day>/ directory. Applied before the basename index so a
+  # reference naming its room is never called ambiguous on account of another rooms namesake.
+  # (No apostrophes in here -- this comment lives inside a single-quoted awk program.)
+  folded = ""
+  if (base ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][_.]/) {
+    day = substr(base, 1, 8)
+    room = substr(root, 1, length(root) - length(base) - 1)
+    if (room != "") {
+      c1 = room "/date/" day "/" base
+      c2 = room "/archive/" day "/" base
+      if (c1 in ex) folded = c1
+      else if (c2 in ex) folded = c2
+    }
+    # A BARE basename was a sibling reference: two files sitting flat in one room, one naming
+    # the other with no directory at all. A day fold puts siblings in different day folders and
+    # breaks exactly those. The citing file still names the room, so the room is read off it --
+    # this uses context the reference already carries rather than guessing between namesakes.
+    if (folded == "" && root == base) {
+      citer_room = dir
+      sub(/\/date\/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$/, "", citer_room)
+      sub(/\/archive\/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$/, "", citer_room)
+      if (citer_room != "") {
+        s1 = citer_room "/date/" day "/" base
+        s2 = citer_room "/archive/" day "/" base
+        if (s1 in ex) folded = s1
+        else if (s2 in ex) folded = s2
+      }
+    }
+  }
+
+  # THE STAMP READING, reached only where the basename names nothing. It answers the same way
+  # tools/d/dated_path_resolve.rish does, because a census and the resolver that reads its rows
+  # disagreeing about one reference is how a reader stops trusting either (the mark law: the
+  # three tools must agree on what a dated file is).
+  # Only a reference with NO SPRIG is read this way. A reference carrying a sprig that names no
+  # file has told us something the stamp cannot overrule, so it stays gone rather than being
+  # handed the file of some namesake. (No apostrophes in here -- single-quoted awk program.)
+  stamp = ""
+  if (base ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]\./) {
+    stamp = substr(base, 1, 15)
+  }
+
+  if (rel in ex || root in ex) { verdict = "home" }
+  else if (folded != "")       { verdict = "recoverable"; found = folded }
+  else if (cnt[base] == 1)     { verdict = "recoverable" }
+  else if (cnt[base] > 1)      { verdict = "ambiguous" }
+  else if (stamp == "")        { verdict = "gone" }
+  else if (scnt[stamp] == 1)   { verdict = "recoverable"; found = swhere[stamp] }
+  else if (scnt[stamp] > 1)    { verdict = "ambiguous" }
+  else                         { verdict = "gone" }
+
+  print verdict "\t" file "\t" ref "\t" rel "\t" root "\t" found
+}' "$work/all.txt" "$work/pairs.txt" > "$work/class.txt"
+
+# A symlinked or untracked path still resolves for a reader, so re-check the two readings on
+# disk before calling anything broken -- work-in-progress -> crux is the standing case. Only
+# the doubtful lines reach the disk, so it is touched once per doubt rather than once per
+# reference. The recovered-home column is never tested here; it exists by construction.
+awk -F'\t' '$1 == "home"' "$work/class.txt" > "$work/final.txt"
+awk -F'\t' '$1 != "home"' "$work/class.txt" > "$work/doubt.txt"
+tab="$(printf '\t')"
+while IFS="$tab" read -r verdict file ref rel root found; do
+  [ -n "${verdict:-}" ] || continue
+  if { [ -n "$rel" ] && [ -e "$rel" ]; } || { [ -n "$root" ] && [ -e "$root" ]; }; then
+    verdict=home
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$verdict" "$file" "$ref" "$rel" "$root" "$found" >> "$work/final.txt"
+done < "$work/doubt.txt"
+
+# A DECLARED ABSENCE IS NOT A BROKEN REFERENCE. A row that names a file and says on the same
+# line that the file never landed is testimony ABOUT a gap, deliberately written, rather than a
+# reference that broke. The session-log shelves say so in their own header -- "the row keeps its
+# stamp and its meaning, and carries no link, since a link promises a file a reader can open" --
+# and then the census counted all 88 of those honest rows as lost, which is the guard reding on
+# the exact repair its own law asks for. Same shape as REDS %246 one artifact over, where a
+# dated name written on a full-line comment reads as a page a round WROTE ABOUT rather than one
+# an instrument planted; and the same cost the %245 note in the ceiling comment above paid once
+# by hand, met here at the scale that made paying it by hand wrong.
+#
+# TWO BOUNDS, so the marker can never become an escape hatch. The declaration must stand on the
+# SAME LINE as the reference -- a header sentence covers a page and would silence every row under
+# it. And a line that LINKS the basename still counts however it is worded: a link promises a
+# file a reader can open, and no adjacent prose withdraws that promise. Both are proven in
+# tools/fixtures/d/dated_path_control.sh rather than trusted here.
+#
+# Two spellings stand in the tree for one meaning -- "*(log never landed)*" on 87 lines across
+# three shelves, and "-- never landed in any commit" on one -- so the pattern reads the phrase
+# they share rather than either page's punctuation.
+: > "$work/declared.txt"
+awk -F'\t' '$1 == "ambiguous" || $1 == "gone"' "$work/final.txt" > "$work/lost.txt"
+awk -F'\t' '$1 != "ambiguous" && $1 != "gone"' "$work/final.txt" > "$work/kept.txt"
+while IFS="$tab" read -r verdict file ref rel root found; do
+  [ -n "${verdict:-}" ] || continue
+  _b="${ref##*/}"
+  # The two greps read the SAME line set: the citing lines that name this basename and carry the
+  # declaration. The second asks whether any of them also links it -- against every form the
+  # target may wear, since a shelf row links `<day>/<basename>` while the reference is recorded
+  # bare -- and a link keeps the reference counted however the line is worded.
+  _decl="$(grep -F -- "$_b" "$file" 2>/dev/null | grep -F -- 'never landed' || :)"
+  if [ -n "$_decl" ] && ! printf '%s\n' "$_decl" | grep -q -- '](\([^)]*/\)\?'"$_b"')'; then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' declared "$file" "$ref" "$rel" "$root" "$found" >> "$work/declared.txt"
+  else
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$verdict" "$file" "$ref" "$rel" "$root" "$found" >> "$work/kept.txt"
+  fi
+done < "$work/lost.txt"
+cat "$work/declared.txt" >> "$work/kept.txt"
+mv "$work/kept.txt" "$work/final.txt"
+
+if [ "$verb" = list ]; then
+  awk -F'\t' '$1 != "home"' "$work/final.txt"
+  exit 0
+fi
+
+# One pass for every count, so the four buckets and the total are read off the same file in
+# the same moment and cannot disagree with each other.
+eval "$(awk -F'\t' '
+  { total++; n[$1]++ }
+  END {
+    printf "total=%d\nhome=%d\nrecoverable=%d\nambiguous=%d\ngone=%d\ndeclared=%d\n",
+      total, n["home"], n["recoverable"], n["ambiguous"], n["gone"], n["declared"]
+  }' "$work/final.txt")"
+broken=$((recoverable + ambiguous + gone + declared))
+
+echo "refs_total=$total"
+echo "refs_home=$home"
+echo "refs_broken=$broken"
+echo "broken_recoverable=$recoverable"
+echo "broken_ambiguous=$ambiguous"
+echo "broken_gone=$gone"
+# Reported beside the gate rather than folded silently into it: a subtraction nobody can see
+# reads as "the tree got better" on the lap it is made.
+echo "broken_declared=$declared"
+lost=$((ambiguous + gone))
+echo "refs_lost=$lost"
+echo "lost_reference_baseline=$LOST_REFERENCE_BASELINE"
+
+# THE LOST SET READ TWO WAYS -- reported, never gated, and the two questions are separate.
+#
+# WHY THESE TWO. A gate is worth having only where a lap can act on it, and `refs_lost` mixes a
+# class a lap must repair with a class the tree's own law forbids it to touch. Two readings tell
+# them apart, and each borrows its rule from a guard that already draws the same line:
+#
+#   PROMISE vs MENTION. `.claude/rules/collaboration.md` seats it: references are promises. A
+#     Markdown link is a promise a reader clicks and finds broken; a name in prose or backticks
+#     tells them a filename and promises nothing. `tools/fixtures/t/tracked_link_scan.sh` already
+#     draws this line -- "only the second one is a promise" -- and gates the promises alone.
+#
+#   LIVING vs TESTIMONY. The mark law's own rule, read here with the same predicate
+#     `tools/fixtures/d/dated_path_repoint_scan.sh` uses to decide what it may write to: a file
+#     whose own basename opens with a one-clock stamp is testimony and keeps every word it wrote.
+#     A lost reference inside testimony is not a defect a lap declined to fix -- it is a reference
+#     accrete-never-break forbids anyone to repair.
+#
+# THE CELL THAT IS BOTH -- a broken link, in a file a lap may lawfully edit -- is the repairable
+# class, and it is the one number the gate question turns on. The `declared` pass above cut the
+# lost set from 173 to 85 without touching this split, so these five print the shape of whatever
+# remains rather than a number frozen at one lap's reading.
+#
+# STILL REPORTED RATHER THAN GATED. Moving the gate from `refs_lost` to `lost_promised_living`
+# would tighten it on the class that matters and drop the class nobody may repair, which is what
+# every other link guard in this family already does. It is asked on `construction/ITINERARY.md`
+# and waits on the maintainer's word, because a gate a lap moves for itself is a ceiling raised by a side
+# door. Until then these five numbers are the diagnosis, so the next lap that meets the ceiling
+# reads whether the count is repairable instead of counting it again by hand -- which two laps
+# did, by hand, on 20260907 alone.
+awk -F'\t' '$1 == "ambiguous" || $1 == "gone"' "$work/final.txt" > "$work/lost_split.txt"
+lost_promised=0
+lost_promised_living=0
+lost_living=0
+while IFS="$tab" read -r verdict file ref rel root found; do
+  [ -n "${file:-}" ] || continue
+  # THE LINK TEST IS EXACT ON THE REFERENCE, never on its basename, and the field taught the
+  # difference before the pen could. `waymarks/date/README-index-20260725.md` writes one row that
+  # names its log twice -- once as the link's own LABEL in backticks, once as the link target
+  # `20260725/<basename>` -- and the extractor records those as two references, because they are
+  # two different strings. The target resolves home. The label cannot resolve, since it names no
+  # room, and it is the label that reaches this split. A basename-shaped test reads the target's
+  # promise onto the label and calls a kept promise a broken one: measured on this tree, that is
+  # the whole of `lost_promised_living`, 1 against the 0 the exact test reads.
+  #
+  # The declared pass above is deliberately loose in exactly this place, and the two are not in
+  # conflict. It asks whether a LINE still links what it calls absent -- a question about the
+  # sentence, where any spelling of the link withdraws the declaration. This asks whether THIS
+  # reference is itself a promise, which only its own text can answer.
+  promised=no
+  if [ -f "$file" ] && grep -qF -- "]($ref)" "$file" 2>/dev/null; then
+    promised=yes
+  fi
+  living=yes
+  case "${file##*/}" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][_.]*) living=no ;;
+  esac
+  [ "$promised" = yes ] && lost_promised=$((lost_promised + 1))
+  [ "$living" = yes ] && lost_living=$((lost_living + 1))
+  if [ "$promised" = yes ] && [ "$living" = yes ]; then
+    lost_promised_living=$((lost_promised_living + 1))
+  fi
+done < "$work/lost_split.txt"
+echo "lost_promised=$lost_promised"
+echo "lost_mentioned=$((lost - lost_promised))"
+echo "lost_living=$lost_living"
+echo "lost_testimony=$((lost - lost_living))"
+echo "lost_promised_living=$lost_promised_living"
+
+# the maintainer's ruling `20260913`: gate only the repairable cell. A living Markdown promise that
+# resolves nowhere is work a lap can close; testimony and plain mentions remain counted without
+# asking an agent to rewrite history. Zero is the natural ceiling because one broken living link
+# is already a reader-facing defect.
+REPAIRABLE_CEILING=0
+echo "repairable_ceiling=$REPAIRABLE_CEILING"
+if [ "$lost_promised_living" -le "$REPAIRABLE_CEILING" ]; then
+  echo "under_ceiling=yes"
+else
+  echo "under_ceiling=no"
+fi
+
+# The census is trustworthy only if every reference landed in exactly one bucket.
+if [ "$((home + broken))" -eq "$total" ] && [ "$total" -gt 0 ]; then
+  echo "verdict=ok"
+else
+  echo "verdict=unsound"
+  exit 1
+fi

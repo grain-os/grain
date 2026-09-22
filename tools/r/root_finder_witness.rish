@@ -1,0 +1,199 @@
+# tools/r/root_finder_witness.rish -- a script that finds its own root by a BUILD OUTPUT has made
+# a claim about the machine rather than about the repository.
+#
+# WHY THIS RUNG. Two hundred and some tracked shell sources in this tree open by walking up from
+# their own directory until they reach a directory holding named children, and 189 of them name
+# `rishi/bin`. Nothing under `rishi/bin` is tracked -- it holds the built `rishi` binary -- so a
+# fresh clone before its first build, a detached worktree, and any pristine-tree reading have no
+# such directory, and every one of those scripts refuses before reading a single file (REDS %788).
+#
+# WHY NO STANDING GUARD COULD HAVE CAUGHT IT. Every guard in this tree runs in a tree somebody has
+# already built in, which is the one condition that hides this. The probe that found it --
+# `tools/c/control_perturbation_witness.rish` -- reaches the class only by running a candidate
+# twice in a detached worktree at two to three minutes each, and it met the class on 2 of its 9
+# candidates. That is a discovery instrument rather than a census: it can say a script refused and
+# it cannot say how many would.
+#
+# WHAT THIS ADDS, and it is the half one ship may land. The reading is STATIC and reads tracked
+# bytes alone: for each tracked shell source, the sentinel directory names its root-finder loop
+# tests are extracted, and `git ls-files` answers whether each name holds tracked content. A name
+# holding none stands only where a build put it. No worktree, no build, no command run -- so the
+# whole population is counted in seconds rather than sampled in hours.
+#
+# WHY IT RATCHETS RATHER THAN WALLS. The repair is one directory name per file -- `rishi/src` is
+# tracked and occurs at the root and nowhere below it, so it is exactly as discriminating and true
+# in a built tree and a bare one alike. The files are spread across every lane of the fleet, so
+# the sweep's timing belongs to the fleet rather than to one ship, which is `%788`'s own closing
+# sentence. A wall at zero would red eight ships at once for work none of them chose this hour.
+# The ceiling only falls, so each lane sweeps its own files at its own pace and the fleet-wide
+# property is provable the lap the last one lands.
+#
+# AND THE RATCHET ALONE WAS A WALL WITH A DELAY. Seated at 189 with no slack, the reading stood at
+# 191 within a day and refused on every checkout in the fleet, for two finder sites BORN upstream
+# that no ship chose and no lane could sweep from where it stood. The no-slack reasoning is right
+# for a FIXED population and it inverts for a growing one, and this population grows at roughly
+# two an hour of fleet time -- each a hand copying one of the 189 examples the tree ships.
+#
+# SO THE GATE MOVED TO THE GROWTH. `tools/fixtures/r/root_finder_baseline.txt` pins the 189 paths
+# carrying a bare finder the lap the split was seated. `finders_bare_new` counts a bare finder in
+# a file ABSENT from that roster and is gated at ZERO, since a file born today was born in
+# somebody's current lane and is repairable on the lap it lands. `finders_bare_legacy` counts the
+# roster's own, under a ceiling that only falls over a population that can never grow -- which is
+# the number no-slack was always right for. The roster is keyed by PATH and the legacy ceiling
+# counts SITES, so a new file reds the gate and a new finder inside a roster file reds the
+# ceiling. One false red is possible and is proven in the pen rather than claimed: a lawful rename
+# leaves the roster behind, and its repair is one roster row.
+#
+# THE SECOND CLASS, which nothing held and which is not the first one. Nine finders name `.git`.
+# That directory stands in an ordinary clone, so those nine run where the 189 refuse -- and in a
+# LINKED WORKTREE `git worktree add` writes `.git` as a FILE carrying a `gitdir:` pointer, so `-d`
+# is false and the walk refuses there. The control proves that by adding a real linked worktree
+# and reading the path's type rather than by citing the manual. Reported apart from the gated
+# number, because the two want different repairs and one merged count would hide which a lane is
+# looking at.
+#
+# THE THIRD READING, ambiguity: a walk stopping at the FIRST directory holding every sentinel
+# stops at the wrong place if some directory below the root holds them all. Reported, and blind in
+# one direction it names: the parents are read from `git ls-files`, so a build output can never
+# show a below-root occurrence here. That blindness is safe, since such a finder is already
+# counted in the gated number where the sharper fault lives.
+#
+# THE DOORS READING, and why a number rather than an argument. `%788` names two repairs and
+# weighs neither, so `--doors` derives each one's cost from the index. SWEEP replaces the
+# build-output sentinel in every finder naming it; TRACK puts one tracked file under that name and
+# changes no finder at all. The sweep's population is LARGER than the finder count: a tracked
+# source that creates the sentinel directory to lay out a pen keeps making the elder shape after a
+# sweep, so a finder copied there walks out of the pen and refuses. Read `20260917`: 187 finder
+# files plus 46 pen layouts, 216 files together against the track door's 2. Both are proven on
+# metal in the control -- a real `git clone` carries tracked content and nothing else, the elder
+# finder refuses there, and each door resolves.
+#
+# THE THIRD DOOR IS PRICED AND NOT ADOPTED. `git -C "$(dirname "$0")" rev-parse --show-toplevel`
+# needs no sentinel and is right in a clone and a linked worktree alike. The walk's own seating
+# comment names its cost -- "git-free, so a pen copy outside a repository still resolves" -- and
+# `pen_files_no_repo` is that cost as a number, 15 today. Adopting it is a fleet ruling.
+#
+# WHAT IT DOES NOT REACH. A script computing its root another way -- `git rev-parse --show-toplevel`,
+# an environment variable, a literal path -- carries no walking loop and is invisible here. A
+# stopping test spanning two physical lines is likewise unread; measured `20260917`, every
+# root-finder in this tree writes its test on one line, so a second line would UNDERCOUNT rather
+# than mislead.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/r/root_finder_witness.rish
+
+say "root-finder: Language EN -- a sentinel is a promise about where the root is, and it holds only where the sentinel exists."
+say "root-finder: Style Gauge at Field -- every figure carries what keeps it still."
+say "root-finder: Lens TAME -- safety first: a script that cannot find its root reads nothing and says so at once."
+
+let scan = run ["sh" "tools/fixtures/r/root_finder_scan.sh"]
+say scan.out
+assert scan.ok else "root-finder: the census must complete before it is believed"
+assert scan.out contains "verdict=ok" else "root-finder: the bare-checkout population must stand at or under its ceiling"
+assert scan.out contains "ceiling=" else "root-finder: a ratchet that spells no ceiling cannot be lowered"
+assert scan.out contains "finders_bare_unrunnable=" else "root-finder: the whole bare population must be counted rather than described"
+assert scan.out contains "finders_bare_new=0" else "root-finder: a bare finder in a file the baseline roster does not carry is growth, and growth is gated at zero"
+assert scan.out contains "finders_bare_legacy=" else "root-finder: the roster's own population must be counted apart, since only it may ratchet"
+assert scan.out contains "baseline_paths=" else "root-finder: a roster gating a wall must say how many paths it carries"
+assert scan.out contains "finders_worktree_fragile=" else "root-finder: the linked-worktree class must be counted apart from the bare one"
+assert scan.out contains "finders_ambiguous=" else "root-finder: a walk that could stop early must be counted rather than assumed safe"
+assert scan.out contains "sentinels_build_output=" else "root-finder: the directories only a build creates must be named as their own class"
+assert scan.out contains "sources_tracked=" else "root-finder: the denominator must be printed beside the count"
+say "census GREEN -- the whole population read from tracked bytes, with no build and no worktree"
+
+let control = run ["sh" "tools/fixtures/r/root_finder_control.sh"]
+say control.out
+assert control.ok else "root-finder: the control must complete"
+assert control.out contains "control_verdict=ok" else "root-finder: the control must agree with itself"
+assert control.out contains "control_failed=0" else "root-finder: every leg must stand, and a leg written tomorrow must be heard today"
+assert control.out contains "tracked_finder_counted=yes" else "root-finder: a finder naming tracked sentinels must be counted"
+assert control.out contains "tracked_finder_not_bare=yes" else "root-finder: the clear direction is asserted as hard as the refusal"
+assert control.out contains "tracked_finder_ok=yes" else "root-finder: a healthy pen must read ok"
+assert control.out contains "build_output_counted=yes" else "root-finder: a sentinel holding no tracked content is the whole subject"
+assert control.out contains "build_output_sentinel=yes" else "root-finder: the sentinel class must be counted beside the finder class"
+assert control.out contains "build_output_row=yes" else "root-finder: the row naming the file must say which verdict it earned"
+assert control.out contains "build_output_exists_on_disk=yes" else "root-finder: the reading is about tracked bytes, so a directory standing on disk must still count"
+assert control.out contains "gitdir_not_bare=yes" else "root-finder: a .git sentinel is not the bare-checkout fault and must not be counted as one"
+assert control.out contains "gitdir_fragile=yes" else "root-finder: the linked-worktree class must be seen when it stands"
+assert control.out contains "gitdir_sentinel=yes" else "root-finder: .git must be classified apart from an untracked build output"
+assert control.out contains "linked_worktree_git_is_file=yes" else "root-finder: the claim about a linked worktree must be run rather than recited"
+assert control.out contains "linked_worktree_git_not_dir=yes" else "root-finder: the -d test the nine finders make must be shown false where it matters"
+assert control.out contains "waitloop_unread=yes" else "root-finder: a loop waiting on a directory is not a root-finder and must not be counted"
+assert control.out contains "waitloop_no_build_sentinel=yes" else "root-finder: a wait loop must not invent a build-output sentinel"
+assert control.out contains "mixed_var_unread=yes" else "root-finder: a test naming two variables names no single root"
+assert control.out contains "mixed_var_not_bare=yes" else "root-finder: a shape the reading declines must never reach the gated number"
+assert control.out contains "ambiguous_seen=yes" else "root-finder: a directory below the root answering every sentinel must be seen"
+assert control.out contains "ambiguous_row=yes" else "root-finder: the row must name which finder could stop early"
+assert control.out contains "unambiguous_clear=yes" else "root-finder: one shared sentinel below the root is no ambiguity, and must read zero"
+assert control.out contains "ceiling_at_bound_ok=yes" else "root-finder: a reading standing exactly at the bound must walk free"
+assert control.out contains "ceiling_at_bound_legacy=yes" else "root-finder: the number the ceiling weighs must be the legacy one rather than the total"
+assert control.out contains "ceiling_at_bound_verdict=yes" else "root-finder: the verdict at the bound must say ok"
+assert control.out contains "ceiling_one_past_counted=yes" else "root-finder: one past the bound must be counted before it is refused"
+assert control.out contains "ceiling_one_past_refuses=yes" else "root-finder: the ceiling must bite one past, or it is a suggestion"
+assert control.out contains "ceiling_lifts_again=yes" else "root-finder: removing the plant must return the pen to green, or the refusal proves nothing"
+assert control.out contains "list_rows_match_count=yes" else "root-finder: the named rows must account for the counted finders"
+assert control.out contains "explain_names_planted=yes" else "root-finder: explain must name the finder, so a judgment is one command away"
+assert control.out contains "explain_clear_file_says_so=yes" else "root-finder: a file carrying no finder must be told so plainly rather than by silence"
+assert control.out contains "sentinels_mode_lists=yes" else "root-finder: the sentinel table must be reachable on its own"
+assert control.out contains "unknown_argument_refuses=yes" else "root-finder: a flag read past is a question read as answered"
+assert control.out contains "explain_without_path_refuses=yes" else "root-finder: explain with no path must refuse rather than explain everything"
+assert control.out contains "empty_pen_one_finder=yes" else "root-finder: a pen holding only the scan must read only the scan"
+assert control.out contains "empty_pen_reads_the_pen=yes" else "root-finder: a scan resolving its root outside the pen would read this tree, and must not"
+assert control.out contains "self_runnable_or_unstaged=yes" else "root-finder: this family's own root-finder must name tracked sentinels, read from the scan rather than asserted"
+
+assert control.out contains "doors_three_rows=yes" else "root-finder: a build-output sentinel must carry one row per door, so a reader compares them side by side"
+assert control.out contains "doors_sweep_finder_files=yes" else "root-finder: the sweep's own population must be counted by file rather than by finder"
+assert control.out contains "doors_sweep_counts_pens=yes" else "root-finder: a pen layout creating the sentinel is a file the sweep must visit, and it was never counted"
+assert control.out contains "doors_sweep_union=yes" else "root-finder: the sweep's cost is the union of finders and pen layouts, counted once per file"
+assert control.out contains "doors_git_door_prices_no_repo=yes" else "root-finder: the git-rooted door's cost is the pens building no repository, and it must carry a number"
+assert control.out contains "doors_track_reads_nothing_tracked=yes" else "root-finder: the track door rests on the name holding nothing tracked, read rather than assumed"
+assert control.out contains "doors_track_names_the_rule=yes" else "root-finder: the ignore rule denying the sentinel must be named, since it is one of the two files that door touches"
+assert control.out contains "doors_replacement_tracked=yes" else "root-finder: a proposed replacement holding no tracked content repairs nothing"
+assert control.out contains "doors_replacement_not_below_root=yes" else "root-finder: a replacement occurring below the root stops a swept walk below the root"
+assert control.out contains "doors_replacement_below_root_seen=yes" else "root-finder: the below-root reading must be shown seeing one, or its zero proves nothing"
+assert control.out contains "doors_clean_tree_no_rows=yes" else "root-finder: a tree with no build-output sentinel must print no door, rather than inviting a sweep that repairs nothing"
+assert control.out contains "metal_elder_refuses_in_tracked_bytes=yes" else "root-finder: the fault must be run in a real checkout of tracked bytes rather than argued from the index"
+assert control.out contains "metal_swept_resolves_in_tracked_bytes=yes" else "root-finder: the sweep door must be shown repairing the refusal it claims to repair"
+assert control.out contains "metal_track_door_carries_sentinel=yes" else "root-finder: the track door rests on a clone carrying the directory, which is a run rather than a claim"
+assert control.out contains "metal_elder_resolves_after_track_door=yes" else "root-finder: the track door must repair an UNCHANGED finder, which is the whole of its argument"
+assert control.out contains "mutation_dropping_pen_count_bites=yes" else "root-finder: emptying the pen-layout population must move the sweep's cost, or that half is decoration"
+assert control.out contains "mutation_dropping_pen_count_moves_union=yes" else "root-finder: the union must fall with the population it unions"
+assert control.out contains "mutation_inverting_repo_filter_bites=yes" else "root-finder: the git door's price must depend on the filter that computes it"
+assert control.out contains "mutation_dropping_class_filter_bites=yes" else "root-finder: a door must be named only for a sentinel that actually fails, or it invites an empty sweep"
+assert control.out contains "mutation_narrowing_below_root_bites=yes" else "root-finder: the below-root guard must be load-bearing, shown against a layout that has one"
+
+assert control.out contains "growth_new_counted=yes" else "root-finder: a bare finder in a file the roster does not carry must be counted as growth"
+assert control.out contains "growth_not_legacy=yes" else "root-finder: growth must never be counted into the population that is allowed to ratchet"
+assert control.out contains "growth_refuses=yes" else "root-finder: the growth gate must bite at zero, or it is a suggestion"
+assert control.out contains "growth_row_named=yes" else "root-finder: the refusing file must be named in a row, so the repair is one command away"
+assert control.out contains "growth_total_unmoved=yes" else "root-finder: the split must move no total, or the two readings are not one population"
+assert control.out contains "rostered_is_legacy=yes" else "root-finder: the same bytes rostered must read legacy, which is the roster doing its one job"
+assert control.out contains "rostered_not_new=yes" else "root-finder: a rostered file must leave the gated number entirely"
+assert control.out contains "rostered_walks_free=yes" else "root-finder: the clear direction must be asserted as hard as the refusal, or a gate that refuses everything passes"
+assert control.out contains "rostered_row_named=yes" else "root-finder: a row must say which side of the split its finder fell on"
+assert control.out contains "baseline_paths_counted=yes" else "root-finder: the roster's own size must be read from the roster rather than assumed"
+assert control.out contains "second_site_base_ok=yes" else "root-finder: a legacy population at its bound must walk free before the second site is written"
+assert control.out contains "second_site_counted=yes" else "root-finder: a second finder inside a roster file must be counted, since the ceiling weighs sites"
+assert control.out contains "second_site_still_not_new=yes" else "root-finder: a roster file stays legacy however many finders it grows, which is what the ceiling is for"
+assert control.out contains "second_site_refuses=yes" else "root-finder: the hole a path-keyed roster would leave must be closed by the site ceiling, and shown closing"
+assert control.out contains "rename_before_is_legacy=yes" else "root-finder: the rename leg must start from a tree that walks free, or it proves nothing"
+assert control.out contains "rename_reads_as_new=yes" else "root-finder: the one false red this shape can make must be measured rather than claimed"
+assert control.out contains "rename_refuses=yes" else "root-finder: the false red must be shown refusing, so its cost is on the record"
+assert control.out contains "rename_one_roster_row_repairs=yes" else "root-finder: the repair for a lawful rename must be one roster row, run rather than promised"
+assert control.out contains "absent_roster_refuses=yes" else "root-finder: a growth gate whose roster can vanish is a gate with a door beside it"
+assert control.out contains "mutation_control_reads_one=yes" else "root-finder: a mutation is evidence only where the truth it replaces differs from it, so the unmutated reading stands in the same pen"
+assert control.out contains "mutation_dropping_roster_test_bites=yes" else "root-finder: the roster lookup must be load-bearing, shown going silent when it is removed"
+assert control.out contains "mutation_dropping_roster_test_moves_verdict=yes" else "root-finder: a mutation that moves no verdict has proven nothing about the gate"
+
+let doors = run ["sh" "tools/fixtures/r/root_finder_scan.sh" "--doors"]
+say doors.out
+assert doors.ok else "root-finder: the door reading must complete before a door is chosen"
+assert doors.out contains "door sweep " else "root-finder: the sweep door must carry its cost on the card rather than in a memory"
+assert doors.out contains "door track " else "root-finder: the second repair must be weighed beside the first rather than named in passing"
+assert doors.out contains "replacement_tracked=yes" else "root-finder: the proposed replacement must hold tracked content, measured on every pass"
+assert doors.out contains "replacement_below_root=0" else "root-finder: the proposed replacement must stand at the root and nowhere below it"
+say "doors GREEN -- both repairs priced from the index, and both run in a real checkout of tracked bytes"
+
+say "root-finder GREEN -- 76 legs on real git repositories in a throwaway pen, six mutations RUN on every pass rather than recorded once"
+say "root-finder: growth gated at zero against a roster of 189 paths; the legacy 191 sites ratchet under a ceiling that only falls"
+say "root-finder: the sweep costs 216 files and the track door 2; the timing stays the fleet's, and now so does the price"

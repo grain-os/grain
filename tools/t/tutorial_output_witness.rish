@@ -1,0 +1,239 @@
+# tools/t/tutorial_output_witness.rish -- a tutorial's quoted output is run back against the
+# command above it.
+#
+#   rishi/bin/rishi run tools/t/tutorial_output_witness.rish
+#
+# WHY. A tutorial's whole promise is here is what you will see, and nothing in this tree read one.
+# qa_report_card scores Truth by whether cited PATHS resolve; document_mirror_scan proves two homes
+# hold identical bytes; a fenced output block holds neither a path nor a mirror. So
+# docs-geode/tutorials/the-first-hour.md quoted a three-line ending for its toolchain fetch where
+# the command prints four, and the page read Truth 100 the whole time it was wrong
+# (20260909.174000). The repair that lap was one page; this is the general form.
+#
+# WHAT IS GATED, hard, at zero: drift -- a pair whose command ran and printed something other than
+# what the page quotes.
+#
+# WHAT RUNS. Only a fence whose every line is one plain invocation of rishi/bin/rishi or sh naming
+# a TRACKED script, with no redirect, pipe, semicolon, ampersand, backtick, dollar or glob. The
+# test is on what EXECUTES rather than on what it is handed, so the resolver in the demos page
+# keeps its deliberately stale argument and the pair still checks.
+#
+# WHAT IS HELD, named rather than run: a fence that makes a directory, writes a file, or names a
+# script the reader is about to write. Held is a ratchet under a ceiling that only falls.
+#
+# A BLOCK THAT HONESTLY MOVES DECLARES ITSELF, with a reason, on the line above its fence:
+# <!-- volatile: why it moves -->. It reports and never gates. A reasonless declaration buys
+# nothing, which the pen proves.
+#
+# THE ROOM WRITES A SECOND CLAIM SHAPE, and this read it as nothing for one day (20260910). A page
+# may quote SOME of a longer report -- "Two lines from the full output:" -- and that sentence sits
+# between the command and the block, which the parser used to treat as the end of the candidate.
+# Measured over the same 38 pages: nine pairs, and the guard saw six. A selection declares itself
+# the same way a volatile block does, with a reason:
+#
+#     <!-- selected: two lines of a longer report -->
+#
+# and is checked by CONTAINMENT IN ORDER -- every quoted line appears in what ran, in the order the
+# page prints them. Order is part of the claim: a page listing a verdict above the count that
+# produced it teaches the output's shape wrongly even when both lines are present, and the pen
+# proves that leg alone by removing the order strand and watching it go red.
+#
+# AND CONTAINMENT IN ORDER SAYS NOTHING ABOUT WHAT STANDS BETWEEN (20260910). A page may quote four
+# lines that all print, in the order it prints them, and pass over a refusal standing in the middle
+# of the run -- and every reading above calls that clean. So a selection is read a second time for
+# its SHAPE: one unbroken run of the real output, or a gathering of lines that stand apart. The
+# test tries every start position in what ran, so the answer is outright rather than an alignment
+# somebody chose. Measured over the same nine pairs: the fascia pair in the demos room quotes two
+# adjacent lines and reads contiguous; the announced-length pair beside it quotes one `met:` line
+# and three summary lines with FOUR further `met:` lines standing between them, and the scan now
+# names all four.
+#
+# `selected_scattered` is a CEILING rather than a zero, since gathering is what a selection is for.
+# It falls on repair and rises only by a hand adding a declared selection, an edit standing in the
+# same commit as the page. What it refuses in silence is the case it exists for: a selection that
+# reads as one run today with a line wedged into the middle of it tomorrow. A ceiling on the COUNT
+# of skipped lines was declined and the reason is measurable -- `announced_length_scan` prints one
+# more line for every ladder anybody announces, so that ceiling would red on a page nobody touched.
+# The pen proves the distinction from both ends: a wedged line bites, and honest growth between the
+# quoted lines goes free with the shape count unmoved.
+#
+# PROSE WITH NOTHING DECLARING IT is counted as undeclared_after_prose and named, never checked and
+# never gated. That is the honest half: the page may be quoting a subset, reattributing the output
+# to another invocation, or setting two unrelated blocks side by side, and those want three
+# different tests. The first hour holds a real one -- its "run it twice" block belongs to a
+# DIFFERENT command, so pairing it would invent a claim the writer never made. What changed is that
+# the tree can now see it, since a block nothing reads and a block nothing MAY read read alike from
+# outside and only one of them is a gap.
+#
+# HOW FAR A BLOCK MAY SIT from its command is bounded at twelve lines, about a screen of prose, and
+# the pen proves the bound from both sides.
+#
+# WHAT IT DOES NOT REACH. Stdout alone -- two interleaved streams give an order that depends on
+# buffering rather than on the program. Only the pairs the corpus rooms already write, and only the
+# two fence labels this tree spells. And it proves what a command PRINTS, never that the command is
+# the right one to teach.
+#
+#
+# NOT tools/d/docs_command_path_witness.rish, which stands beside it in the same room and does a
+# different job: that one proves every path printed inside a fenced block RESOLVES for a reader who
+# clones, after a folded room left two pages naming a file at its elder address. This one proves
+# what a command PRINTS. A page can name paths that all resolve and still promise output no command
+# produces -- which is exactly what the first hour did. Two jobs, two names.
+# THE SECOND FENCE LABEL, seated 20260911. This read the literal ```sh alone, and the tree writes
+# two labels: measured over living tracked Markdown, 18 command-and-output pairs stand in living
+# prose, TEN labelled `sh` and EIGHT labelled `bash`. The eight sat in four rooms, five of them in
+# `manual/` -- the room that teaches a reader to encrypt a disk and hold their own keys. Three of
+# those five run under the roster rule, and on metal one was exact and TWO had drifted. All three
+# pages scored Truth 100 on the report card, whose counted half reads cited PATHS.
+#
+# A THIRD DECLARATION rode with it, the LEAD-IN, because the label alone made those five visible
+# and checked NONE of them: that room writes one line of prose between the blocks -- "You should
+# see:" -- and prose with nothing declaring it is named, never checked. All five carry exactly one
+# line, where the two undeclared pairs in docs-geode carry eight and two and are real
+# reattributions. `<!-- lead-in: why -->` says the prose introduces the block rather than
+# reattributing it, so the block is the command's whole output and equality is the right test.
+#
+# THE CORPUS WIDENED BY MEASUREMENT. `docs/` holds 16 pages and ZERO pairs; `bat/` one page and
+# zero. So it is the two teaching rooms the shelf's front door names as a pair, plus the clone
+# path. The held ceiling rose 2 -> 3 for the one case a ceiling may honestly rise for -- a widened
+# denominator, here a macOS `fdesetup` this pier cannot run -- never for a page that drifted.
+#
+# Pen: tools/fixtures/t/tutorial_output_control.sh -- every behavior it counts for itself in
+# `control_cases`, asserted below rather than spelled here, on real git
+# repositories in a throwaway pen, every refusal planted and then lifted, the gap bound and the
+# scattered ceiling each shown from both sides, the order strand proven load-bearing by a mutation
+# that reds one leg alone, and the shape strand by one that reds seven.
+#
+# This header read "twenty-nine" until 20260910, and the pen emitted THIRTY-ONE the whole time. The
+# number had been taken from the witness's own assertion list rather than from the control's
+# output, so it counted the reader instead of the thing read -- which is the same fault one room
+# over as a page quoting output nobody ran.
+#
+# THE TWO ROSTERS DISAGREED AGAIN, and this time the pen was the larger. On `20260911` the control
+# ran 47 legs and this file named 45: `dangling_fence_spares_next` and `dangling_fence_lifted_same`
+# had been written the lap before and asserted nowhere, so either could have read RED under a GREEN
+# witness. Both are named now, and the structural repair sits beside them -- the control prints
+# `control_cases` and `control_failed`, and the witness asserts the failure count, so a leg written
+# tomorrow is heard the day it lands rather than on the day somebody remembers to name it. The
+# spoken figure left the claim line in the same pass: the pen counts itself, and a number typed in
+# prose was the form this shelf has now watched go wrong three times.
+#
+# THE WORD "NAMED" WAS TRUE OF A VERB NOTHING RUNS, repaired 20260911. Two of the readings above --
+# `undeclared_after_prose` and `held` -- report rather than gate, and both earn that on the promise
+# that their populations stay visible. The default report printed the counts and nothing else; the
+# page and line of each one went to the scan's `list` verb, which this witness never calls and no
+# roster lap has ever called. So a reader met `undeclared_after_prose=4` and could not reach the
+# four pages. The report names each one now. A population reported as a bare count is visible the
+# way a locked door is visible, and a header claiming otherwise is the same fault this guard exists
+# to catch, one room over: a document promising something nobody ran.
+#
+# READ ONE AT A TIME, the four turned out to be honest reattributions and illustrations -- a
+# fingerprint card under "reads like", the first hour's "run it twice" block and its `already=yes`
+# ending, and a cloud recipe quoting what two OTHER commands answer. None wants a lead-in, so that
+# population is honestly unreadable rather than merely unread. A fourth shape came out of the same
+# reading and was declined on measurement: a command and its expected output on the next line inside
+# one fence, as a `#` comment. Six of those stand in the living corpus, and five are off the run
+# roster, so a checker for them would check nothing today. The scan's header carries the census.
+# Run from the repository root.
+
+say "tutorial-output: Language EN -- a quoted output block is a claim about behavior, and a claim nobody checks is a claim that decays."
+say "tutorial-output: Style Gauge, Meter -- the reading runs the commands, so anyone may check the number by running them too."
+say "tutorial-output: Lens Aether -- a guard that cannot red guards nothing, so every refusal here is planted in a pen and watched to bite."
+
+let scan = run ["sh" "tools/fixtures/t/tutorial_output_scan.sh"]
+say scan.out
+assert scan.ok else "tutorial-output: a page quotes output its command no longer prints -- read the scan's own detail lines"
+assert scan.out contains "verdict=every_quoted_block_still_prints" else "tutorial-output: the scan must reach the clean verdict"
+assert scan.out contains "drift=0" else "tutorial-output: no page may quote output its command does not print"
+assert (scan.out contains "verdict=a_selection_broke_its_run" == false) else "tutorial-output: a selection quoted as one run must still be one run"
+
+# A shape reading that never fires reads exactly like a corpus with no selections in it, so both
+# counts are asserted present rather than only the refusal being absent.
+assert scan.out contains "selected_contiguous=" else "tutorial-output: the shape of every selection must be read, not only its containment"
+assert scan.out contains "selected_scattered=" else "tutorial-output: a gathering must be counted where a reader can see it"
+
+# A meter reading an empty corpus reports clean while proving nothing, so the corpus is measured.
+assert (scan.out contains "pairs=0" == false) else "tutorial-output: a corpus with no pairs would report clean while reading nothing at all"
+assert (scan.out contains "checked=0" == false) else "tutorial-output: every pair held and none run is a guard that ran no command"
+
+let control = run ["sh" "tools/fixtures/t/tutorial_output_control.sh"]
+say control.out
+assert control.ok else "tutorial-output: the control must complete"
+assert control.out contains "case=match_free ok" else "tutorial-output: a page quoting exactly what its command prints must pass"
+assert control.out contains "case=match_counted_exact ok" else "tutorial-output: a matching pair must be counted exact, which is what proves the command ran"
+assert control.out contains "case=drift_bitten ok" else "tutorial-output: a quoted line the command never prints must be refused"
+assert control.out contains "case=drift_named ok" else "tutorial-output: a refusal must name the page it refused"
+assert control.out contains "case=drift_measured ok" else "tutorial-output: a refusal must say how far apart the quote and the output are"
+assert control.out contains "case=drift_lifted ok" else "tutorial-output: a refusal that survives its own repair is one nobody can act on"
+assert control.out contains "case=volatile_free ok" else "tutorial-output: a declared moving block must report rather than gate"
+assert control.out contains "case=volatile_counted ok" else "tutorial-output: a declared pair must be counted volatile"
+assert control.out contains "case=volatile_not_drift ok" else "tutorial-output: a declared pair must leave the drift count alone"
+assert control.out contains "case=reasonless_bitten ok" else "tutorial-output: a declaration with no reason must excuse nothing"
+assert control.out contains "case=redirect_held ok" else "tutorial-output: a fence that writes a file must be held"
+assert control.out contains "case=redirect_not_run ok" else "tutorial-output: a fence outside the roster must run nothing"
+assert control.out contains "case=untracked_held ok" else "tutorial-output: a script the reader writes must be held rather than called a drift"
+assert control.out contains "case=ceiling_bitten ok" else "tutorial-output: the held ceiling must refuse one pair past it"
+assert control.out contains "case=ceiling_met_free ok" else "tutorial-output: the held ceiling must pass at exactly its own number"
+assert control.out contains "case=prose_between_named ok" else "tutorial-output: prose between the blocks must be counted and named rather than dropped in silence"
+assert control.out contains "case=prose_between_unchecked ok" else "tutorial-output: an undeclared block behind prose must not be checked, since the prose may reattribute it"
+assert control.out contains "case=prose_between_ungated ok" else "tutorial-output: an undeclared block behind prose must report rather than gate"
+assert control.out contains "case=selection_counted ok" else "tutorial-output: a declared selection must be counted selected"
+assert control.out contains "case=selection_free ok" else "tutorial-output: a true selection of a longer report must pass"
+assert control.out contains "case=selection_drift_bitten ok" else "tutorial-output: a selection quoting a line no command prints must be refused"
+assert control.out contains "case=selection_drift_named ok" else "tutorial-output: a refused selection must name the line that never printed"
+assert control.out contains "case=selection_order_bitten ok" else "tutorial-output: a selection whose lines all print in the wrong order must be refused -- order is part of the claim"
+assert control.out contains "case=selection_lifted ok" else "tutorial-output: a repaired selection must go free again"
+assert control.out contains "case=selection_reasonless_declares_nothing ok" else "tutorial-output: a selection with no reason must declare nothing"
+assert control.out contains "case=selection_run_contiguous ok" else "tutorial-output: a selection quoted as one unbroken run must read contiguous"
+assert control.out contains "case=selection_run_not_scattered ok" else "tutorial-output: an unbroken run must not be counted as a gathering"
+assert control.out contains "case=selection_gathered_counted ok" else "tutorial-output: a selection gathered from lines that stand apart must be counted"
+assert control.out contains "case=selection_gathered_named ok" else "tutorial-output: the line standing between the quoted ones must be named, or a reader cannot weigh what the page passes over"
+assert control.out contains "case=selection_gathered_not_drift ok" else "tutorial-output: a lawful gathering must never be called a drift"
+assert control.out contains "case=scattered_ceiling_bitten ok" else "tutorial-output: one gathering past the ceiling must refuse"
+assert control.out contains "case=scattered_ceiling_names_the_middle ok" else "tutorial-output: a refusal must say what the page passes over"
+assert control.out contains "case=scattered_ceiling_met_free ok" else "tutorial-output: the scattered ceiling must pass at exactly its own number"
+assert control.out contains "case=selection_break_bitten ok" else "tutorial-output: a run broken by a line wedged into its middle must refuse -- the page teaches a run that no longer exists"
+assert control.out contains "case=selection_break_names_the_wedge ok" else "tutorial-output: a broken run must name the line that broke it"
+assert control.out contains "case=selection_growth_keeps_shape ok" else "tutorial-output: honest growth between quoted lines must leave the shape count where it stood"
+assert control.out contains "case=selection_growth_free ok" else "tutorial-output: a report that prints one more line must never red a page nobody touched"
+assert control.out contains "case=gap_at_bound_free ok" else "tutorial-output: a block exactly at the gap bound must still pair"
+assert control.out contains "case=gap_past_bound_dropped ok" else "tutorial-output: a block past the gap bound must not pair, since a reader has stopped holding the command"
+assert control.out contains "case=lone_command_free ok" else "tutorial-output: a command promising no output must be counted as no claim"
+assert control.out contains "case=empty_corpus_refused ok" else "tutorial-output: a corpus with no pairs must refuse rather than read clean"
+assert control.out contains "case=no_tree_told_apart ok" else "tutorial-output: a directory with no git tree must read distinctly"
+assert control.out contains "case=list_names_pairs ok" else "tutorial-output: the list verb must name every pair with its verdict"
+assert control.out contains "case=dangling_fence_spares_next ok" else "tutorial-output: a command fence promising no output must leave the next pair whole"
+assert control.out contains "case=dangling_fence_lifted_same ok" else "tutorial-output: lifting the dangling fence must leave the count where it stood, so the pen is innocent of it"
+
+# The second fence label, seated 20260911. docs-geode writes ```sh and the operator manual writes
+# ```bash, and a guard reading one label reads one room -- eight of the tree's eighteen living
+# pairs stood outside this, five of them in the room that teaches a reader to hold their own keys.
+assert control.out contains "case=bash_label_counted ok" else "tutorial-output: a bash-labelled command fence must be read as a pair"
+assert control.out contains "case=bash_label_checked ok" else "tutorial-output: a bash-labelled pair must be checked, never merely counted"
+assert control.out contains "case=bash_label_mutation_bitten ok" else "tutorial-output: dropping the bash arm must return the reading to zero, or the leg above proves nothing"
+assert control.out contains "case=bash_drift_bitten ok" else "tutorial-output: a drifted bash-labelled block must be refused exactly as an sh one is"
+
+# The lead-in, seated the same lap. Teaching the label made the manual visible and checked none of
+# it, because that room writes one line of prose between the blocks.
+assert control.out contains "case=leadin_checked ok" else "tutorial-output: a declared lead-in must be checked by equality"
+assert control.out contains "case=leadin_leaves_undeclared ok" else "tutorial-output: a declared lead-in must leave the undeclared count at zero"
+assert control.out contains "case=leadin_mutation_bitten ok" else "tutorial-output: dropping the lead-in arm must return the pair to undeclared, or the leg above proves nothing"
+assert control.out contains "case=leadin_drift_bitten ok" else "tutorial-output: a lead-in must never excuse a drifted block -- a declaration that hides output is an exemption"
+assert control.out contains "case=undeclared_unchanged ok" else "tutorial-output: prose with nothing declaring it must still be named"
+assert control.out contains "case=leadin_reason_required ok" else "tutorial-output: a lead-in with no reason must declare nothing, as the other two tokens already require"
+
+# The names beside the counts, seated 20260911. A reported population that prints only its size
+# tells a reader there is something to look at and never where.
+assert control.out contains "case=undeclared_name_printed ok" else "tutorial-output: the report must name the page behind every undeclared pair, not only count them"
+assert control.out contains "case=names_mutation_bitten ok" else "tutorial-output: dropping the naming lines must take the names and leave the count, or the leg above proves nothing"
+assert control.out contains "case=held_name_printed ok" else "tutorial-output: the report must name the page behind every held fence"
+
+# THE PEN MUST BE HEARD WHOLE. `control=ok` says the script reached its last line and nothing more,
+# so a leg this file never names could read RED under a GREEN witness -- which two did, written one
+# lap before and asserted nowhere. The tally is what makes tomorrow's leg audible today.
+assert control.out contains "control_failed=0" else "tutorial-output: every leg the pen runs must pass, including ones this witness does not name by hand"
+assert control.out contains "control_cases=" else "tutorial-output: the pen must count its own legs, or a silent leg cannot be told from an absent one"
+assert control.out contains "control=ok" else "tutorial-output: the control must agree with itself"
+
+say ""
+say "GREEN: tutorial-output -- every quoted output block in the shipping shelf, the operator manual and the clone path still prints what its page promises, whole or as a declared selection whose shape is read as well as its contents, with every behavior the pen runs proven and every refusal bitten and then lifted."

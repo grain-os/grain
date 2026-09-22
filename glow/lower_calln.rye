@@ -1,0 +1,114 @@
+//! glow/lower_calln.rye -- lower a parsed `%*` call to runnable `.rye`.
+//!
+//! Thin STOA9 face: closed demo gate `mix` with a named-sample struct
+//! `{ left, right }` -- demos 5 and 3 -> expect 8. Unknown gates refuse.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const rn = @import("rune_calln.rye");
+const refusal = @import("refusal.rye");
+const zig_ident = @import("zig_ident.rye");
+
+pub const LowerError = rn.ParseError || error{
+    Overflow,
+    EmptySource,
+    BadIdent,
+    UnknownGate,
+    BadNames,
+};
+
+pub const calln_demo_a: u32 = 5;
+pub const calln_demo_b: u32 = 3;
+pub const calln_demo_expect: u32 = 8;
+
+/// The one ident rule, reached through `glow/zig_ident.rye`. The ceiling is this module's
+/// own `rn.max_name_len`; the rule -- hyphen to underscore, then Zig's own identifier bytes -- is the
+/// room's, and stood in 29 copies before it moved.
+fn zig_safe_ident(face: []const u8, out: *[rn.max_name_len]u8, field: []const u8) LowerError!u32 {
+    var slot: refusal.Slot = null;
+    // invariant: this entry keeps the parameters and the error name it always had, and it
+    // answers the `u32` the rule itself answers rather than widening it to `usize` for the
+    // caller -- a return width is authored API, where TAME asks a fixed width and leaves
+    // `usize` at the seam; the record is dropped here because a caller wanting it reaches
+    // `zig_ident.safe_ident` directly rather than through this module
+    const n = try zig_ident.safe_ident(face, out[0..], rn.max_name_len, field, .refuse, &slot);
+    // invariant: the rule wrote exactly the face it was handed, so the span below is the
+    // caller's own length rather than a truncation the buffer would have hidden
+    assert(n == face.len);
+    return n;
+}
+
+fn emit_calln_program(
+    glow_gate: []const u8,
+    glow_left: []const u8,
+    glow_right: []const u8,
+    zig_gate: []const u8,
+    zig_left: []const u8,
+    zig_right: []const u8,
+    expect: u32,
+    out: []u8,
+) LowerError!u32 {
+    if (!std.mem.eql(u8, glow_gate, "mix")) return error.UnknownGate;
+    if (!std.mem.eql(u8, glow_left, "left")) return error.BadNames;
+    if (!std.mem.eql(u8, glow_right, "right")) return error.BadNames;
+
+    const written = std.fmt.bufPrint(out,
+        \\const std = @import("std");
+        \\
+        \\/// Lowered from Glow `%*  {s}  {s}  {s}` — named-arg call.
+        \\const Sample = struct {{ left: u32, right: u32 }};
+        \\fn {s}(sample: Sample) u32 {{
+        \\    return sample.left +% sample.right;
+        \\}}
+        \\
+        \\pub fn main(_: std.process.Init) !u8 {{
+        \\    const {s}: u32 = {d};
+        \\    const {s}: u32 = {d};
+        \\    const called: u32 = {s}(.{{ .{s} = {s}, .{s} = {s} }});
+        \\    return if (called == {d}) 0 else 1;
+        \\}}
+        \\
+    , .{
+        glow_gate,
+        glow_left,
+        glow_right,
+        zig_gate,
+        zig_left,
+        calln_demo_a,
+        zig_right,
+        calln_demo_b,
+        zig_gate,
+        zig_left,
+        zig_left,
+        zig_right,
+        zig_right,
+        expect,
+    }) catch return error.Overflow;
+    return @intCast(written.len);
+}
+
+fn lower_line(line: []const u8, welcome: bool, out: []u8) LowerError!u32 {
+    const trimmed = std.mem.trim(u8, line, " \t\r\n");
+    if (trimmed.len == 0) return error.EmptySource;
+    const spec = try rn.parse(trimmed);
+    if (spec.count != 2) return error.MissingName;
+    const gate = rn.gate_slice(&spec);
+    const left = rn.name_at(&spec, 0);
+    const right = rn.name_at(&spec, 1);
+    var zg: [rn.max_name_len]u8 = undefined;
+    var zl: [rn.max_name_len]u8 = undefined;
+    var zr: [rn.max_name_len]u8 = undefined;
+    const gn = try zig_safe_ident(gate, &zg, "gate");
+    const ln = try zig_safe_ident(left, &zl, "left");
+    const rn_len = try zig_safe_ident(right, &zr, "right");
+    const expect: u32 = if (welcome) calln_demo_expect else calln_demo_expect +% 1;
+    return emit_calln_program(gate, left, right, zg[0..gn], zl[0..ln], zr[0..rn_len], expect, out);
+}
+
+pub fn lower_line_welcome(line: []const u8, out: []u8) LowerError!u32 {
+    return lower_line(line, true, out);
+}
+
+pub fn lower_line_unwelcome(line: []const u8, out: []u8) LowerError!u32 {
+    return lower_line(line, false, out);
+}

@@ -1,0 +1,23 @@
+//! rye/tests/version_test.rye -- print the Zig version this Rye stands on.
+//!
+//! WHY. Rye's standard library at `rye/lib` begins bit-for-bit identical to a
+//! named backend and diverges from there by deliberate choice, so which backend
+//! is in force is a fact a reader needs rather than a detail. This program reads
+//! `builtin.zig_version`, the value the compiler injects, and prints it -- so the
+//! answer comes from the compiler doing the work rather than from a constant
+//! somebody typed.
+//!
+//! Run it the way every other Rye program runs: `rye run rye/tests/version_test.rye`.
+const std = @import("std");
+const builtin = @import("builtin");
+
+pub fn main() void {
+    // Rye stands, for now, exactly on Zig 0.16.0. We report the backend's
+    // version through Zig's own mechanism -- `builtin.zig_version`, a value the
+    // compiler injects -- rather than inventing a parallel one in std. Our
+    // standard library at rye/lib begins bit-for-bit identical to this backend;
+    // from here it diverges only by our deliberate choices, and the `rye` CLI
+    // insists on loading it by path, so we always know whose std is in force.
+    const v = builtin.zig_version;
+    std.debug.print("rye: standing on Zig {d}.{d}.{d} (backend, via builtin.zig_version)\n", .{ v.major, v.minor, v.patch });
+}

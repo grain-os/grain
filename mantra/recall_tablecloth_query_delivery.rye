@@ -1,0 +1,668 @@
+//! mantra/recall_tablecloth_query_delivery.rye -- Tablecloth query over Comlink hosted UDP.
+//!
+//! Client seals a filter request; host opens, runs query_tablecloth, seals name hits back.
+//! Scope: [`active-designing/yonder/date/20260710/20260710-140500_comlink-view-filter-not-graphql.md`](../active-designing/yonder/date/20260710/20260710-140500_comlink-view-filter-not-graphql.md)
+//!
+//!   rye build mantra/recall_tablecloth_query_delivery.rye -lc -femit-bin=mantra/bin/recall-tablecloth-query-delivery
+//!   mantra/bin/recall-tablecloth-query-delivery selftest
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const c = std.c;
+const ns = @import("recall_lap1.rye");
+const qw = @import("recall_tablecloth_query_wire.rye");
+const wf = @import("wire_format.rye");
+
+const nqw_version = "20260710.140500";
+
+const AF_INET: c_uint = 2;
+const SOCK_DGRAM: c_uint = 2;
+// THE HOST NUMBERS THESE, NEVER THIS FILE. `std.c` reads SOL_SOCKET 0xffff and SO_REUSEADDR
+// 0x0004 on a BSD kernel where Linux reads 1 and 2, so a literal here is one kernel's dialect
+// standing on every kernel it is built for. REDS %282; the class is metered by
+// tools/fixtures/s/socket_dialect_scan.sh.
+const SOL_SOCKET: c_int = c.SOL.SOCKET;
+const SO_REUSEADDR: c_int = c.SO.REUSEADDR;
+const SO_RCVTIMEO: c_int = c.SO.RCVTIMEO;
+
+// THE WAIT NAMES ITS MAXIMUM, the way every collection here names its size. A datagram on
+// localhost is still a datagram: the kernel may drop it when a receive buffer fills, and
+// `recvfrom` with no SO_RCVTIMEO then waits for a packet that will never arrive. Observed on
+// metal `20260911` at load 14.1 -- this binary's own `selftest` sat 29 minutes in
+// `__skb_wait_for_more_packets` with two voluntary context switches, hanging a rostered roster
+// pass. The two sibling delivery modules, mantra/recall_batch_delivery.rye and
+// mantra/recall_subscribe_poll_delivery.rye, have both carried this bound for chapters; this one
+// alone never received it. Five seconds is far above a localhost round trip and far below the
+// roster's own patience, so an expiry means the datagram is genuinely gone rather than slow.
+const recv_timeout_sec: u32 = 5;
+
+// NEITHER SIDE NAMES A PORT, and the reason is three faults the two constants carried (REDS row
+// `20260911.064232`). A reply was addressed to a fixed 38490 the client bound only AFTER it had
+// sent, so a datagram arriving inside that window met a port nobody held and the kernel dropped
+// it. A fixed 38491 is a name on the MACHINE rather than in this tree, so eight ships on one pier
+// bound it eight times. And a 50 ms sleep stood in for the host being ready to listen.
+//
+// Measured `20260911`: all 8 checkouts on this pier carry this file, all 8 spell those two
+// numbers, and every one of their roster passes runs this witness. Eight concurrent selftests of
+// the elder binary read 39 of 80 red on metal at load 14, where 120 serial runs of that same
+// binary read 0 -- which is why running the guard again could only ever agree with it (REDS %700).
+//
+// Both sockets bind port 0 now -- the kernel's choice, which cannot be a port a sibling tree
+// spelled -- and the two sides find each other by a READINESS DATAGRAM rather than by a shared
+// number. The caller binds first, hands its own port to the dependent in argv, and blocks on the
+// dependent's ready byte; `recvfrom` reports where that byte came from, and that address is the
+// host. So the handshake replaces the sleep and the constant together, and the wait it replaces
+// the sleep with is bounded by the same `recv_timeout_sec` every other receive here honors.
+const ready_byte: u8 = 0x01;
+
+// THE KERNEL LAYS THIS OUT, NEVER THIS FILE. A hand-rolled `sockaddr_in` stood here in the
+// Linux layout -- a two-byte family and no length byte -- and BSD kernels open the same
+// structure with a one-byte `sin_len` ahead of a one-byte family, so writing `AF_INET` as a
+// `c_ushort` lands 2 in the length and 0 in the family and every `bind` refuses (REDS %282,
+// repaired first in mantra/recall_subscribe_poll_delivery.rye). `std.c.sockaddr.in` dispatches
+// on the host and both branches carry a defaulted family, so neither pier spells the other's
+// layout.
+const sockaddr_in = c.sockaddr.in;
+
+fn localhost_addr(port: u16) sockaddr_in {
+    return .{
+        .port = std.mem.nativeToBig(u16, port),
+        .addr = @bitCast([4]u8{ 127, 0, 0, 1 }),
+    };
+}
+
+fn open_socket() !c.fd_t {
+    const fd = c.socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return error.SocketFailed;
+    // invariant: a socket the kernel hands back is a real descriptor, so a negative here would
+    // mean the guard above let a failure through.
+    assert(fd >= 0);
+    // THE OPTION THAT STOOD HERE WAS TCP REASONING ON A UDP SOCKET, and on a pier of eight trees
+    // it cost the flakiness of REDS %700. `setsockopt(SO_REUSEADDR)` stood here under the invariant
+    // *SO_REUSEADDR is what lets a bounded run rebind its own port*. That sentence is true of TCP,
+    // whose closed sockets sit in TIME_WAIT holding the port; UDP has no TIME_WAIT, so a closed
+    // UDP port is free at once and the option bought nothing it was added for. What it bought
+    // instead was a DUPLICATE BIND: two sockets that both set it hold one address and port
+    // together, and the kernel splits the arriving datagrams between them with no error on either
+    // side. These ports are compiled in and a port belongs to the MACHINE, so eight checkouts
+    // reach for one pair and the loser reads a peer's traffic as `BadKind` or waits out its
+    // timeout as `RecvFailed` -- a red naming a receive path for a fault that happened at bind.
+    // Dropping it makes a second reacher fail at `bind` with `error.BindFailed`, in the kernel,
+    // in the namespace the port lives in, needing no lock to be right. Measured on this metal by
+    // tools/fixtures/a/amphora_udp_reuseaddr_scan.sh: close-then-rebind without the option
+    // SUCCEEDS, two concurrent binds without it refuse the second EADDRINUSE, and two concurrent
+    // binds WITH it both succeed. Repaired first in amphora/vessel_fetch_delivery.rye
+    // (REDS `20260906.154105`); gated for this lane by tools/fixtures/m/mantra_udp_reuseaddr_scan.sh.
+    var reuse: c_int = 0;
+    var reuse_len: c.socklen_t = @sizeOf(c_int);
+    if (c.getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, &reuse_len) < 0) {
+        _ = c.close(fd);
+        return error.GetSockOptFailed;
+    }
+    // invariant: this socket carries no address reuse, so a second bind to a port this one holds
+    // refuses by name rather than quietly splitting one port's datagrams between two readers.
+    assert(reuse == 0);
+    return fd;
+}
+
+fn open_bound(port: u16) !c.fd_t {
+    // invariant: the wait is bounded above zero, so the timeout below is a real deadline rather
+    // than the "block forever" SO_RCVTIMEO spells with a zero timeval.
+    assert(recv_timeout_sec > 0);
+    const fd = try open_socket();
+    errdefer _ = c.close(fd);
+    var tv = c.timeval{ .sec = @intCast(recv_timeout_sec), .usec = 0 };
+    // invariant: the caller is promised a BOUNDED wait, so a receive timeout that fails to set
+    // refuses here rather than returning a socket that blocks until the run is killed.
+    if (c.setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, @sizeOf(c.timeval)) < 0)
+        return error.SetSockOptFailed;
+    // A zero port asks the kernel for one nobody else holds. That is the client's whole
+    // collision story: an ephemeral port cannot be the port a sibling tree chose, because the
+    // kernel hands out only what is free on this machine at this moment.
+    var bind_addr = localhost_addr(port);
+    if (c.bind(fd, @ptrCast(&bind_addr), @sizeOf(sockaddr_in)) < 0) return error.BindFailed;
+    return fd;
+}
+
+// THE KERNEL KNOWS WHICH PORT IT GAVE, and this is the one call that asks. A socket bound to
+// port 0 carries a real port from the moment `bind` returns; without reading it back there is no
+// number to hand a dependent, and the whole rendezvous would fall back to a constant.
+fn bound_port(fd: c.fd_t) !u16 {
+    var addr: sockaddr_in = undefined;
+    var addr_len: c.socklen_t = @sizeOf(sockaddr_in);
+    if (c.getsockname(fd, @ptrCast(&addr), &addr_len) < 0) return error.GetSockNameFailed;
+    // invariant: the kernel filled the whole address, so the port read below is one it wrote
+    assert(addr_len == @sizeOf(sockaddr_in));
+    const port = std.mem.bigToNative(u16, addr.port);
+    // invariant: an ephemeral bind yields a real port, so a zero here means the bind never took
+    // and the dependent would be sent to a port nothing holds
+    assert(port != 0);
+    return port;
+}
+
+fn send_on(fd: c.fd_t, dest: sockaddr_in, wire: []const u8) !void {
+    // invariant: a datagram carries bytes, so an empty send refuses here rather than putting a
+    // zero-length packet on the port for a reader that will call it a truncated message.
+    assert(wire.len > 0);
+    const sent = c.sendto(fd, wire.ptr, @intCast(wire.len), 0, @ptrCast(&dest), @sizeOf(sockaddr_in));
+    if (sent < 0 or @as(usize, @intCast(sent)) != wire.len) return error.SendFailed;
+    // invariant: the whole message left in one datagram, which is what the length check above
+    // establishes and what every reader on the far side assumes.
+    assert(@as(usize, @intCast(sent)) == wire.len);
+}
+
+// THE SENDER'S ADDRESS IS AN ANSWER, NEVER A DISCARD. `recvfrom` already fills `from` on every
+// kernel this builds for, and the elder spelling threw it away and replied to a constant instead.
+// Handing it back is what lets the host answer whoever asked -- including a client whose port the
+// kernel chose a moment ago and no file could have spelled.
+fn recv_on(fd: c.fd_t, wire: []u8, from: *sockaddr_in) !u64 {
+    // invariant: a receive reads into a buffer that exists, so an empty slice refuses here
+    // rather than handing the kernel a zero length and reading a success that carries nothing.
+    assert(wire.len > 0);
+    var from_len: c.socklen_t = @sizeOf(sockaddr_in);
+    const n = c.recvfrom(fd, wire.ptr, @intCast(wire.len), 0, @ptrCast(from), &from_len);
+    // A timeout lands here as a negative return, the same way the sibling modules read it. The
+    // named error is what the caller sees either way, and the bound above is what makes the
+    // difference between a refusal and a hang.
+    if (n < 0) return error.RecvFailed;
+    // invariant: a datagram never exceeds the buffer it was read into, so the length handed back
+    // indexes that buffer safely for every caller.
+    assert(@as(usize, @intCast(n)) <= wire.len);
+    // invariant: the address was written whole, so the reply below goes to a sockaddr the kernel
+    // filled rather than to whatever stood in this frame before.
+    assert(from_len == @sizeOf(sockaddr_in));
+    return @intCast(n);
+}
+
+fn init_host_catalog(cat: *ns.BoltCatalog) !void {
+    cat.* = .empty();
+    try cat.append_leaf("peerB", "b", 1, "notes.txt", "alpha", "plain-text");
+    try cat.append_leaf("peerB", "b", 2, "notes.txt", "alpha2", "plain-text");
+    try cat.append_leaf("peerB", "c", 1, "other.txt", "beta", "plain-bytes");
+}
+
+fn run_host_once(cat: *const ns.BoltCatalog, caller_port: u16) !void {
+    // invariant: the caller named a real port, so the ready byte below reaches a bound socket
+    // rather than drawing an ICMP refusal the sender never reads
+    assert(caller_port != 0);
+    const fd = try open_bound(0);
+    defer _ = c.close(fd);
+    // THE READY BYTE IS THE ANNOUNCEMENT. It leaves the same socket the request will arrive on,
+    // so the caller's `recvfrom` reads this host's own address from it -- which is how a port the
+    // kernel chose a moment ago becomes an address a second process can reach.
+    const ready = [_]u8{ready_byte};
+    try send_on(fd, localhost_addr(caller_port), ready[0..]);
+    var wire_in: [@intCast(wf.wire_capacity)]u8 = undefined;
+    var caller: sockaddr_in = undefined;
+    const n = try recv_on(fd, &wire_in, &caller);
+    var opened: [@intCast(wf.max_message)]u8 = undefined;
+    const opened_len = try wf.open_datagram(wire_in[0..n], &opened);
+
+    var req: qw.QueryWireRequest = undefined;
+    try qw.decode_request(opened[0..@intCast(opened_len)], &req);
+
+    var resp: qw.QueryWireResponse = undefined;
+    try qw.build_response(cat, req, &resp);
+
+    var payload: [qw.max_wire_payload]u8 = undefined;
+    const payload_len = try qw.encode_response(resp, &payload);
+    var wire_out: [@intCast(wf.wire_capacity)]u8 = undefined;
+    const sealed_len = try wf.seal_message(payload[0..payload_len], &wire_out);
+    // invariant: the reply leaves the socket the request arrived on, so its source port is the
+    // one the caller already addressed rather than a second name to keep in step.
+    assert(sealed_len > 0);
+    try send_on(fd, caller, wire_out[0..@intCast(sealed_len)]);
+}
+
+// THE CALLER OWNS THE ANSWER'S BYTES, NEVER THIS FRAME. `qw.decode_response` fills every hit's
+// `peer`, `bolt`, and `path` with slices INTO the opened payload it was handed, so a response
+// returned by value carries views rather than text. This function once declared `opened` as its
+// own local and returned the response anyway: the witness read GREEN because the dead frame still
+// held the bytes, and a probe that filled the same frame with 0xAA after the return read the path
+// back as 0xAA. So the opened buffer is a parameter -- the signature now says, where a reader can
+// see it, that the answer lives exactly as long as the bytes the caller supplied.
+fn run_client_query(
+    fd: c.fd_t,
+    host_addr: sockaddr_in,
+    req: qw.QueryWireRequest,
+    opened: *[@intCast(wf.max_message)]u8,
+    out: *qw.QueryWireResponse,
+) !void {
+    var payload: [qw.max_wire_payload]u8 = undefined;
+    const payload_len = try qw.encode_request(req, &payload);
+    var wire_out: [@intCast(wf.wire_capacity)]u8 = undefined;
+    const sealed_len = try wf.seal_message(payload[0..payload_len], &wire_out);
+    // invariant: the sealed request fits the wire the socket send is bounded by, so the datagram
+    // this call puts on the port is one the far side's fixed receive buffer can hold whole
+    assert(sealed_len <= wf.wire_capacity);
+    // THE SOCKET WAS BOUND BEFORE THE REQUEST GOES OUT, and it was bound before the dependent even
+    // started. The elder spelling sent from one socket and then opened a second to receive on, so
+    // a reply arriving between those two calls met a port nobody held; the kernel dropped it, the
+    // bounded receive spent its five seconds, and the run read RecvFailed on an unchanged tree.
+    try send_on(fd, host_addr, wire_out[0..@intCast(sealed_len)]);
+
+    var wire_in: [@intCast(wf.wire_capacity)]u8 = undefined;
+    var responder: sockaddr_in = undefined;
+    const n = try recv_on(fd, &wire_in, &responder);
+    const opened_len = try wf.open_datagram(wire_in[0..n], opened);
+    // invariant: the opened payload stops inside the caller's buffer, so every slice the decoder
+    // cuts from it points at bytes the caller still owns
+    assert(opened_len <= wf.max_message);
+    try qw.decode_response(opened[0..@intCast(opened_len)], out);
+    // invariant: the decoded reply names no more hits than the response record holds, so a reader
+    // walking `hits[0..hit_count]` stays inside the array
+    assert(out.hit_count <= qw.max_wire_hits);
+}
+
+// A frame-sized scratch filled with a byte no reply carries. Run it between a call and the read of
+// that call's answer, and text still living in the callee's frame comes back as 0xAA. It proves no
+// theorem -- nothing here makes the compiler place this frame where the last one stood -- and it is
+// the cheapest test that catches this class, which is what it did here.
+fn scribble_frame() void {
+    var scratch: [@intCast(wf.max_message)]u8 = undefined;
+    var i: u32 = 0;
+    while (i < scratch.len) : (i += 1) scratch[i] = 0xAA;
+    // invariant: the walk reached the end, so the whole frame carries the fill and no byte of a
+    // departed answer survives inside it by luck
+    assert(i == scratch.len);
+    // invariant: the last byte took the fill, which is the postcondition a reader can check
+    assert(scratch[scratch.len - 1] == 0xAA);
+    std.mem.doNotOptimizeAway(&scratch);
+}
+
+// THE POOL RESERVES THE ANSWER'S HOME BEFORE THE REQUEST RUNS. A caller may keep its answer after
+// the request that fetched it has finished, so a ceiling on requests in flight bounds nothing a
+// reader can measure: four requests run one at a time leave four answers alive. This pool counts
+// both lifetimes -- `pool_active_max` requests may be in flight and `pool_answer_max` answers may
+// stand at once -- and a request is admitted only when a free answer slot is ready to receive its
+// reply. Design: active-designing/date/20260909/20260909-084736_a-kept-answer-has-its-own-budget.md
+pub const pool_active_max: u32 = 2;
+pub const pool_answer_max: u32 = 3;
+
+comptime {
+    // invariant: the pool holds at least as many answers as requests in flight, so every request
+    // slot stays reachable and a refusal names a full answer pool rather than a ceiling the
+    // request count alone made unreachable
+    assert(pool_answer_max >= pool_active_max);
+}
+
+pub const PoolError = error{
+    RequestSlotsFull,
+    AnswerSlotsFull,
+    SlotNotActive,
+    SlotNotRetained,
+    StaleTicket,
+};
+
+const SlotState = enum { free, active, retained };
+
+// One slot is one answer's whole home: the payload frame the datagram opens into, and the decoded
+// response whose every name is a view into that frame. Keeping the two together is what lets a
+// retained answer outlive the exchange that fetched it, since the bytes it points at are the
+// pool's own rather than a caller frame that has since moved on (REDS %664).
+const AnswerSlot = struct {
+    frame: [@intCast(wf.max_message)]u8 = undefined,
+    response: qw.QueryWireResponse = undefined,
+    state: SlotState = .free,
+    generation: u32 = 0,
+};
+
+// A ticket names one slot AND the filling it was handed. Counts alone cannot tell a second release
+// of an answer already returned from a release of whatever answer stands in that slot now, so the
+// generation advances on every free and a stale ticket refuses rather than reading or freeing a
+// stranger's bytes.
+pub const Ticket = struct { index: u32, generation: u32 };
+
+pub const AnswerPool = struct {
+    slots: [pool_answer_max]AnswerSlot = [_]AnswerSlot{.{}} ** pool_answer_max,
+    active: u32 = 0,
+    retained: u32 = 0,
+
+    fn counts_hold(self: *const AnswerPool) void {
+        // invariant: requests in flight stay inside the request ceiling
+        assert(self.active <= pool_active_max);
+        // invariant: work in flight plus answers kept stays inside the answer pool, which is the
+        // whole reservation this type exists to hold
+        assert(self.active + self.retained <= pool_answer_max);
+    }
+
+    fn slot_for(self: *AnswerPool, ticket: Ticket) PoolError!*AnswerSlot {
+        // invariant: a ticket names a slot this pool holds, so the index stays inside the array
+        assert(ticket.index < pool_answer_max);
+        const slot = &self.slots[ticket.index];
+        if (slot.generation != ticket.generation) return error.StaleTicket;
+        return slot;
+    }
+
+    pub fn admit(self: *AnswerPool) PoolError!Ticket {
+        if (self.active >= pool_active_max) return error.RequestSlotsFull;
+        if (self.active + self.retained >= pool_answer_max) return error.AnswerSlotsFull;
+        var found: ?u32 = null;
+        var i: u32 = 0;
+        while (i < pool_answer_max) : (i += 1) {
+            if (self.slots[i].state == .free) {
+                found = i;
+                break;
+            }
+        }
+        // invariant: the two counters and the slot states describe one set, so a pool that passed
+        // both admission checks holds a free slot for this request
+        assert(found != null);
+        const idx = found.?;
+        self.slots[idx].state = .active;
+        self.active += 1;
+        self.counts_hold();
+        // invariant: the ticket names the slot just claimed, so its holder writes into the bytes
+        // this admission reserved and no other
+        assert(self.slots[idx].state == .active);
+        return .{ .index = idx, .generation = self.slots[idx].generation };
+    }
+
+    pub fn destination(self: *AnswerPool, ticket: Ticket) PoolError!*AnswerSlot {
+        const slot = try self.slot_for(ticket);
+        if (slot.state != .active) return error.SlotNotActive;
+        return slot;
+    }
+
+    pub fn complete(self: *AnswerPool, ticket: Ticket) PoolError!void {
+        const slot = try self.slot_for(ticket);
+        if (slot.state != .active) return error.SlotNotActive;
+        // invariant: a completion moves one request out of flight, so the counter it decrements
+        // stands above zero before the move
+        assert(self.active > 0);
+        slot.state = .retained;
+        self.active -= 1;
+        self.retained += 1;
+        self.counts_hold();
+    }
+
+    pub fn fail(self: *AnswerPool, ticket: Ticket) PoolError!void {
+        const slot = try self.slot_for(ticket);
+        if (slot.state != .active) return error.SlotNotActive;
+        // invariant: a refusal ends a request that was in flight, so the counter stands above zero
+        assert(self.active > 0);
+        slot.state = .free;
+        slot.generation += 1;
+        self.active -= 1;
+        self.counts_hold();
+    }
+
+    pub fn release(self: *AnswerPool, ticket: Ticket) PoolError!void {
+        const slot = try self.slot_for(ticket);
+        if (slot.state != .retained) return error.SlotNotRetained;
+        // invariant: a release returns an answer that was being kept, so the counter stands above
+        // zero and the slot's capacity was charged to this holder
+        assert(self.retained > 0);
+        slot.state = .free;
+        slot.generation += 1;
+        self.retained -= 1;
+        self.counts_hold();
+    }
+
+    pub fn answer(self: *AnswerPool, ticket: Ticket) PoolError!*const qw.QueryWireResponse {
+        const slot = try self.slot_for(ticket);
+        if (slot.state != .retained) return error.SlotNotRetained;
+        // invariant: a kept answer names no more hits than the response record holds, so a reader
+        // walking `hits[0..hit_count]` stays inside the array however long it kept the ticket
+        assert(slot.response.hit_count <= qw.max_wire_hits);
+        return &slot.response;
+    }
+};
+
+// One exchange: spawn a host that answers exactly one datagram, run the query into the caller's own
+// frame and response, and wait for that host to exit. The bytes the answer names are the caller's
+// for as long as the caller keeps them, which is the whole contract `run_client_query` states in
+// its signature.
+fn exchange(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    self_path: []const u8,
+    req: qw.QueryWireRequest,
+    opened: *[@intCast(wf.max_message)]u8,
+    out: *qw.QueryWireResponse,
+) !void {
+    const fd = try open_bound(0);
+    defer _ = c.close(fd);
+    const caller_port = try bound_port(fd);
+    const caller_port_text = try std.fmt.allocPrint(allocator, "{d}", .{caller_port});
+    defer allocator.free(caller_port_text);
+    const host_argv = try allocator.alloc([]const u8, 3);
+    defer allocator.free(host_argv);
+    host_argv[0] = self_path;
+    host_argv[1] = "host";
+    host_argv[2] = caller_port_text;
+    var host_child = try std.process.spawn(io, .{ .argv = host_argv });
+
+    // THE WAIT IS AN ANSWER, NEVER A DURATION. A 50 ms sleep stood here and it was a guess about
+    // how long a spawn takes on a loaded pier; the ready byte is the dependent saying it has
+    // bound. Its source address is the host, so this one receive supplies both the readiness and
+    // the destination, under the same bounded timeout every other receive here carries.
+    var ready_in: [1]u8 = undefined;
+    var host_addr: sockaddr_in = undefined;
+    const ready_len = try recv_on(fd, ready_in[0..], &host_addr);
+    // invariant: the announcement is the one byte this module sends, so a longer datagram here is
+    // a stranger on the port rather than the dependent that was just spawned
+    assert(ready_len == 1);
+    // invariant: and it carries the agreed mark, so a coincidental byte refuses rather than being
+    // read as a host that never announced itself
+    assert(ready_in[0] == ready_byte);
+    try run_client_query(fd, host_addr, req, opened, out);
+    const term = try host_child.wait(io);
+    const code: u8 = switch (term) {
+        .exited => |value| value,
+        else => 255,
+    };
+    // invariant: the host answered and exited clean, so this reply came from a run that finished
+    // rather than from a datagram some earlier exchange left on the port
+    assert(code == 0);
+    // invariant: the decoded reply names no more hits than the response record holds
+    assert(out.hit_count <= qw.max_wire_hits);
+}
+
+// A refusal is read as hard as a success here: the call must refuse, and it must refuse by the name
+// a caller would act on. A check that only asks whether something failed cannot tell a full answer
+// pool from a stale ticket.
+fn refuses_with(result: anytype, want: anyerror) void {
+    if (result) |_| {
+        // invariant: the call under test refused, so control reaches the error branch below and
+        // never this one
+        assert(false);
+    } else |err| {
+        // invariant: the refusal names the error the caller can act on, rather than any refusal
+        assert(err == want);
+    }
+}
+
+// THE CALLER TRIAL the answer budget asked for, run against the live wire rather than a model.
+// Fill the pool with retained replies one request at a time; prove admission refuses while every
+// request slot stands idle, because answers already handed back are still charged; release one
+// answer, admit into the slot it freed, and run a fourth exchange through those same bytes. Then
+// read the answers that were never released. They are whole, because each holds its own frame --
+// which is the claim, and the reason the pool exists rather than one shared scratch buffer.
+// Fill every answer slot, one request at a time, and hand back the tickets that keep them. Three
+// requests whose answers read differently, so a corrupted keep cannot pass by resembling its
+// neighbour: two hits of one path, then one of another, then one more of the second.
+fn fill_pool(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    self_path: []const u8,
+    pool: *AnswerPool,
+    tickets: *[pool_answer_max]Ticket,
+) !void {
+    const filling = [_]qw.QueryWireRequest{
+        .{ .peer = "peerB", .bolt = "b" },
+        .{ .tilak = "plain-bytes" },
+        .{ .peer = "peerB", .bolt = "c" },
+    };
+    var i: u32 = 0;
+    while (i < pool_answer_max) : (i += 1) {
+        const ticket = try pool.admit();
+        tickets[i] = ticket;
+        const slot = try pool.destination(ticket);
+        try exchange(allocator, io, self_path, filling[i], &slot.frame, &slot.response);
+        try pool.complete(ticket);
+        scribble_frame();
+    }
+    // invariant: every request finished, so nothing is in flight
+    assert(pool.active == 0);
+    // invariant: the pool is full of retained answers, which is the state its caller reads
+    assert(pool.retained == pool_answer_max);
+}
+
+// The request ceiling is the other half of the admission pair, and it needs no network: admit until
+// both request slots are in flight, and read the refusal by name. Then let one request refuse and
+// watch its reservation come back without ever spending an answer -- the design's *finish refusal*
+// edge.
+fn check_request_ceiling() PoolError!void {
+    var busy: AnswerPool = .{};
+    var in_flight: [pool_active_max]Ticket = undefined;
+    var held: u32 = 0;
+    while (held < pool_active_max) : (held += 1) in_flight[held] = try busy.admit();
+    // invariant: both request slots are in flight, which is the state the refusal below reads
+    assert(busy.active == pool_active_max);
+    refuses_with(busy.admit(), error.RequestSlotsFull);
+
+    try busy.fail(in_flight[0]);
+    // invariant: the refusal freed exactly one request slot
+    assert(busy.active == pool_active_max - 1);
+    // invariant: and charged no answer, so a request that fails costs the pool nothing it keeps
+    assert(busy.retained == 0);
+    _ = try busy.admit();
+    refuses_with(busy.fail(in_flight[0]), error.StaleTicket);
+}
+
+// The answers nobody released, read after the bytes beside them were reused. Both halves of the
+// retention claim run here: the text each kept answer spells, and the structural one no coincidence
+// of bytes can satisfy -- a kept name points INSIDE the slot its answer was admitted into. The
+// second half earns its place: two of this catalog's own replies spell one word at one offset, and
+// a text reading alone passed a pen where every exchange shared one frame.
+fn check_kept_whole(
+    pool: *AnswerPool,
+    tickets: *const [pool_answer_max]Ticket,
+    reused: Ticket,
+) PoolError!void {
+    const kept_first = try pool.answer(tickets[0]);
+    // invariant: the first answer still names both revisions its filter matched
+    assert(kept_first.hit_count == 2);
+    // invariant: and still spells its own path, rather than a later reply's
+    assert(std.mem.eql(u8, kept_first.hits[0].path, "notes.txt"));
+    // invariant: with its revisions in catalog order, which a partial overwrite would disturb
+    assert(kept_first.hits[0].revision == 1);
+    // invariant: the second hit is the later revision, so the whole record survived rather than
+    // its first field alone
+    assert(kept_first.hits[1].revision == 2);
+
+    const first_frame = @intFromPtr(&pool.slots[tickets[0].index].frame);
+    const first_path = @intFromPtr(kept_first.hits[0].path.ptr);
+    // invariant: the name begins at or after its own slot's frame
+    assert(first_path >= first_frame);
+    // invariant: and ends inside it, so the whole name is bytes this slot owns
+    assert(first_path + kept_first.hits[0].path.len <= first_frame + @as(usize, @intCast(wf.max_message)));
+
+    const kept_third = try pool.answer(tickets[2]);
+    // invariant: the third answer kept its single hit across the reuse beside it
+    assert(kept_third.hit_count == 1);
+    // invariant: naming the other path, which is what tells it from its neighbours
+    assert(std.mem.eql(u8, kept_third.hits[0].path, "other.txt"));
+    // invariant: at the revision its filter matched
+    assert(kept_third.hits[0].revision == 1);
+
+    const fresh = try pool.answer(reused);
+    // invariant: the reused slot answers its own new question, one hit rather than the released
+    // answer's shape
+    assert(fresh.hit_count == 1);
+    // invariant: and names the path this request asked for, where its former filling named the
+    // other one -- so the slot was written rather than merely re-labelled
+    assert(std.mem.eql(u8, fresh.hits[0].path, "notes.txt"));
+    // invariant: at the revision this request pinned
+    assert(fresh.hits[0].revision == 1);
+}
+
+fn run_pool_trial(allocator: std.mem.Allocator, io: std.Io, self_path: []const u8) !void {
+    var pool: AnswerPool = .{};
+    var tickets: [pool_answer_max]Ticket = undefined;
+    try fill_pool(allocator, io, self_path, &pool, &tickets);
+    // The claim the model made, now on the wire: no request is running, both request slots are
+    // free, and admission refuses anyway.
+    refuses_with(pool.admit(), error.AnswerSlotsFull);
+
+    try pool.release(tickets[1]);
+    // invariant: the release returned exactly one slot, so one admission fits and no more
+    assert(pool.retained == pool_answer_max - 1);
+
+    const reused = try pool.admit();
+    const reused_slot = try pool.destination(reused);
+    try exchange(allocator, io, self_path, .{ .peer = "peerB", .bolt = "b", .revision = 1 }, &reused_slot.frame, &reused_slot.response);
+    try pool.complete(reused);
+    scribble_frame();
+
+    try check_kept_whole(&pool, &tickets, reused);
+
+    // A released ticket names a slot whose filling has moved on, so it neither reads nor frees the
+    // answer standing there now. Both doors refuse, since a duplicate release is the costlier one.
+    refuses_with(pool.answer(tickets[1]), error.StaleTicket);
+    refuses_with(pool.release(tickets[1]), error.StaleTicket);
+    // A retained answer is not an active request, so the destination door refuses it too.
+    refuses_with(pool.destination(tickets[0]), error.SlotNotActive);
+
+    try check_request_ceiling();
+}
+
+fn run_selftest(allocator: std.mem.Allocator, io: std.Io, self_path: []const u8) !u8 {
+    var cat: ns.BoltCatalog = undefined;
+    try init_host_catalog(&cat);
+
+    var client_opened: [@intCast(wf.max_message)]u8 = undefined;
+    var resp: qw.QueryWireResponse = undefined;
+    try exchange(allocator, io, self_path, .{ .peer = "peerB", .bolt = "b" }, &client_opened, &resp);
+    // The lifetime check, run before the answer is read: fill a frame the size of the one
+    // `run_client_query` just left with a byte the reply never contains. When the response held
+    // views into that frame this read came back as 0xAA and the next assert refused; reading the
+    // right path afterwards is what proves the answer sits in the caller's own bytes.
+    scribble_frame();
+    assert(resp.hit_count == 2);
+    assert(std.mem.eql(u8, resp.hits[0].path, "notes.txt"));
+    assert(resp.hits[0].revision == 1);
+    assert(resp.hits[1].revision == 2);
+
+    // Second exchange: empty match (honest absence).
+    var empty: qw.QueryWireResponse = undefined;
+    try exchange(allocator, io, self_path, .{ .tilak = "no-such-tilak" }, &client_opened, &empty);
+    assert(empty.hit_count == 0);
+
+    try run_pool_trial(allocator, io, self_path);
+
+    print("ns-tcqd: version {s} wire {s}\n", .{ nqw_version, qw.query_wire_version });
+    print("ns-tcqd: answer pool active_max {d} answer_max {d} -- reserved bytes {d}\n", .{
+        pool_active_max,
+        pool_answer_max,
+        @sizeOf(AnswerPool),
+    });
+    print("GREEN: Tablecloth query delivery -- hosted filter hits, empty match, answer-slot budget.\n", .{});
+    return 0;
+}
+
+fn run_host(caller_port: u16) !u8 {
+    // invariant: the host was told where to announce itself, so a zero refuses here rather than
+    // binding a socket nobody will ever be told about
+    assert(caller_port != 0);
+    var cat: ns.BoltCatalog = undefined;
+    try init_host_catalog(&cat);
+    try run_host_once(&cat, caller_port);
+    return 0;
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    const garden = init.arena.allocator();
+    const io = init.io;
+    const args = try init.minimal.args.toSlice(garden);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "host")) {
+        // The caller's port arrives in argv because a dependent cannot read the socket its parent
+        // bound. A host invoked without it has nowhere to announce itself, so it refuses by name.
+        if (args.len < 3) return error.CallerPortMissing;
+        const caller_port = try std.fmt.parseInt(u16, args[2], 10);
+        return run_host(caller_port);
+    }
+    return run_selftest(garden, io, args[0]);
+}

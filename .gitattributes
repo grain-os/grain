@@ -1,0 +1,45 @@
+# Linguist overrides — public language bar (Path A interim).
+#
+# Rye is a thin Zig frontend; Linguist has no Rye entry yet, so content
+# heuristics were mislabeling .rye as C. Remap to Zig — truthful, not a fudge.
+# Path C (languages.yml PR, display color Flax) waits multi-repo adoption.
+#
+# See: work-in-progress/ready-to-ask-claude.md · GitHub Linguist docs/overrides.md
+
+# --- Path A: .rye is Zig beneath the frontend ---
+*.rye linguist-language=Zig linguist-detectable
+
+# --- Vendored: pinned toolchains and third-party clones stay out of stats ---
+vendor/** linguist-vendored
+
+# --- Documentation: prose shelves (already prose by type; named so the bar stays clear) ---
+gratitude/** linguist-documentation
+session-logs/** linguist-documentation
+external-research/** linguist-documentation
+counsel/** linguist-documentation
+context/** linguist-documentation
+active-designing/** linguist-documentation
+foundations/** linguist-documentation
+expanding-prompts/** linguist-documentation
+manual/** linguist-documentation
+work-in-progress/** linguist-documentation
+archive/** linguist-documentation
+
+# HTML 24.4% (Linengrow web glass / gratitude .html): product-vs-sketch is the maintainer's
+# per-path word — left unmarked until that ruling. Shell (.rish/.sh) stays as-is.
+
+# Day-shelf indexes take one prepended row from EVERY seat, so any two clones
+# that both landed laps conflict at the same line on every rebase (Mind's
+# first cured lap hit it, 20260830.000121). This carried merge=union until
+# 20260908, on the reading that order was cosmetic and a stamp-order reseat
+# would ride on touch. Order is not cosmetic -- the page promises NEWEST
+# FIRST -- and union concatenates in hunk order, so a rebase whose own row is
+# newer seats the older row on top. REDS %440 fired fourteen-plus times that
+# way, each repaired by hand, because every ship that pulls re-earns it.
+# merge=dayshelf unions the same rows and reseats them in stamp order, and
+# refuses rather than guesses on a shape it cannot read. The driver's command
+# line lives in git config, which no clone inherits, so a fresh clone must run
+# `rishi/bin/rishi run tools/i/install_hooks.rish` -- until it does, the shelf
+# conflicts visibly rather than merging wrong.
+# Driver: tools/d/dayshelf_merge.sh -- proven by tools/d/dayshelf_merge_witness.rish
+session-logs/date/README-index-*.md merge=dayshelf

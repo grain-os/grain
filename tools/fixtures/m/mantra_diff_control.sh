@@ -1,0 +1,229 @@
+#!/bin/sh
+# tools/fixtures/m/mantra_diff_control.sh -- the diff, broken on purpose.
+#
+# WHAT THIS DOES. mantra/src/diff_witness.rye asserts that the diff compiles, keeps the
+# common subsequence, round-trips an append, and appends a middle insert. This control
+# copies the module and its witness into a throwaway pen, changes ONE thing in the copy,
+# and watches the witness answer with a non-zero exit. Each break is shown from both
+# sides, so a real refusal stays tellable from a bypass.
+#
+# THE PEN IS A DIRECTORY. Zig resolves an import inside the root file's own directory, so
+# weave.rye, diff.rye and the witness sit side by side here. Everything reads from the
+# filesystem alone, which makes a plain directory the honest pen.
+#
+# SEVEN PHASES.
+#   clean          -- the unmutated copy reaches GREEN, exit 0. This leg is what lets every
+#                     other phase read as the break speaking rather than the pen.
+#   elder_arraylist -- `var deletes: ... = .empty` returns to the Zig 0.15 form
+#                     `std.ArrayListUnmanaged(u32){}`. This is the exact fault this witness
+#                     was written for: the module carried it at HEAD, five guards read the
+#                     file with grep, and every one stayed green.
+#   walker_teeth   -- a public function carrying a type error is appended to the module,
+#                     and nothing in the witness calls it. The comptime declaration walker
+#                     reaches it, so the build reds.
+#   walker_removed -- the SAME planted function, with the walker deleted from the witness
+#                     copy. This phase must exit 0. Zig analyses lazily, so an uncalled
+#                     declaration is never looked at, and the witness sails past a module
+#                     that does not compile. That pass is the whole argument for the walker:
+#                     it shows what the toothless form waves through.
+#   lcs_equality   -- the line-text comparison inside the LCS table becomes `false`, so no
+#                     line is ever common. Identical documents then diff as a whole
+#                     replacement, and claim 1 catches it.
+#   inverted_inserts -- the insert-collection test is inverted, so the lines held in common
+#                       (RE-AIMED `20260916`: the loop reads `kept_new` as the SKIP test now,
+#                       since it also counts the gap each insert falls in for the replacement
+#                       pairing. The plant inverts that test wherever it stands.)
+#                     are carried as inserts and the genuinely new ones are dropped. Claim 1
+#                     catches it at its first assert: an unchanged document stops being free.
+#   terminator_dropped -- the elder break that DROPPED the empty token after a file's last
+#                     newline is restored, so "one\ntwo\n" reads as two lines again and the
+#                     split stops being injective: `x\ny` and `x\ny\n` earn one address.
+#                     RE-AIMED `20260917` with REDS %689's repair -- the plant used to delete
+#                     that break, and once the break left the module the sed matched nothing,
+#                     which `plant_matched_nothing` refused by name rather than reading the
+#                     unmutated pen's exit as a law that holds. Claim 7 catches it.
+#   empty_terminator -- the head guard that answers zero lines for empty text is deleted, so
+#                     `splitScalar` over no bytes yields its one empty token and an empty file
+#                     becomes the same document as a file holding a single newline -- the very
+#                     collision the terminator repair exists to close, reappearing at its
+#                     smallest case. Claim 7 catches it.
+#   bound_widened  -- the per-side ceiling inside check_bounds is doubled, so every pair the
+#                     module admitted is still admitted and the refusal one line past the
+#                     ceiling stops arriving. Claim 8 catches it, and only because that claim
+#                     presses the boundary from both sides: a refusal proven only in the
+#                     failing direction cannot tell a bound from a wall.
+#   ceiling_restated -- the imported per-side ceiling becomes a hand-typed number that looks
+#                     reasonable. Nothing stops compiling and every behavioral claim still
+#                     passes; claim 9 reds, because a quantity spelled twice is a quantity
+#                     that drifts.
+#   edge_check_removed -- the call to check_bounds is deleted from `diff` and check_bounds
+#                     itself is left standing, so the decision stays correct and nobody asks
+#                     it. Claim 8 cannot see this; claim 10 exists for it. A bound nobody
+#                     calls is a bound.
+#
+# WHY walker_removed IS THE SHARPEST PHASE. Every other phase proves the witness bites.
+# This one proves the witness would NOT bite without its walker -- the plant the grain's own
+# strand asks for, where the toothed form catches what the vacuous form waves through
+# (foundations/20260826-024942_the-grain-and-the-crossing.md, "a guard that cannot red
+# guards nothing").
+#
+# EXPECTED: clean_exit=0, walker_removed_exit=0, and every other phase non-zero. Ten phases.
+#
+# Driven by tools/m/mantra_diff_witness.rish. Run from the repository root.
+
+set -eu
+
+# The plant law, imported rather than restated: `plant_apply` rewrites a pen file through a sed
+# program and refuses by name when the program matched nothing, so a line that moves in the module
+# reds this control instead of quietly handing a phase an unmutated file (REDS %519). Root by
+# upward walk (seated 20260828), so the letter fold's depth is never spelled here.
+_fd_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+_fd_steps=0
+while [ ! -d "$_fd_root/rishi/bin" ] || [ ! -d "$_fd_root/tools/fixtures" ]; do
+  _fd_steps=$((_fd_steps + 1))
+  if [ "$_fd_steps" -gt 8 ] || [ "$_fd_root" = "/" ] || [ -z "$_fd_root" ]; then
+    echo "$0: no tree root within 8 steps (needs rishi/bin and tools/fixtures)" >&2
+    exit 2
+  fi
+  _fd_root=$(dirname "$_fd_root")
+done
+. "$_fd_root/tools/fixtures/p/plant.sh"
+
+root="$(pwd)"
+zig="$root/vendor/zig-toolchain/zig"
+rye="$root/rye/bin/rye"
+module="$root/mantra/src/diff.rye"
+weave="$root/mantra/src/weave.rye"
+witness="$root/mantra/src/diff_witness.rye"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# A public declaration carrying a type error, reachable only by analysis. Appended to the
+# module copy for the two walker phases.
+planted_decl='pub fn planted_never_called(value: u32) u32 { return value.no_such_field; }'
+
+# Build a pen from the real sources, apply an optional sed program to the module copy and an
+# optional one to the witness copy, then build and run. Echoes the exit code and nothing else.
+run_pen() {
+  name="$1"
+  module_program="$2"
+  witness_program="$3"
+  append_decl="$4"
+  pen="$work/$name"
+  mkdir -p "$pen"
+  cp "$weave" "$pen/weave.rye"
+  cp "$module" "$pen/diff.rye"
+  cp "$witness" "$pen/diff_witness.rye"
+  if [ -n "$module_program" ]; then
+    # A plant that matched nothing leaves the pen byte for byte identical, and the
+    # phase then reads the UNMUTATED module's exit code -- which is 0, and is
+    # indistinguishable from a law that holds. That is exactly what happened when
+    # `deletes` changed type from u32 to LineId on 20260906 and this plant's sed
+    # went on naming the elder spelling. `plant_apply` refuses by name instead,
+    # and it is imported rather than written here so the next control inherits it.
+    if ! plant_apply "$pen/diff.rye" "$module_program" "$name"; then
+      echo "plant_matched_nothing"
+      return
+    fi
+  fi
+  if [ -n "$append_decl" ]; then
+    printf '\n%s\n' "$planted_decl" >> "$pen/diff.rye"
+  fi
+  if [ -n "$witness_program" ]; then
+    if ! plant_apply "$pen/diff_witness.rye" "$witness_program" "$name"; then
+      echo "plant_matched_nothing"
+      return
+    fi
+  fi
+  code=0
+  ( cd "$pen" && env RYE_ZIG="$zig" "$rye" build diff_witness.rye \
+      -femit-bin="$pen/run" >/dev/null 2>&1 ) || code=$?
+  if [ "$code" -eq 0 ]; then
+    "$pen/run" >/dev/null 2>&1 || code=$?
+  fi
+  echo "$code"
+}
+
+# The walker is four lines; deleting it is what walker_removed measures.
+drop_walker='/^comptime {$/,/^}$/d'
+
+clean_exit="$(run_pen clean '' '' '')"
+elder_exit="$(run_pen elder_arraylist \
+  's/var \([a-z_]*\): std\.ArrayListUnmanaged(\([A-Za-z0-9_]*\)) = \.empty;/var \1 = std.ArrayListUnmanaged(\2){};/' '' '')"
+walker_teeth_exit="$(run_pen walker_teeth '' '' 'yes')"
+walker_removed_exit="$(run_pen walker_removed '' "$drop_walker" 'yes')"
+lcs_exit="$(run_pen lcs_equality \
+  's/            if (std.mem.eql(u8, old_lines\[i - 1\].text, new_text\[j - 1\])) {/            if (false) {/' '' '')"
+inverted_inserts_exit="$(run_pen inverted_inserts \
+  's/        if (kept_new\[idx\]) {/        if (!kept_new[idx]) {/' '' '')"
+terminator_dropped_exit="$(run_pen terminator_dropped \
+  '/    while (it.next()) |line| {/a\        if (line.len == 0 and it.rest().len == 0) break;' '' '')"
+empty_terminator_exit="$(run_pen empty_terminator \
+  '/    if (text.len == 0) return &.{};/d' '' '')"
+
+# The three bound plants, added 20260907 with the ceilings themselves. Until that
+# day the module allocated a quadratic LCS table with no named max, no named
+# error, and no edge check, so none of these three phases had anything to break.
+#
+# bound_widened doubles the per-side ceiling inside check_bounds, which leaves
+# every admitted pair admitted and stops the refusal one line past the ceiling
+# -- the direction a loosened bound always fails in, and the one a passing test
+# cannot see.
+bound_widened_exit="$(run_pen bound_widened \
+  's/    if (old_len > max_diff_lines) return DiffError.TooManyLines;/    if (old_len > max_diff_lines * 2) return DiffError.TooManyLines;/' '' '')"
+# ceiling_restated replaces the imported per-side ceiling with a number that
+# merely looks reasonable. Nothing about the module stops compiling and every
+# behavioral claim still passes; only the derivation claim reds, which is what
+# that claim is for.
+ceiling_restated_exit="$(run_pen ceiling_restated \
+  's|^pub const max_diff_lines: u32 = @import("weave.rye").max_weave_lines;|pub const max_diff_lines: u32 = 1 << 19;|' '' '')"
+# edge_check_removed deletes the call from `diff` and leaves `check_bounds`
+# standing, so the decision is still correct and nobody asks it. This is the
+# phase claim 8 alone could not catch, and the reason claim 10 exists.
+edge_removed_exit="$(run_pen edge_check_removed \
+  '/    try check_bounds(old_lines.len, new_text.len);/d' '' '')"
+
+echo "phase=clean"
+echo "clean_exit=$clean_exit"
+echo "phase=elder_arraylist"
+echo "elder_arraylist_exit=$elder_exit"
+echo "phase=walker_teeth"
+echo "walker_teeth_exit=$walker_teeth_exit"
+echo "phase=walker_removed"
+echo "walker_removed_exit=$walker_removed_exit"
+echo "phase=lcs_equality"
+echo "lcs_equality_exit=$lcs_exit"
+echo "phase=inverted_inserts"
+echo "inverted_inserts_exit=$inverted_inserts_exit"
+echo "phase=terminator_dropped"
+echo "terminator_dropped_exit=$terminator_dropped_exit"
+echo "phase=empty_terminator"
+echo "empty_terminator_exit=$empty_terminator_exit"
+echo "phase=bound_widened"
+echo "bound_widened_exit=$bound_widened_exit"
+echo "phase=ceiling_restated"
+echo "ceiling_restated_exit=$ceiling_restated_exit"
+echo "phase=edge_check_removed"
+echo "edge_check_removed_exit=$edge_removed_exit"
+
+verdict=ok
+# A plant that matched nothing is read FIRST and by its own name, because every
+# other reading below is a number and this one is a word -- and because a phase
+# that planted nothing would otherwise be judged on the clean module's exit code.
+for reading in "$clean_exit" "$elder_exit" "$walker_teeth_exit" "$walker_removed_exit" \
+               "$lcs_exit" "$inverted_inserts_exit" "$terminator_dropped_exit" \
+               "$empty_terminator_exit" \
+               "$bound_widened_exit" "$ceiling_restated_exit" "$edge_removed_exit"; do
+  [ "$reading" != plant_matched_nothing ] || verdict=plant_matched_nothing
+done
+if [ "$verdict" = ok ]; then
+  [ "$clean_exit" -eq 0 ] || verdict=clean_failed
+  [ "$walker_removed_exit" -eq 0 ] || verdict=walker_removed_not_innocent
+  for broken in "$elder_exit" "$walker_teeth_exit" "$lcs_exit" "$inverted_inserts_exit" \
+                "$terminator_dropped_exit" "$empty_terminator_exit" \
+                "$bound_widened_exit" "$ceiling_restated_exit" "$edge_removed_exit"; do
+    [ "$broken" -ne 0 ] || verdict=break_not_caught
+  done
+fi
+echo "control_verdict=$verdict"
+[ "$verdict" = ok ]

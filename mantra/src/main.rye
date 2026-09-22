@@ -1,0 +1,1145 @@
+//! mantra/src/main.rye -- Mantra: the living history of a text stream.
+//!
+//! Mantra is the version-control layer of the Rye family. It holds the full
+//! history of a text file as a weave -- a list of lines each carrying a stable
+//! position and a generation count that names whether the line is present or
+//! gone. Every state is content-named by its SHA3-256 digest; the store never
+//! loses a blob once written.
+//!
+//! This is the seed: one file, six commands, one weave PER TRACKED FILE.
+//! A path is what tells one document from another, so a commit names the
+//! weave of every file it tracks rather than one weave for the directory --
+//! the fault booked `20260910.003046`, where the second file added deleted
+//! the first one's every line.
+//!
+//! Commands:
+//!   mantra init           Create .mantra/ in the current directory.
+//!   mantra brix           Print the .brix course descriptor.
+//!   mantra add            Weave every file the .brix descriptor names.
+//!   mantra add <file>     Weave the file's current content into the history.
+//!   mantra log            Show the commit chain and the files each names.
+//!   mantra status <file>  Show what has changed since the last weave.
+//!   mantra annotate <file> Show every line marked with what each side did.
+//!   mantra version        Print the Mantra version.
+//!
+//! Build:
+//!   RYE_ZIG=$PWD/vendor/zig-toolchain/zig \
+//!   rye/bin/rye build mantra/src/main.rye -femit-bin=mantra/bin/mantra
+//!
+//! Architecture (three sections, one file for the seed):
+//!   Section Weave   -- the data model, imported from mantra/src/weave.rye
+//!   Section Diff    -- the LCS diff, imported from mantra/src/diff.rye
+//!   Section Store   -- the blob store, imported from mantra/src/store.rye
+//!   Section Commit  -- the chain link, one weave named per tracked path
+//!   Section Main    -- CLI: init / brix / add / log / status / version
+
+const std  = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+const tally_parse_int = @import("parse_int.rye");
+const Dir  = std.Io.Dir;
+const Sha3 = std.crypto.hash.sha3.Sha3_256;
+
+const mantra_version = "20260619.213800";
+
+// =========================================================================
+// Section Weave -- the data model, imported rather than declared
+// =========================================================================
+//
+// The model lives in one file. `mantra/src/weave.rye` publishes `Line`, `Diff`
+// and `Weave`, and this CLI reads them from there rather than declaring its
+// own. It declared its own until `20260908`, and the two copies drifted the
+// moment the module widened: `bc37657e8` gave `Line` a `site` and a `run` and
+// gave `Diff` a `site`, and this file kept the three-field `Line` it was born
+// with, so a line was named by a pair in one file and by a bare integer in the
+// other (REDS %589). One declaration cannot drift from itself.
+//
+// The identity is a pair -- the position one counter handed a line, and the
+// site of the hand that was counting -- and this CLI is one hand, so every
+// line it writes today stands at `v1_site`. That kept the elder three-field
+// record honest for as long as one hand was all there was: the two fields it
+// does not carry were constant across everything this CLI produced rather than
+// missing from it.
+//
+// IT STOPPED BEING ALL THERE IS the moment `merge` landed, since a merge is
+// the arrival of a second site by definition, and `Weave.to_v1` refuses
+// `V1SiteNotConstant` rather than folding two lines into one row. So from
+// `20260909` this CLI WRITES `mantra-weave-v2` and reads both records, which
+// is what gives a merged history somewhere to land. `Weave.to_v2` and
+// `Weave.from_v2` carry the five fields and the two counters; `from_v1` still
+// lifts every elder blob already on disk.
+const weave = @import("weave.rye");
+
+const Line = weave.Line;
+const Diff = weave.Diff;
+const Weave = weave.Weave;
+const LineId = weave.LineId;
+const V1Row = weave.V1Row;
+const V2Row = weave.V2Row;
+const V2Record = weave.V2Record;
+const OrderRow = weave.OrderRow;
+const OrderRecord = weave.OrderRecord;
+
+// =========================================================================
+// Section Diff -- pure diff computation, imported rather than declared
+// =========================================================================
+//
+// The LCS diff lives in one file too. `mantra/src/diff.rye` publishes `diff`
+// and `split_lines`, and this CLI calls them rather than carrying its own
+// copies, which it did until `20260908`.
+//
+// THE COPY HERE HAD NO CEILING. Its table was `(m + 1) * (n + 1)` cells of
+// `u32` allocated straight from two lengths a caller chooses, with no named
+// maximum, no named error, and no check at the edge -- the exact fault
+// `diff.rye`'s own header describes fixing one seam over, left standing in the
+// file that actually reads a user's file off disk. `diff.rye` names
+// `max_diff_lines`, read from the weave's own `max_weave_lines` so one
+// quantity is spelled once; it names `max_diff_table_bytes` in bytes, because
+// bytes are what the machine has; and it refuses through `check_bounds`
+// before a single cell is allocated. Calling it is how the CLI inherits that
+// fence.
+//
+// `split_lines` comes with it, because the two split rules have to agree: the
+// slice this CLI hands `diff` is the slice `diff` reads its ceiling against,
+// and one terminator rule written in two files is one rule two files will come
+// to disagree about. From `20260917` that rule KEEPS the empty token a trailing
+// newline produces, so the terminator reaches the weave as a line (REDS %689,
+// door 2 on the maintainer's word `20260916.000449`). A terminated document therefore
+// weaves one line longer than a hand counts, and `mantra status` sees a newline
+// arrive and leave like any other edit.
+//
+// SAID EXACTLY, so the elder is not remembered as worse than it was: a document
+// past the ceiling was refused either way, one seam apart. The copy here split
+// its lines and built its table first, and met `WeaveError.TooManyLines` in
+// `Weave.apply` afterwards. Measured on metal `20260908` from two binaries: a
+// 1,048,577-line file reds inside `apply` for the elder and inside
+// `split_lines` for this one, before the split finishes and so before a cell is
+// asked for. The old side comes from `Weave.current` and is bounded by the
+// weave's own ceiling, so the exposure was never a table from two free lengths;
+// it was a table from ONE free length, taken ahead of the only fence that would
+// have spoken.
+//
+// The diff carries `cli_site` on every insert and names its deletes by the
+// `LineId` that `Line.id()` returns, which is the model's own identity rather
+// than a bare position.
+const diff_mod = @import("diff.rye");
+
+/// The site every line this CLI writes belongs to.
+///
+/// `mantra/src/weave.rye` names it `v1_site` because that is the site an elder
+/// record is lifted onto. Read from here it is the same fact said the other
+/// way round: the elder record IS this CLI's history, so the CLI keeps writing
+/// at the site its own record already carries.
+const cli_site: u32 = weave.v1_site;
+
+/// The largest working-file text one Mantra command reads into memory.
+///
+/// Named once because three commands read a file into a buffer, and three
+/// spellings of one ceiling is how two of them come to disagree -- the shape
+/// `max_blob_bytes` closed in `mantra/src/store.rye`, where two heights over
+/// one directory turned a blob written by one hand into a prefix read by
+/// another. Stated in BYTES because bytes are what the machine has; the
+/// weave's own ceiling is stated in LINES, and `split_lines` refuses past it.
+const max_working_file_bytes: u32 = 4 * 1024 * 1024;
+
+// =========================================================================
+// Section Store -- SHA3-256 content-addressed blob store
+// =========================================================================
+//
+// Layout under the repository root:
+//   .mantra/
+//     HEAD          -- 64-char hex blob name of the current weave, + \n
+//     blobs/
+//       <64-hex>    -- one file per blob, named by its SHA3-256 digest
+//
+// THIS FILE CARRIED ITS OWN COPY UNTIL `20260908`, and the two copies read the
+// same directory at two different heights: `main.rye` allocated a 4 MiB buffer
+// and `store.rye` allocated 1 MiB, so a blob one hand wrote was a prefix the
+// other hand read. Neither named its ceiling, and neither recomputed the
+// digest it had already paid for, so a read past the buffer came back
+// truncated with no error raised -- and a truncated `mantra-weave-v1` record
+// is a valid prefix, which the next commit writes back under its own honest
+// digest.
+//
+// The port was declined once, on `20260908.143034`, for a reason this repair
+// removes: adopting the module then would have quartered this CLI's blob
+// capacity, since the module's ceiling was the lower of the two. One named
+// `max_blob_bytes` at 128 MiB raises both.
+
+const store_mod = @import("store.rye");
+
+const Store = store_mod.Store;
+
+// =========================================================================
+// Section Weave serialization
+// =========================================================================
+//
+// TWO RECORDS ARE READ AND ONE IS WRITTEN, and the header line is what tells
+// them apart. `deserialize_weave` dispatches on line 0, so a store written
+// before `20260909` keeps opening; `serialize_weave` writes the wide record
+// from here forward, because the elder one refuses `V1SiteNotConstant` the
+// moment two hands meet in a history and `merge` is exactly what makes them
+// meet. A module that can merge and cannot save the result has not finished
+// being one.
+//
+// Elder record -- read, never written from here forward:
+//   Line 0:  "mantra-weave-v1\n"
+//   Lines 1+: "{gen}\t{pos}\t{text}\n"
+//
+// Wide record -- written, and read:
+//   Line 0:  "mantra-weave-v2\n"
+//   Line 1:  "{next_pos}\t{next_run}\n"
+//   Lines 2+: "{gen}\t{pos}\t{site}\t{run}\t{text}\n"
+//
+// THE COUNTERS GET A LINE OF THEIR OWN because `V2Record` carries them as
+// fields rather than deriving them from the rows, and the reason is written at
+// that declaration: the weave declares `pos < next_pos` and `run < next_run`,
+// which are upper bounds rather than equalities. A reader deriving them off the
+// last row would bind every future reading to an equality this module never
+// promised. Two numbers cost one line and buy that independence.
+//
+// Both records use tab as the field separator, and line text must not contain
+// tabs or embedded newlines -- asserted at serialization in both writers. The
+// constraint stays one constraint on purpose: `to_v1` and `to_v2` write from
+// one line store, and narrowing it per record would make a line writable into
+// one and refused by the other. A future pass will lift it with a
+// length-prefix encoding.
+
+/// Write a weave as a `mantra-weave-v2` record.
+///
+/// The rows and the two counters come from `Weave.to_v2`, which asks nothing of
+/// the weave the weave does not already promise -- so this writer, unlike the
+/// elder one below it, refuses nothing. That absence is the whole change. The
+/// elder writer read two questions before allocating a row, and the first of
+/// them (`V1SiteNotConstant`) is a refusal a merged history triggers by
+/// construction, since a merge is exactly the arrival of a second site. This
+/// function turns a record into bytes and stops there.
+///
+/// Precondition:  no line's text carries a tab or a newline, the two separators
+///   this serialization uses.
+/// Postcondition: the blob holds one row per weave line, under a header naming
+///   the record and a line naming both counters.
+fn serialize_weave(allocator: std.mem.Allocator, w: *const Weave) ![]const u8 {
+    const record = try w.to_order_record(allocator);
+    var out = std.ArrayListUnmanaged(u8).empty;
+    try out.appendSlice(allocator, "mantra-weave-20260916.101910\n");
+    var counter_buf: [64]u8 = undefined;
+    const counters = try std.fmt.bufPrint(&counter_buf, "{d}\t{d}\n", .{ record.next_pos, record.next_run });
+    try out.appendSlice(allocator, counters);
+    for (record.rows) |row| {
+        // invariant: a line carries no tab and no newline, since both are the field and record
+        // separators this serialization uses -- one inside a line would split it into two on
+        // the way back
+        assert(std.mem.indexOfScalar(u8, row.text, '\t') == null);
+        assert(std.mem.indexOfScalar(u8, row.text, '\n') == null);
+        var field_buf: [64]u8 = undefined;
+        const prefix = try std.fmt.bufPrint(&field_buf, "{d}\t{d}\t{d}\t{d}\t{d}\t", .{ row.gen, row.pos, row.site, row.run, row.ord });
+        try out.appendSlice(allocator, prefix);
+        try out.appendSlice(allocator, row.text);
+        try out.append(allocator, '\n');
+    }
+    // invariant: one record row per weave line, since the record is the whole history
+    // rather than the present view -- a shorter record would drop a line the store has
+    // already promised to keep
+    assert(record.rows.len == w.lines.items.len);
+    return out.toOwnedSlice(allocator);
+}
+
+/// Read a weave record back, whichever of the two records it is.
+///
+/// The header line decides, and it is read before a row is allocated. A store
+/// written before `20260909` holds `mantra-weave-v1` blobs and keeps opening
+/// through `read_v1_rows`; every blob written from here forward is
+/// `mantra-weave-v2`. Neither reader trusts its bytes: both hand their rows to
+/// a lift that refuses a broken record by name, because a blob off disk is the
+/// one input this file gets that no caller vouched for.
+fn deserialize_weave(allocator: std.mem.Allocator, blob: []const u8) !Weave {
+    var it = std.mem.splitScalar(u8, blob, '\n');
+    const header = it.next() orelse return error.InvalidFormat;
+    if (std.mem.eql(u8, header, "mantra-weave-20260916.101910")) return read_order_record(allocator, &it);
+    if (std.mem.eql(u8, header, "mantra-weave-v2")) return read_v2_record(allocator, &it);
+    if (std.mem.eql(u8, header, "mantra-weave-v1")) return read_v1_rows(allocator, &it);
+    return error.InvalidFormat;
+}
+
+/// Read the rows of a `mantra-weave-v2` record, the header already taken.
+///
+/// The counters line comes first, since `from_v2` reads every row against both
+/// counters and a record whose counters are missing is a record whose rows
+/// cannot be checked at all.
+///
+/// Precondition:  the iterator stands just past the header line.
+/// Postcondition: the weave holds one line per row, with both counters exactly
+///   as the record carried them.
+/// Refuses:       `WeaveError.TooManyLines`, at the row that would pass
+///   `max_weave_lines`, so the allocation is bounded rather than checked after.
+fn read_v2_record(allocator: std.mem.Allocator, it: *std.mem.SplitIterator(u8, .scalar)) !Weave {
+    const counter_line = it.next() orelse return error.InvalidFormat;
+    var counter_fields = std.mem.splitScalar(u8, counter_line, '\t');
+    const next_pos_str = counter_fields.next() orelse return error.InvalidFormat;
+    const next_run_str = counter_fields.next() orelse return error.InvalidFormat;
+    const next_pos = try tally_parse_int.parse_int(u32, next_pos_str, .{});
+    const next_run = try tally_parse_int.parse_int(u32, next_run_str, .{});
+
+    var rows = std.ArrayListUnmanaged(V2Row).empty;
+    while (it.next()) |row| {
+        if (row.len == 0) continue;
+        // invariant: the row that would pass the ceiling is refused before it is parsed,
+        // so a record off disk allocates at most `max_weave_lines` rows and their text --
+        // the same move `read_commit_v2` makes against `max_commit_files` sixty lines
+        // below. The store's ceiling is in BYTES and this one is in LINES, and the
+        // conversion is what was missing: a blob standing under `max_blob_bytes` carries
+        // roughly fourteen times `max_weave_lines` rows at nine bytes a row.
+        if (rows.items.len >= weave.max_weave_lines) return weave.WeaveError.TooManyLines;
+        var fields = std.mem.splitScalar(u8, row, '\t');
+        const gen_str  = fields.next() orelse return error.InvalidFormat;
+        const pos_str  = fields.next() orelse return error.InvalidFormat;
+        const site_str = fields.next() orelse return error.InvalidFormat;
+        const run_str  = fields.next() orelse return error.InvalidFormat;
+        const text_str = fields.rest();
+        const gen  = try tally_parse_int.parse_int(u32, gen_str, .{});
+        const pos  = try tally_parse_int.parse_int(u32, pos_str, .{});
+        const site = try tally_parse_int.parse_int(u32, site_str, .{});
+        const run  = try tally_parse_int.parse_int(u32, run_str, .{});
+        const text = try allocator.dupe(u8, text_str);
+        try rows.append(allocator, V2Row{ .text = text, .gen = gen, .pos = pos, .site = site, .run = run });
+    }
+    // invariant: the loop above refused the row that would have passed the ceiling, so
+    // this holds by construction rather than by hope -- it stood here alone until
+    // `20260910`, after the whole record had already been allocated, and an assert on
+    // bytes read off disk panics where `from_v2` would have refused by name
+    assert(rows.items.len <= weave.max_weave_lines);
+    return weave.Weave.from_v2(allocator, V2Record{
+        .rows = rows.items,
+        .next_pos = next_pos,
+        .next_run = next_run,
+    });
+}
+
+/// Read the rows of a `mantra-weave-20260916.101910` record, the header already taken.
+///
+/// The stamped record is v2 with the order key beside each row (REDS %680). Both elder readers
+/// stand, because a store written before this record holds v2 and v1 blobs and
+/// must keep opening; only what this CLI WRITES moved forward.
+fn read_order_record(allocator: std.mem.Allocator, it: *std.mem.SplitIterator(u8, .scalar)) !Weave {
+    const counter_line = it.next() orelse return error.InvalidFormat;
+    var counter_fields = std.mem.splitScalar(u8, counter_line, '\t');
+    const next_pos_str = counter_fields.next() orelse return error.InvalidFormat;
+    const next_run_str = counter_fields.next() orelse return error.InvalidFormat;
+    const next_pos = try tally_parse_int.parse_int(u32, next_pos_str, .{});
+    const next_run = try tally_parse_int.parse_int(u32, next_run_str, .{});
+
+    var rows = std.ArrayListUnmanaged(OrderRow).empty;
+    while (it.next()) |row| {
+        if (row.len == 0) continue;
+        // invariant: the row that would pass the ceiling is refused before it is parsed,
+        // so a record off disk allocates at most `max_weave_lines` rows and their text --
+        // the same move `read_commit_v2` makes against `max_commit_files` sixty lines
+        // below. The store's ceiling is in BYTES and this one is in LINES, and the
+        // conversion is what was missing: a blob standing under `max_blob_bytes` carries
+        // roughly fourteen times `max_weave_lines` rows at nine bytes a row.
+        if (rows.items.len >= weave.max_weave_lines) return weave.WeaveError.TooManyLines;
+        var fields = std.mem.splitScalar(u8, row, '\t');
+        const gen_str  = fields.next() orelse return error.InvalidFormat;
+        const pos_str  = fields.next() orelse return error.InvalidFormat;
+        const site_str = fields.next() orelse return error.InvalidFormat;
+        const run_str  = fields.next() orelse return error.InvalidFormat;
+        // The order key is the field v3 adds, and it is REQUIRED: a record
+        // announcing itself as v3 while carrying four numbers is truncated, and
+        // reading it as v2 would put every replacement at the end of its
+        // document in silence.
+        const ord_str  = fields.next() orelse return error.InvalidFormat;
+        const text_str = fields.rest();
+        const gen  = try tally_parse_int.parse_int(u32, gen_str, .{});
+        const pos  = try tally_parse_int.parse_int(u32, pos_str, .{});
+        const site = try tally_parse_int.parse_int(u32, site_str, .{});
+        const run  = try tally_parse_int.parse_int(u32, run_str, .{});
+        const ord  = try tally_parse_int.parse_int(u32, ord_str, .{});
+        const text = try allocator.dupe(u8, text_str);
+        try rows.append(allocator, OrderRow{ .text = text, .gen = gen, .pos = pos, .site = site, .run = run, .ord = ord });
+    }
+    // invariant: the loop above refused the row that would have passed the ceiling, so
+    // this holds by construction rather than by hope -- it stood here alone until
+    // `20260910`, after the whole record had already been allocated, and an assert on
+    // bytes read off disk panics where `from_order_record` would have refused by name
+    assert(rows.items.len <= weave.max_weave_lines);
+    return weave.Weave.from_order_record(allocator, OrderRecord{
+        .rows = rows.items,
+        .next_pos = next_pos,
+        .next_run = next_run,
+    });
+}
+
+/// Read the rows of an elder `mantra-weave-v1` record, the header already taken.
+///
+/// Nothing writes this record from `20260909` forward; every store written
+/// before it holds one, so this reader stays. The parsing stops at rows;
+/// `Weave.from_v1` lifts them, and the two things this reader used to take on
+/// trust are refused there by name. A record whose positions do not rise reds
+/// as `V1PositionsDoNotRise` rather than lifting as a weave whose document
+/// order was already broken, and a generation of zero reds as
+/// `V1GenerationBelowOne` rather than tripping an assert -- which is the right
+/// register for a blob read off disk, where a caller's promise is not what
+/// stands behind the bytes.
+///
+/// Precondition:  the iterator stands just past the header line.
+/// Postcondition: the weave holds one line per row, standing at one site.
+/// Refuses:       `WeaveError.TooManyLines`, at the same edge the v2 reader takes.
+fn read_v1_rows(allocator: std.mem.Allocator, it: *std.mem.SplitIterator(u8, .scalar)) !Weave {
+    var rows = std.ArrayListUnmanaged(V1Row).empty;
+    while (it.next()) |row| {
+        if (row.len == 0) continue;
+        // invariant: the same edge refusal the v2 reader above makes, for the same reason --
+        // an elder store is the one input here that no caller vouched for, and its row count
+        // is bounded by nothing the store checked
+        if (rows.items.len >= weave.max_weave_lines) return weave.WeaveError.TooManyLines;
+        var fields = std.mem.splitScalar(u8, row, '\t');
+        const gen_str  = fields.next() orelse return error.InvalidFormat;
+        const pos_str  = fields.next() orelse return error.InvalidFormat;
+        const text_str = fields.rest();
+        const gen = try tally_parse_int.parse_int(u32, gen_str, .{});
+        const pos = try tally_parse_int.parse_int(u32, pos_str, .{});
+        const text = try allocator.dupe(u8, text_str);
+        try rows.append(allocator, V1Row{ .text = text, .gen = gen, .pos = pos });
+    }
+    // invariant: the loop above refused the row that would have passed the ceiling, so
+    // this holds by construction -- `from_v1` still reads it at its own edge, and both
+    // readings stand because a caller other than this one may reach that lift
+    assert(rows.items.len <= weave.max_weave_lines);
+    return weave.Weave.from_v1(allocator, rows.items);
+}
+
+// =========================================================================
+// Section Commit -- the chain link
+// =========================================================================
+//
+// A commit blob names the weave of every tracked file and points to its
+// parent commit. Format, tab-separated on every row:
+//   mantra-commit-v2\n
+//   parent\t<64-hex|none>\n
+//   file\t<path>\t<64-hex>\n      (one row per tracked file)
+//
+// WHY A ROW PER FILE. The elder `mantra-commit-v1` named ONE weave for a
+// whole directory, so `cmd_add` loaded that weave, diffed the next file
+// against it, and applied the difference -- which deletes every line of the
+// file added before it. A two-file project kept only its last file, and the
+// CLI reported `wove 2/2 file(s).` while it happened (`20260910.003046`). A path is
+// what tells one document from another, so the record carries it.
+//
+// WHY TAB RATHER THAN THE ELDER SPACE. A tracked path may contain a space,
+// and v1's parser splits a row at the first one. Tabs separate every v2
+// field, so one rule reads the whole record.
+//
+// ELDER RECORDS KEEP OPENING. A `mantra-commit-v1` blob names one weave and
+// no path, and lifts to a single entry whose path is empty. `weave_for`
+// reads an empty path as *the weave a path inherits until it has its own*,
+// so a store written before this change answers exactly as it did, and the
+// first commit onto it starts that file from the history already there.
+//
+// HEAD always points to the most recent commit blob.
+// Legacy HEAD values (v0: HEAD -> weave blob directly) are handled in
+// load_weave for backwards compatibility.
+
+/// The largest number of tracked files one commit may name. A .brix course
+/// is a list a hand maintains, so a thousand stands far past any real one
+/// and still bounds the read of an untrusted blob before a row is kept.
+const max_commit_files: u32 = 1024;
+
+/// One tracked file's weave inside a commit. An empty `path` is the elder
+/// v1 entry -- the weave every path inherits until it has one of its own.
+const FileWeave = struct {
+    path:       []const u8,
+    weave_name: []const u8,
+};
+
+const CommitRecord = struct {
+    parent: ?[]const u8, // null for the first commit
+    files:  []const FileWeave,
+
+    /// The weave blob name this commit holds for `path`, or null when the
+    /// commit names neither that path nor an inherited elder weave.
+    fn weave_for(self: CommitRecord, path: []const u8) ?[]const u8 {
+        // invariant: a commit names at most the stated maximum of files
+        assert(self.files.len <= max_commit_files);
+        for (self.files) |fw| {
+            if (std.mem.eql(u8, fw.path, path)) return fw.weave_name;
+        }
+        for (self.files) |fw| {
+            if (fw.path.len == 0) return fw.weave_name;
+        }
+        return null;
+    }
+};
+
+/// Does this file list name exactly what the prior commit named -- path for
+/// path, weave for weave, in the same order?
+///
+/// WHY THE ANSWER EXISTS. A second `add` over a file nobody edited produces a
+/// weave whose bytes are the bytes already on disk, so its content-addressed
+/// name is the prior name and the whole list comes back unchanged. A commit
+/// written from that list records that somebody ran the command rather than
+/// that anything changed, and `add` is meant to be idempotent: running it twice
+/// leaves the world the first run left.
+///
+/// WHY ORDER IS PART OF THE ANSWER. `commit_files_with` builds its list by
+/// walking the prior one and replacing in place, so an unchanged add returns
+/// the prior order exactly. Comparing in order is therefore the reading the
+/// caller wants: two lists agreeing as sets while differing in order were built
+/// by something else, and calling those the same would skip a commit that
+/// records a real change.
+fn files_agree(prior: []const FileWeave, next: []const FileWeave) bool {
+    // invariant: the prior list stands within the stated maximum, so the walk
+    // below is bounded by a named constant rather than by whatever reached here
+    assert(prior.len <= max_commit_files);
+    // invariant: the new list stands within the same maximum, for the same reason
+    assert(next.len <= max_commit_files);
+    if (prior.len != next.len) return false;
+    for (prior, next) |held, fresh| {
+        if (!std.mem.eql(u8, held.path, fresh.path)) return false;
+        if (!std.mem.eql(u8, held.weave_name, fresh.weave_name)) return false;
+    }
+    return true;
+}
+
+/// The file list a commit for `path` should carry: every entry this commit
+/// already holds, with `path` set to `weave_name` -- replaced where it was
+/// already named, appended where it was not.
+///
+/// The elder empty-path entry is carried forward rather than dropped,
+/// because dropping it would take the inherited history from every OTHER
+/// file of an elder store on the first commit after this change.
+fn commit_files_with(
+    allocator: std.mem.Allocator,
+    prior: []const FileWeave,
+    path: []const u8,
+    weave_name: []const u8,
+) ![]const FileWeave {
+    // invariant: a path names a file, so it is never empty here
+    assert(path.len > 0);
+    // invariant: the prior list already stands within the stated maximum
+    assert(prior.len <= max_commit_files);
+    var out = std.ArrayListUnmanaged(FileWeave).empty;
+    var replaced = false;
+    for (prior) |fw| {
+        if (std.mem.eql(u8, fw.path, path)) {
+            try out.append(allocator, .{ .path = fw.path, .weave_name = weave_name });
+            replaced = true;
+        } else {
+            try out.append(allocator, fw);
+        }
+    }
+    if (!replaced) {
+        if (out.items.len >= max_commit_files) return error.TooManyFiles;
+        try out.append(allocator, .{ .path = path, .weave_name = weave_name });
+    }
+    // invariant: the path this call was given is named exactly once when the call returns
+    assert(out.items.len >= 1);
+    // invariant: the list stays within the stated maximum when the call returns
+    assert(out.items.len <= max_commit_files);
+    return out.toOwnedSlice(allocator);
+}
+
+fn serialize_commit(allocator: std.mem.Allocator, commit: CommitRecord) ![]const u8 {
+    // invariant: a commit names at least one weave, or it records nothing
+    assert(commit.files.len >= 1);
+    // invariant: a commit names at most the stated maximum of files
+    assert(commit.files.len <= max_commit_files);
+    var out = std.ArrayListUnmanaged(u8).empty;
+    try out.appendSlice(allocator, "mantra-commit-v2\n");
+    if (commit.parent) |p| {
+        // invariant: a store name is the hex of a digest, exactly two characters per byte, so
+        // any other length would address a blob that was never written
+        assert(p.len == Sha3.digest_length * 2);
+        const line = try std.fmt.allocPrint(allocator, "parent\t{s}\n", .{p});
+        try out.appendSlice(allocator, line);
+    } else {
+        try out.appendSlice(allocator, "parent\tnone\n");
+    }
+    for (commit.files) |fw| {
+        // invariant: a store name is the hex of a digest, exactly two characters per byte, so any
+        // other length would address a blob that was never written
+        assert(fw.weave_name.len == Sha3.digest_length * 2);
+        // invariant: a tab inside a path would split one row into two fields at read
+        assert(std.mem.indexOfScalar(u8, fw.path, '\t') == null);
+        const line = try std.fmt.allocPrint(allocator, "file\t{s}\t{s}\n", .{ fw.path, fw.weave_name });
+        try out.appendSlice(allocator, line);
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn deserialize_commit(allocator: std.mem.Allocator, blob: []const u8) !CommitRecord {
+    // invariant: a commit blob is never empty
+    assert(blob.len > 0);
+    var it = std.mem.splitScalar(u8, blob, '\n');
+    const header = it.next() orelse return error.InvalidFormat;
+    if (std.mem.eql(u8, header, "mantra-commit-v2")) return read_commit_v2(allocator, &it);
+    if (std.mem.eql(u8, header, "mantra-commit-v1")) return read_commit_v1(allocator, &it);
+    return error.InvalidFormat;
+}
+
+/// Read the rows of a `mantra-commit-v2` blob, header already consumed.
+fn read_commit_v2(
+    allocator: std.mem.Allocator,
+    it: *std.mem.SplitIterator(u8, .scalar),
+) !CommitRecord {
+    var parent_val: ?[]const u8 = null;
+    var files = std.ArrayListUnmanaged(FileWeave).empty;
+    while (it.next()) |raw| {
+        const row = std.mem.trim(u8, raw, "\r");
+        if (row.len == 0) continue;
+        var f = std.mem.splitScalar(u8, row, '\t');
+        const key = f.next() orelse continue;
+        if (std.mem.eql(u8, key, "parent")) {
+            const val = f.next() orelse return error.InvalidFormat;
+            if (std.mem.eql(u8, val, "none")) {
+                parent_val = null;
+            } else {
+                if (val.len != Sha3.digest_length * 2) return error.InvalidFormat;
+                parent_val = try allocator.dupe(u8, val);
+            }
+        } else if (std.mem.eql(u8, key, "file")) {
+            const path = f.next() orelse return error.InvalidFormat;
+            const name = f.next() orelse return error.InvalidFormat;
+            if (name.len != Sha3.digest_length * 2) return error.InvalidFormat;
+            // Bound the read at the edge: a blob naming more files than the
+            // maximum is refused before another row is kept.
+            if (files.items.len >= max_commit_files) return error.TooManyFiles;
+            try files.append(allocator, .{
+                .path       = try allocator.dupe(u8, path),
+                .weave_name = try allocator.dupe(u8, name),
+            });
+        }
+    }
+    if (files.items.len == 0) return error.InvalidFormat;
+    // invariant: the list stays within the stated maximum when the read returns
+    assert(files.items.len <= max_commit_files);
+    return CommitRecord{ .parent = parent_val, .files = try files.toOwnedSlice(allocator) };
+}
+
+/// Read the rows of an elder `mantra-commit-v1` blob, header already
+/// consumed. Its one weave becomes the single empty-path entry.
+fn read_commit_v1(
+    allocator: std.mem.Allocator,
+    it: *std.mem.SplitIterator(u8, .scalar),
+) !CommitRecord {
+    var parent_val: ?[]const u8 = null;
+    var weave_val:  ?[]const u8 = null;
+    while (it.next()) |row| {
+        if (row.len == 0) continue;
+        const sep = std.mem.indexOfScalar(u8, row, ' ') orelse continue;
+        const key = row[0..sep];
+        const val = std.mem.trim(u8, row[sep + 1..], " \t\r");
+        if (std.mem.eql(u8, key, "parent")) {
+            if (std.mem.eql(u8, val, "none")) {
+                parent_val = null;
+            } else {
+                parent_val = try allocator.dupe(u8, val);
+            }
+        } else if (std.mem.eql(u8, key, "weave")) {
+            weave_val = try allocator.dupe(u8, val);
+        }
+    }
+    const w = weave_val orelse return error.InvalidFormat;
+    // postcondition: weave name is exactly 64 hex chars
+    assert(w.len == Sha3.digest_length * 2);
+    // postcondition: parent is null or exactly 64 hex chars
+    if (parent_val) |p| assert(p.len == Sha3.digest_length * 2);
+    const one = try allocator.alloc(FileWeave, 1);
+    one[0] = .{ .path = "", .weave_name = w };
+    return CommitRecord{ .parent = parent_val, .files = one };
+}
+
+// =========================================================================
+// Section Brix -- .brix course descriptor
+// =========================================================================
+//
+// A .brix descriptor names a project and the bricks (source files) Mantra
+// tracks. Format: one key-value pair per line, space-separated. Lines
+// starting with '#' are comments; blank lines are ignored.
+//
+//   name     -- the project name (one value)
+//   version  -- descriptor version (Rye chronological stamp)
+//   file     -- one tracked brick/source file (multiple allowed, in order)
+//
+// Tablecloth (the content-addressed store) holds blobs; Brix (the composing
+// language) describes what the system is made of. A .brix descriptor is
+// a course: an ordered list of bricks, declared plainly.
+
+const BrixConfig = struct {
+    name:    []const u8,
+    version: []const u8,
+    files:   []const []const u8,
+};
+
+/// Read and parse .brix from `dir`. Returns null if .brix is absent.
+fn read_brix(allocator: std.mem.Allocator, io: std.Io, dir: Dir) !?BrixConfig {
+    var buf: [8192]u8 = undefined;
+    const content = dir.readFile(io, ".brix", &buf) catch |err| {
+        if (err == error.FileNotFound) return null;
+        return err;
+    };
+    var name_val:    []const u8 = "";
+    var version_val: []const u8 = "";
+    var files = std.ArrayListUnmanaged([]const u8).empty;
+    var lines_it = std.mem.splitScalar(u8, content, '\n');
+    while (lines_it.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0 or trimmed[0] == '#') continue;
+        const sep = std.mem.indexOfScalar(u8, trimmed, ' ') orelse continue;
+        const key = trimmed[0..sep];
+        const val = std.mem.trim(u8, trimmed[sep..], " \t");
+        if (std.mem.eql(u8, key, "name")) {
+            name_val = try allocator.dupe(u8, val);
+        } else if (std.mem.eql(u8, key, "version")) {
+            version_val = try allocator.dupe(u8, val);
+        } else if (std.mem.eql(u8, key, "file")) {
+            // invariant: an empty value would bind a key to nothing, which reads back the same
+            // as a key that was never set
+            assert(val.len > 0);
+            try files.append(allocator, try allocator.dupe(u8, val));
+        }
+    }
+    return BrixConfig{
+        .name    = name_val,
+        .version = version_val,
+        .files   = try files.toOwnedSlice(allocator),
+    };
+}
+
+/// The commit HEAD names, or null when the store holds none -- and null too
+/// when HEAD points straight at a weave blob, which is the legacy v0 shape
+/// that predates the commit chain.
+fn load_commit(allocator: std.mem.Allocator, store: *const Store, io: std.Io) !?CommitRecord {
+    const head_name = try store.read_head(allocator, io);
+    if (head_name == null) return null;
+    const blob = try store.read_blob(allocator, io, head_name.?);
+    if (!std.mem.startsWith(u8, blob, "mantra-commit-")) return null;
+    return try deserialize_commit(allocator, blob);
+}
+
+/// The weave the store holds for `file_path` -- empty when this file has no
+/// history yet, which is what a first `add` starts from.
+///
+/// The path is what tells one tracked document from another. Reading the
+/// store's whole history as one weave is the fault the red booked `20260910.003046`: a
+/// second file's diff then deletes the first file's every line.
+fn load_weave(
+    allocator: std.mem.Allocator,
+    store: *const Store,
+    io: std.Io,
+    file_path: []const u8,
+) !Weave {
+    // invariant: a path names a file, so it is never empty here
+    assert(file_path.len > 0);
+    const head_name = try store.read_head(allocator, io);
+    if (head_name == null) return Weave.empty();
+    const blob = try store.read_blob(allocator, io, head_name.?);
+    // v1/v2: HEAD -> commit blob -> weave blob. Legacy v0: HEAD -> weave blob.
+    if (std.mem.startsWith(u8, blob, "mantra-commit-")) {
+        const commit = try deserialize_commit(allocator, blob);
+        const weave_name = commit.weave_for(file_path) orelse return Weave.empty();
+        const weave_blob = try store.read_blob(allocator, io, weave_name);
+        return deserialize_weave(allocator, weave_blob);
+    }
+    return deserialize_weave(allocator, blob);
+}
+
+// =========================================================================
+// Section Main -- CLI
+// =========================================================================
+
+pub fn main(init: std.process.Init) !u8 {
+    const allocator = init.arena.allocator();
+    const io = init.io;
+    const args = try init.minimal.args.toSlice(allocator);
+
+    if (args.len < 2) { print_usage(); return 2; }
+
+    const cmd = args[1];
+    if (std.mem.eql(u8, cmd, "init")) {
+        return cmd_init(allocator, io);
+    } else if (std.mem.eql(u8, cmd, "brix")) {
+        return cmd_brix(allocator, io);
+    } else if (std.mem.eql(u8, cmd, "add")) {
+        if (args.len >= 3) {
+            return cmd_add(allocator, io, args[2]);
+        } else {
+            return cmd_add_all(allocator, io);
+        }
+    } else if (std.mem.eql(u8, cmd, "log")) {
+        return cmd_log(allocator, io);
+    } else if (std.mem.eql(u8, cmd, "status")) {
+        if (args.len < 3) {
+            print("mantra: status requires a file path\n", .{});
+            return 2;
+        }
+        return cmd_status(allocator, io, args[2]);
+    } else if (std.mem.eql(u8, cmd, "annotate")) {
+        if (args.len < 3) {
+            print("mantra: annotate requires a file path\n", .{});
+            return 2;
+        }
+        return cmd_annotate(allocator, io, args[2]);
+    } else if (std.mem.eql(u8, cmd, "version")) {
+        print("mantra {s}\n", .{mantra_version});
+        return 0;
+    } else {
+        print("mantra: unknown command '{s}'\n\n", .{cmd});
+        print_usage();
+        return 2;
+    }
+}
+
+fn print_usage() void {
+    print(
+        \\mantra -- the living history of the Rye family
+        \\
+        \\usage:
+        \\  mantra init           create .mantra/ in the current directory
+        \\  mantra brix           print the .brix course descriptor
+        \\  mantra add            weave all .brix files into the history
+        \\  mantra add <file>     weave one file's current text into the history
+        \\  mantra log            show the commit chain
+        \\  mantra status <file>  show what has changed since the last weave
+        \\  mantra annotate <file> show every line and what each side did
+        \\  mantra version        print the Mantra version
+        \\
+    , .{});
+}
+
+/// Open the store for a command that only reads, or refuse in the command's
+/// own name.
+///
+/// WHY A SECOND DOOR. `Store.open` creates `.mantra/` and `.mantra/blobs/`
+/// when they are absent, which is right for `init` and `add` and wrong for
+/// every command that only reads. Measured `20260911` from the built binary:
+/// `mantra status b.txt` in a directory holding no repository answered by
+/// CREATING one, called the whole file added, and left `.mantra/` behind. So a
+/// mistyped directory gained a repository, and a reading changed the world --
+/// which is the claim `foundations/20260823-222019_what-brix-infuse-is.md`
+/// makes about running a thing twice, failing on the first run.
+///
+/// The probe and the open are two steps on purpose. Asking `Store.open`
+/// whether a repository is there would answer by making one, so the question
+/// is put to the directory first and the answer is `null` with the refusal
+/// already printed.
+fn open_for_reading(io: std.Io, cwd: Dir, command: []const u8) ?Store {
+    // invariant: a refusal names the command it came from, so the line a
+    // person reads says what refused and what to run instead. One assert,
+    // because a directory handle carries no fact this function may state --
+    // what it protects is proven by tools/m/mantra_annotate_cli_witness.rish.
+    assert(command.len > 0);
+    _ = cwd.openDir(io, ".mantra", .{}) catch {
+        print("mantra {s}: no .mantra/ here -- run `mantra init` first\n", .{command});
+        return null;
+    };
+    return Store.open(io, cwd) catch |err| {
+        print("mantra {s}: cannot open .mantra/ ({})\n", .{ command, err });
+        return null;
+    };
+}
+
+fn cmd_init(allocator: std.mem.Allocator, io: std.Io) !u8 {
+    var store = Store.open(io, Dir.cwd()) catch |err| {
+        print("mantra init: could not create .mantra/: {}\n", .{err});
+        return 1;
+    };
+    _ = &store;
+    const maybe_brix = try read_brix(allocator, io, Dir.cwd());
+    if (maybe_brix) |s| {
+        print("mantra: initialized .mantra/ -- project '{s}' ({d} tracked file(s)).\n", .{
+            s.name, s.files.len,
+        });
+    } else {
+        print("mantra: initialized .mantra/ in the current directory.\n", .{});
+    }
+    return 0;
+}
+
+fn cmd_brix(allocator: std.mem.Allocator, io: std.Io) !u8 {
+    const maybe_brix = try read_brix(allocator, io, Dir.cwd());
+    if (maybe_brix == null) {
+        print("mantra: no .brix found in the current directory.\n", .{});
+        return 1;
+    }
+    const s = maybe_brix.?;
+    print("brix: {s}  version {s}  ({d} file(s))\n", .{ s.name, s.version, s.files.len });
+    for (s.files) |f| print("  file {s}\n", .{f});
+    return 0;
+}
+
+fn cmd_add(allocator: std.mem.Allocator, io: std.Io, file_path: []const u8) !u8 {
+    // invariant: an empty path names no file to add
+    assert(file_path.len > 0);
+    const cwd = Dir.cwd();
+    var store = Store.open(io, cwd) catch |err| {
+        print("mantra add: cannot open .mantra/ ({}) -- run `mantra init` first\n", .{err});
+        return 1;
+    };
+    const file_buf = try allocator.alloc(u8, max_working_file_bytes);
+    const file_content = cwd.readFile(io, file_path, file_buf) catch |err| {
+        print("mantra add: cannot read '{s}': {}\n", .{ file_path, err });
+        return 1;
+    };
+    // Record the current HEAD as parent before the new commit.
+    const parent_name = try store.read_head(allocator, io);
+    const prior       = try load_commit(allocator, &store, io);
+    var w             = try load_weave(allocator, &store, io, file_path);
+    const old         = try w.current(allocator);
+    const new         = try diff_mod.split_lines(allocator, file_content);
+    const d           = try diff_mod.diff(allocator, cli_site, old, new);
+    try w.apply(allocator, d);
+    const weave_blob  = try serialize_weave(allocator, &w);
+    const weave_name  = try store.write_blob(allocator, io, weave_blob);
+    const prior_files: []const FileWeave = if (prior) |c| c.files else &.{};
+    const files       = try commit_files_with(allocator, prior_files, file_path, weave_name);
+    // A second `add` over a file nobody edited names exactly the weaves HEAD
+    // already names, so a commit here would record the command rather than a
+    // change. Leaving HEAD where it stands is what makes `add` idempotent, and
+    // it is the difference between a store that grows with the work and one
+    // that grows with the polling: `cmd_log` walks at most `max_log_depth`
+    // commits, so a watcher calling `add` on a timer pushes the real first
+    // commit past the end of the log inside a day. Booked `20260910.024500`.
+    if (files_agree(prior_files, files)) {
+        // invariant: a list agreeing with the prior one holds at least one
+        // entry, so a commit stood at HEAD and its name is here to print
+        assert(prior_files.len >= 1);
+        print("mantra: '{s}' unchanged -- nothing to weave. HEAD stays {s}\n", .{
+            file_path, parent_name.?[0..12],
+        });
+        return 0;
+    }
+    const commit_blob = try serialize_commit(allocator, .{ .parent = parent_name, .files = files });
+    const commit_name = try store.write_blob(allocator, io, commit_blob);
+    try store.write_head(io, commit_name);
+    print("mantra: wove '{s}' -- +{d} -{d} lines. HEAD -> {s}\n", .{
+        file_path, d.inserts.len, d.deletes.len, commit_name[0..12],
+    });
+    return 0;
+}
+
+fn cmd_add_all(allocator: std.mem.Allocator, io: std.Io) !u8 {
+    const maybe_brix = try read_brix(allocator, io, Dir.cwd());
+    if (maybe_brix == null) {
+        print("mantra add: no .brix found -- either specify a file or create .brix\n", .{});
+        return 1;
+    }
+    const brix = maybe_brix.?;
+    print("mantra: adding {d} file(s) from .brix ({s})\n", .{ brix.files.len, brix.name });
+    var added: u32 = 0;
+    for (brix.files) |file_path| {
+        const rc = try cmd_add(allocator, io, file_path);
+        if (rc == 0) added += 1;
+    }
+    print("mantra: wove {d}/{d} file(s).\n", .{ added, brix.files.len });
+    return if (added == brix.files.len) 0 else 1;
+}
+
+fn cmd_log(allocator: std.mem.Allocator, io: std.Io) !u8 {
+    const cwd = Dir.cwd();
+    var store = open_for_reading(io, cwd, "log") orelse return 1;
+    var head: ?[]const u8 = try store.read_head(allocator, io);
+    if (head == null) {
+        print("mantra: no commits yet -- run `mantra add` to weave the first line.\n", .{});
+        return 0;
+    }
+    const max_log_depth: u32 = 1000; // bounded to prevent runaway chain walks
+    var depth: u32 = 0;
+    while (head) |commit_name| {
+        // invariant: depth stays within the stated bound
+        assert(depth <= max_log_depth);
+        const blob = try store.read_blob(allocator, io, commit_name);
+        if (!std.mem.startsWith(u8, blob, "mantra-commit-")) {
+            // Legacy v0: HEAD pointed directly to a weave blob.
+            print("  {s}  (weave, legacy)\n", .{commit_name[0..12]});
+            break;
+        }
+        const commit = try deserialize_commit(allocator, blob);
+        print("  commit {s}  {d} file(s)\n", .{ commit_name[0..12], commit.files.len });
+        for (commit.files) |fw| {
+            const shown = if (fw.path.len == 0) "(elder, unnamed)" else fw.path;
+            print("    {s}  weave {s}\n", .{ shown, fw.weave_name[0..12] });
+        }
+        head = commit.parent;
+        depth += 1;
+        if (depth > max_log_depth) {
+            print("  ... (depth limit -- stopping)\n", .{});
+            break;
+        }
+    }
+    print("({d} commit(s))\n", .{depth});
+    return 0;
+}
+
+fn cmd_status(allocator: std.mem.Allocator, io: std.Io, file_path: []const u8) !u8 {
+    // invariant: an empty path names no file to report on
+    assert(file_path.len > 0);
+    const cwd = Dir.cwd();
+    var store = open_for_reading(io, cwd, "status") orelse return 1;
+    const file_buf = try allocator.alloc(u8, max_working_file_bytes);
+    const file_content = cwd.readFile(io, file_path, file_buf) catch |err| {
+        print("mantra status: cannot read '{s}': {}\n", .{ file_path, err });
+        return 1;
+    };
+    var w       = try load_weave(allocator, &store, io, file_path);
+    const old   = try w.current(allocator);
+    const new   = try diff_mod.split_lines(allocator, file_content);
+    const d     = try diff_mod.diff(allocator, cli_site, old, new);
+    if (d.inserts.len == 0 and d.deletes.len == 0) {
+        print("mantra status: '{s}' -- clean\n", .{file_path});
+        return 0;
+    }
+    print("mantra status: '{s}' -- {d} added, {d} removed\n", .{
+        file_path, d.inserts.len, d.deletes.len,
+    });
+    for (d.inserts) |line| print("+ {s}\n", .{line});
+    for (d.deletes) |target| {
+        for (old) |line| {
+            if (line.id().eq(target)) { print("- {s}\n", .{line.text}); break; }
+        }
+    }
+    return 0;
+}
+
+/// The largest number of annotated lines one `mantra annotate` prints.
+///
+/// Named in LINES, because a reading is made for a person and a person reads
+/// lines. A weave may hold `weave.max_weave_lines` -- 1,048,576 -- and a
+/// terminal handed a million of them has been sent the file rather than shown
+/// the story. So the reading stops here and names the remainder in its own
+/// last line; a bound that truncated in silence would leave a reader believing
+/// they had seen the whole document.
+const max_annotate_print: u32 = 4096;
+
+/// The mark one line wears in the reading, read from the two parities the
+/// merge reads.
+///
+/// Parity is the tombstone in `mantra/src/weave.rye`, so `present_left` and
+/// `present_right` answer the whole question between them and no third field
+/// is consulted. The stored weave is the left side and the working file the
+/// right, which is what makes `+` mean *the working file holds it and the
+/// store does not*.
+///
+/// The fourth case -- neither side holding the line -- is a position deleted in
+/// an earlier commit and still gone. `cmd_annotate` counts it and moves on
+/// without printing, so `x` reaches a terminal only when that skip is broken;
+/// it is named here rather than left to a default arm, because the four parity
+/// pairs are the whole enumeration and a reader deserves to see all four.
+fn annotate_mark(note: weave.Note) []const u8 {
+    // invariant: a note names a position at least one side has seen, since a
+    // position neither weave holds never enters the union at all
+    assert(note.left_gen != 0 or note.right_gen != 0);
+    // invariant: the merged count stands at one or above, because zero is the
+    // count reserved for a side that has never seen the position and at least
+    // one side has
+    assert(note.gen() >= 1);
+    if (note.present_left() and note.present_right()) return "  ";
+    if (note.present_right()) return "+ ";
+    if (note.present_left()) return "- ";
+    return "x ";
+}
+
+/// `mantra annotate <file>` -- the story the weave tells about one file.
+///
+/// WHAT IT SHOWS. `mantra status` answers how many lines moved; this answers
+/// what each line DID. Every line the document shows comes back with a mark:
+/// two spaces for a line both sides hold, `+` for one the working file added,
+/// `-` for one it removed. The marks come from `Weave.annotate`, so the story
+/// and the merge read the same two generation counts and cannot drift into two
+/// answers.
+///
+/// WHY TWO LOADS RATHER THAN ONE COPY. The left side must stand exactly as the
+/// store handed it while the right carries the working file's edit, and
+/// `load_weave` is the one function that knows how HEAD reaches a file's
+/// weave. Asking it twice keeps one answer about that path; a hand-written
+/// deep copy beside it would be a second answer waiting to disagree.
+///
+/// WHAT IT NEVER DOES. A reading writes nothing: no blob is stored and HEAD
+/// stays where it stands, which is what lets a person run this as often as
+/// they like on a repository they are unsure of.
+fn cmd_annotate(allocator: std.mem.Allocator, io: std.Io, file_path: []const u8) !u8 {
+    // invariant: an empty path names no file to read
+    assert(file_path.len > 0);
+    const cwd = Dir.cwd();
+    var store = open_for_reading(io, cwd, "annotate") orelse return 1;
+    const file_buf = try allocator.alloc(u8, max_working_file_bytes);
+    const file_content = cwd.readFile(io, file_path, file_buf) catch |err| {
+        print("mantra annotate: cannot read '{s}': {}\n", .{ file_path, err });
+        return 1;
+    };
+    var base = try load_weave(allocator, &store, io, file_path);
+    var work = try load_weave(allocator, &store, io, file_path);
+    const old = try base.current(allocator);
+    const new = try diff_mod.split_lines(allocator, file_content);
+    const d = try diff_mod.diff(allocator, cli_site, old, new);
+    try work.apply(allocator, d);
+    const notes = try base.annotate(allocator, &work);
+
+    // invariant: both sides stand inside the weave's own ceiling, which is what
+    // makes the two casts below safe rather than hopeful
+    assert(base.lines.items.len <= weave.max_weave_lines);
+    assert(work.lines.items.len <= weave.max_weave_lines);
+    // invariant: the union carries one note per identity and `annotate` refuses
+    // a union past the ceiling, so the count fits the width the walk uses
+    assert(notes.len <= weave.max_weave_lines);
+    // usize lives at the inherited-std seam alone: a slice counts in usize, and
+    // the three bounds just asserted are what make these casts safe.
+    const base_len: u32 = @intCast(base.lines.items.len);
+    const work_len: u32 = @intCast(work.lines.items.len);
+    const note_len: u32 = @intCast(notes.len);
+
+    // Notes, base lines and work lines all arrive in place order, so one walk
+    // through each finds every note's text -- rather than searching a side per
+    // note, which would cost the reading a factor it has no need to spend.
+    var li: u32 = 0;
+    var ri: u32 = 0;
+    var unchanged: u32 = 0;
+    var added: u32 = 0;
+    var removed: u32 = 0;
+    var gone: u32 = 0;
+    var printed: u32 = 0;
+    var held: u32 = 0;
+    for (notes) |note| {
+        while (li < base_len and base.lines.items[li].place().less_than(note.place())) li += 1;
+        while (ri < work_len and work.lines.items[ri].place().less_than(note.place())) ri += 1;
+        if (note.present_left() and note.present_right()) {
+            unchanged += 1;
+        } else if (note.present_right()) {
+            added += 1;
+        } else if (note.present_left()) {
+            removed += 1;
+        } else {
+            // A line deleted in an earlier commit and still gone. Both sides
+            // agree it left the document, so it is counted and left unprinted:
+            // a reading of what the file says today has no line to show for it.
+            gone += 1;
+            continue;
+        }
+        const from_work = ri < work_len and work.lines.items[ri].id().eq(note.id());
+        const from_base = li < base_len and base.lines.items[li].id().eq(note.id());
+        // invariant: a note comes from the union of the two sides, so at least
+        // one of them holds the line whose text this reading is about
+        assert(from_work or from_base);
+        const text = if (from_work) work.lines.items[ri].text else base.lines.items[li].text;
+        if (printed < max_annotate_print) {
+            print("{s}{s}\n", .{ annotate_mark(note), text });
+            printed += 1;
+        } else {
+            held += 1;
+        }
+    }
+    // invariant: every note was counted exactly once, so the summary below
+    // describes the whole reading rather than a sample of it
+    assert(unchanged + added + removed + gone == note_len);
+    // invariant: the reading stopped at its own ceiling rather than past it
+    assert(printed <= max_annotate_print);
+    print("mantra annotate: '{s}' -- {d} unchanged, {d} added, {d} removed\n", .{
+        file_path, unchanged, added, removed,
+    });
+    if (held > 0) {
+        print("mantra annotate: {d} further line(s) held -- the reading stops at {d}\n", .{
+            held, max_annotate_print,
+        });
+    }
+    return 0;
+}

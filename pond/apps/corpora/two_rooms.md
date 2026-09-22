@@ -1,0 +1,246 @@
+# Two Rooms -- The Checkable and the Visionary
+
+**Language:** EN
+**Last updated:** `20260916.034104` (the living ratchet reached zero on `20260911.160504` and this page said so five days late -- each figure now names what holds it still; elder refresh: the door is the head and two keys open it -- `**Status:**` or `**Room:**`; the token is a word rather than a substring; the three questions a Status line answers seated `20260907.015907` -- elder refresh `20260717`, Quin voice)
+**Style:** Gauge (see `GAUGE_STYLE.md`)
+**Voice:** Quin
+**Status:** Seated -- checkable-room canon; reviewed and kept `20260705.203144 UDT`; doorway witness from that stamp forward (`tools/t/two_rooms_doorway.rish`)
+**Ground:** drafted from the second harvest
+([`external-research/20260703-071712_the-second-harvest.md`](../external-research/20260703-071712_the-second-harvest.md));
+vocabulary companions:
+[`20260704-024800_the-checkable-room.md`](../external-research/20260704-024800_the-checkable-room.md) -
+[`20260704-024900_claim.md`](../external-research/20260704-024900_claim.md) -
+[`20260704-025600_claims-happy-zone-and-grain.md`](../external-research/20260704-025600_claims-happy-zone-and-grain.md) -
+[`20260704-024600_two-rooms-on-the-metal-path.md`](../external-research/20260704-024600_two-rooms-on-the-metal-path.md);
+metal-path cases seated above; forward-facing pages name their room from stamp `20260705.203144` -- [`specs/20260705-203144_canonical-glosses.md`](specs/20260705-203144_canonical-glosses.md)
+
+---
+
+## Why Two Rooms
+
+This project receives two kinds of material, and both are welcome. One kind can be bound by a
+witness today: a digest, a gate count, a policy whose reward can be measured against its
+outcome. The other kind orients before it can be proven: the two-layer image of buried cable and
+living air, the health of pollinators as the measure of an invisible commons, give back more
+than you take, let the circle close. The first kind belongs to the bench. The second kind
+belongs to the vision register. Trouble begins when the two share a room without saying so
+-- when a beautiful guess borrows the bench's authority, or when the bench spends its rigor
+mocking an image that was doing honest orienting work. The discipline is therefore architectural:
+**give each register a room of its own, and name the room at the door.**
+
+Quin keeps the same law in prose that TAME keeps in code: **witness before narrative** -- mark
+what is proven as proven and what is proposed as proposed (`QUIN.md` - root rule **9**, docs and
+implementation stay synced). A living claim about behavior earns the checkable room only when a
+witness binds it; until then it speaks from the vision room, or as honest horizon.
+
+## The Checkable Room
+
+The checkable room is the bench's world, and its law is already canon: only what a witness can
+bind enters as fact, and the bench pins what it reports. Code, gates, arithmetic, verified
+policy ground, figures with sources -- these live here, and their sentences carry the register's
+plain confidence. Nothing in this note weakens that law by a hair. Fuller definition:
+[`external-research/20260704-024800_the-checkable-room.md`](../external-research/20260704-024800_the-checkable-room.md).
+Claim vocabulary:
+[`external-research/20260704-024900_claim.md`](../external-research/20260704-024900_claim.md).
+Braid with grain and happy zone:
+[`external-research/20260704-025600_claims-happy-zone-and-grain.md`](../external-research/20260704-025600_claims-happy-zone-and-grain.md).
+
+Landed edges in this room prefer **nib** vocabulary in new prose -- product nib - suite nib -
+git nib -- so the pen's place is named without borrowing git's tip metaphor (`LEXICON.md`).
+
+## The Vision Room
+
+The vision room holds the images that orient the work: the poetics that feed Linengrow's voice,
+the devotional essay lane, the figures a foundations letter reaches for when it must say why
+before it can say how. Material in this room frames itself as vision -- beautiful guesses that
+earn their proof later, imagination doing the work imagination is for. The room is honored, not
+humored: an orienting image can steer years of checkable work, and the project keeps such
+images deliberately, in their own strong voice.
+
+## The Rules of the Doorway
+
+A piece names its register at the top, in its status line, so no reader has to guess which room
+they are standing in. Vision never cites the bench: an image may inspire a witness, and until
+the witness runs green the image remains an image, quoted as one. The bench never borrows the
+vision's warmth as evidence, and never spends its rigor mocking the vision's reach. A claim
+crosses from the vision room to the checkable room by exactly one door -- it earns a witness --
+and the crossing is recorded like any other graduation. And when visionary material arrives
+carrying a testable spark, the spark is parked to RTAC as a question, so the vision keeps its
+voice and the bench keeps its queue.
+
+**Doorway witness vocabulary.** From seating stamp `20260705.203144` forward, every
+one-clock-stamped page under the doorway roster carries a `**Status:**` line whose first lines
+name the room in words the witness can bind. Accepted room tokens (case-insensitive) are:
+
+| Token | Room |
+|---|---|
+| `checkable` | Checkable room |
+| `vision` | Vision room |
+| `mixed` | Both registers named on purpose |
+| `research for understanding` | Vision-leaning study -- orients; seats no fact |
+
+The witness is [`../tools/t/two_rooms_doorway.rish`](../tools/t/two_rooms_doorway.rish). A Status that
+says "design" or "study" alone, without one of those tokens, does not yet name the room.
+
+**The door is the head, and two keys open it** (amended `20260907.094712`). A page may carry the
+token in its `**Status:**` line or in a `**Room:**` line, and the witness reads both. Nine pages
+under the doorway roster answered under `**Room:**`, two of them spelling `Mixed` -- this table's
+own token, at the door, in this page's own word -- and were counted as pages naming no room at all.
+
+**A living page is read too, and it was the larger half** (amended `20260911.023000`). The witness
+gated a page whose basename carries a one-clock stamp and passed every other page as
+*grandfathered*, on the reasoning that a missing stamp means the page predates the seating. The
+mark law reads the same absence the other way -- *a file whose own basename carries a one-clock
+stamp is testimony, and everything else is living*
+([`stamp-and-name`](../.claude/rules/stamp-and-name.md)) -- so the exemption stood over exactly the
+pages a reader meets first. Measured on the amending lap: 1,254 pages, 138 of them stampless, and
+**106 of those named no room**, against a dated reading of 3. Both numbers are reported now, each
+under its own ceiling, because a page never changes class and one merged number would let a living
+repair hide a dated regression. Sixteen doors were named the same lap and the living ceiling opens
+at 90.
+
+**And this room paid its own share the next lap** (`20260911.032352`). The 23 living pages of
+`context/` that named no room are this tree's core guides -- `GAUGE_STYLE.md`, `TAME_CORE.md`,
+`LEXICON.md`, the three alternate registers, the voice notes -- so the room housing this law was
+the last room whose own front matter never answered it. Each carries a `**Room:**` line beside what
+its Status already said, judged from the body rather than the title: **6 `checkable`** where a
+witness or a rule file binds every claim, **8 `mixed`** where a counted half stands beside a judged
+one, **9 `vision`** where a voice or a discipline is held by taste. `context/` reads 99 pages and
+**0** living-silent, and the ceiling falls **90 to 67**. The room-at-a-time door is `%642`'s, and it
+costs no word: a room joins free by being repaired.
+
+**And the shipping shelf paid its share the same day** (`20260911.081500`). The 8 living
+`docs-geode/` pages naming no room are the shelf a newcomer is sent to -- the Rishi reference, the
+three Sangha patterns, the naming study, and the three tutorials -- so the room that teaches this
+tree to a stranger answered every question at its door except which register the stranger was
+standing in. Each took a `**Room:**` line judged from the body: **6 `checkable`** where a witness
+binds every claim, **1 `mixed`** -- [`the-first-hour.md`](../docs-geode/tutorials/the-first-hour.md),
+whose quoted endings `tools/fixtures/t/tutorial_output_scan.sh` runs and whose welcome is judged --
+and **1 `vision`**, [`SHOPPING.md`](../docs-geode/tutorials/SHOPPING.md), a method that names no
+winner and quotes no price, so no guard could bind a sentence of it. `docs-geode/` reads 18 pages
+and **0** living-silent; the ceiling falls **67 to 59**, moved by the eight and by nothing else.
+The remainder is 33 `active-designing/`, 20 `manual/`, 6 `external-research/`.
+
+**And the OS manual paid its share** (`20260911.114108`). The 20 living `manual/` pages naming no
+room are the manual itself -- eight setup and operating guides a person follows on their own
+machine, the overview and the variant template, three reference pages, two tutorials, and three
+video scripts. **The room never regressed.** It joined this roster on `20260908` reading 0 silent,
+and the `20260911` amendment above, which reads a stampless basename as **living** rather than
+elder, reopened 20 of its 29 doors in one reading -- the amendment working rather than the room
+slipping. Each took a `**Room:**` line judged from the body: **9 `checkable`** where a command
+answers for itself or a named witness binds the page, **8 `mixed`** where a proven half stands
+beside an unproven one, and **3 `vision`** where the page is held by taste. The clearest `mixed` is
+[`pixel-10a-grapheneos-setup.md`](../manual/guides/pixel-10a-grapheneos-setup.md), whose steps are
+transcribed verbatim from a cited installer page -- checkable against that source -- while its own
+Status says the end-to-end run stands unproven here. The clearest `vision` is
+[`apprentice-welcome.md`](../manual/guides/apprentice-welcome.md), a person-to-person letter no
+guard binds a sentence of. `manual/` reads 29 pages and **0** living-silent; the ceiling falls
+**59 to 39**, moved by the twenty and by nothing else, and the remainder is 33 `active-designing/`
+and 6 `external-research/`.
+
+**And the living ratchet reached zero the same day, which this page records only now** (`20260911.160504`,
+commit `42826c45d`). The 39 remaining living pages each took a `**Room:**` line, and
+`living_ceiling` in
+[`../tools/fixtures/t/two_rooms_doorway_scan.rish`](../tools/fixtures/t/two_rooms_doorway_scan.rish)
+fell **39 to 0**. Thirty were ALES fill captures reading `mixed`, since each carries a *What the
+witness proves* section beside a *The road on* section and that structure is the reading; six were
+the lineage silos reading `research for understanding`, the first room where the fourth token
+answers every page in it; and three were `active-designing` pages -- the Constel naming law and the
+two hammocks -- each `mixed` for a reason of its own. **A ratchet at zero is a wall, and this one
+holds structurally:** a living path may always be repaired, so a living page stays silent only until
+a hand reaches it. The dated floor keeps its **3**, since accrete-never-break holds those three
+exactly as written.
+
+**Read on metal `20260916.033406`**, five days after that close: **1,328 pages, 619 folded shelves
+reached, 138 stampless, `living_silent=0` against `living_ceiling=0`, and `fails=3` against
+`ceiling=3`.** The two zeros are **walled** -- the guard reds on the lap either one moves. The
+counts of pages, shelves, and stampless heads are **free**, rising with every page this tree writes,
+so run the reading rather than trusting this line:
+
+```
+rishi/bin/rishi run tools/fixtures/t/two_rooms_doorway_scan.rish
+```
+
+**What the five quiet days cost, and the shape of the fault.** Every fall above narrates itself --
+106 to 90, 90 to 67, 67 to 59, 59 to 39 -- and the last one stood in the scan alone. So this page
+closed on *the remainder is 33 `active-designing/` and 6 `external-research/`* while the wall read
+zero, and it read as a bare fact rather than as a figure with a stamp. A rota lap meets that
+sentence on its Earth-Fixed seat once per orbit
+([`the earth row`](../foundations/20260826-021735_earth-the-row-that-breathes-in.md)), where the
+reading is the concrete fact taken in at the door. **A number narrated in prose is a number no
+instrument reads.**
+[`../tools/fixtures/d/declared_ceiling_scan.sh`](../tools/fixtures/d/declared_ceiling_scan.sh) gates
+that exact fault at zero -- *a declaration a tool cannot read* -- and it reaches a page's
+`**Ceiling:** <=N lines` and `**Bound:**` headers while a sentence stays outside it. `docs/CRYPTO.md`
+taught the shape by replacing its header with a paragraph about its own drift; this page taught it
+again by narrating a ceiling it declares nowhere. **Whether a law page's narrated ceiling earns a
+machine-readable declaration beside it is a style law and waits on the maintainer's word.** What a hand
+supplies meanwhile is what this amendment supplies: each figure named with what holds it still, so a
+free one reads as free.
+
+**The grade said A and the drift was in the half it left unread.** `qa_report_card.sh` scored this
+page **A/92** at Field an hour before the amendment -- register scored, reach 100, service 100, and
+**`truth=100` at `truth_mode=counted`**, all 16 cited paths resolving. Every path did resolve, and
+the stale sentence carries a number where a path would have been read. That is the third recorded firing of the reading
+[`quality-assurance`](../.claude/rules/quality-assurance.md) names -- a page scoring `A+/98` as its
+own elder, and `docs-geode/README.md` teaching 1,004 pages where its scan answered 1,261 -- so
+handing in `--truth` is what closes a Truth reading on a page whose claims carry numbers.
+
+**And this page's own door was among them.** The witness read the first head line carrying
+`**Status:**` anywhere, and the `Last updated` line above quotes both key names, so the reading
+returned that sentence and called this page silent three lines above a Status reading
+`checkable-room canon`. A key's own line is preferred now; the anywhere-in-line match stays as the
+fallback a shared header row needs.
+
+**Two laws use the word room, so a `**Room:**` line may be answering the other one.** This page
+names a **register**; [`../.claude/rules/design-rooms.md`](../.claude/rules/design-rooms.md) names a
+**directory**, decided by *would this still be worth reading if the code were deleted?* So
+`**Room:** Design essay -- worth reading with the code deleted` is an honest answer to a different
+question, still names no register, and is still counted -- named now as a Room line rather than
+misreported as a missing Status.
+
+**The token is a word rather than a substring.** Measured `20260907`, three post-seating pages read
+as naming a room on the letters inside `provisioned` and `divisional`. `Visionary` is kept on
+purpose: `**Status:** Visionary room` is an honest naming of the vision room. And a grep reads
+presence rather than assertion -- one page read as checkable off the sentence *nothing here is
+checkable until a witness binds it* -- so the last reader of a door is still a reader.
+
+**The Status line answers more than one question, and the doorway reads one of them.** A page's
+`**Status:**` line gets asked for three different things at once, and the three come apart cleanly:
+
+| The question | The words that answer it | Who reads the answer |
+|---|---|---|
+| Where does this page stand in its life? | `Living`, `Landed`, `Seated`, `Design`, `Fossil`, `Elder` | a reader deciding whether to trust it as current |
+| Has a witness bound this claim yet? | `proven`, `proposed` | *witness before narrative*, above |
+| Which room does this page speak from? | `checkable`, `vision`, `mixed`, `research for understanding` | the doorway witness |
+
+**Carry the room token beside whatever else the line says.** Most of the tree already writes this
+way: measured `20260907` over tracked Markdown, **69** Status lines name `proposed` and **44 of
+them name a room token in the same line** -- `Mixed -- proposed`, `Proposed -- research for
+understanding`, `Vision -- ... a proposal, not a bound claim`. The habit is older than this
+paragraph, which is what makes it worth writing down.
+
+**`proposed` stays off the table above**, and the reason takes one sentence: a proposed claim lives
+in either room. A design a witness will bind next week is a proposed **checkable** claim; an image
+that orients years of work is **vision**. So the word says how far along a claim is, and leaves the
+register open -- which puts a Status naming only `proposed` exactly where one naming only `design`
+already stands.
+
+**What the quiet costs, measured `20260907`.** The doorway read 45 pages that name no room. Twenty-three
+named a lifecycle word and stopped there -- eleven `Living`, four `Landed`, two each of `Proposed`
+and `Design`, one each of `Seated`, `GRANTED`, `Fossil`, and `Elder`. Twenty-one carried no
+`Status` line at all, and one named its genre. Each of those twenty-three answers a real question
+honestly; the doorway asks a different one, and this page had yet to say so.
+
+## How a Session Holds Visionary Material
+
+Receive it with warmth and read it whole; the register deserves the same full attention as a
+spec. Silo its poetics toward the voice lanes it feeds -- Linengrow's writing, the devotional
+essays, the foundations letters -- in the project's own vocabulary, with the teachers thanked in
+the gratitude room. Name its register plainly in anything it feeds. Keep reporting only what
+the bench shows. Both rooms stay strong precisely because neither pretends to be the other.
+
+---
+
+*May the images stay bright and the witnesses stay strict. May every piece say which room it
+speaks from. And may the door between them open only one way -- by proof, with gladness.*

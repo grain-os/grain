@@ -1,0 +1,29 @@
+# caravan_subscribe_poll_mirror_service_witness.rish -- host mirror under Caravan supervision.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/ca/caravan_subscribe_poll_mirror_service_witness.rish
+
+let zig = "vendor/zig-toolchain/zig"
+let delivery = "mantra/bin/recall-subscribe-poll-delivery"
+let service = "caravan/bin/subscribe-poll-service"
+# THE PEN IS UNIQUE PER RUN, and the elder name leaves with it. `/tmp/acme-owner*` was a
+# CONSTANT shared by six files, so two of them running at once -- or one witness on each of eight
+# ships -- collide on one stop sentinel: one run's prep `rm -f` deletes the stop signal another
+# run just wrote to halt its service, and a service that never stops hangs a witness or, worse,
+# stops early and inverts its result. Each file is self-contained, so a per-run pen breaks no
+# contract (%618/%601). The elder repository name is breached to `grain` here and kept in history
+# and in dated testimony, which is where a superseded name belongs (`20260908.180000`).
+let mk = run ["sh" "-c" "mktemp -d /tmp/grain_poll.XXXXXX"]
+assert mk.ok else "poll pen: the pen could not be opened"
+let pen = trim mk.out
+let sentinel = "${pen}/mirror-stop"
+
+let build = run ["sh" "-c" "mkdir -p mantra/bin caravan/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh mantra/recall_subscribe_poll_delivery.rye -lc -femit-bin=${delivery} && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh caravan/subscribe_poll_service.rye -lc -femit-bin=${service}"]
+assert build.ok else "subscribe poll mirror service build failed -- ${build.err_brief}"
+
+let run = run ["sh" "-c" "rm -f ${sentinel} && CARAVAN_WITNESS_MODE=1 CARAVAN_WITNESS_MIRROR=1 ${service} ${delivery} ${sentinel} 2 2>&1"]
+assert run.ok else "subscribe poll mirror service supervisor exited non-zero"
+assert run.out contains "host mirror cycle" else "mirror fetcher cycle not logged"
+assert run.out contains "supervised host mirror" else "mirror supervisor not GREEN"
+
+say "GREEN: Caravan supervised host mirror witness passed."

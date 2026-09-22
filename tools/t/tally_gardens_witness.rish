@@ -1,0 +1,38 @@
+# tally_gardens_witness.rish -- Tally gardens bounds on metal (Arc IV Tighten).
+#
+# Proves the named garden module builds, holds its selftest facts, and that
+# the living bounds in source stay the seated constants (max_gardens - max_name_len).
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/t/tally_gardens_witness.rish
+
+let zig = "vendor/zig-toolchain/zig"
+let bin = "tally/bin/tally-gardens"
+
+say "tally-gardens: build..."
+let build = run ["sh" "-c" "mkdir -p tally/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh tally/gardens.rye -femit-bin=${bin}"]
+assert build.ok else "tally gardens build failed"
+
+say "tally-gardens: selftest..."
+let self = run ["sh" "-c" "${bin} 2>&1"]
+assert self.ok else "tally gardens selftest exited non-zero"
+assert self.out contains "tally gardens: all facts held" else "tally gardens selftest missing facts line"
+
+# Bound pins -- tighten means these numbers stay named and witnessed, not silent
+let max_g = run ["sh" "-c" "grep -E '^pub const max_gardens: u32 = 8;$' tally/gardens.rye"]
+assert max_g.ok else "max_gardens must remain the seated bound 8"
+
+let max_n = run ["sh" "-c" "grep -E '^pub const max_name_len: u32 = 32;$' tally/gardens.rye"]
+assert max_n.ok else "max_name_len must remain the seated bound 32"
+
+# The two bounds above are numbers; these are the refusals that keep them. `add` declared
+# itself fallible from 20260620 and returned no error at all until 20260910, so both ceilings
+# and the no-duplicate rule stood on asserts a release build removes. The module's own main
+# asks for each from the failing side; this pins that the names stay named.
+let refusals = run ["sh" "-c" "grep -c -E '^    (NameEmpty|NameTooLong|Full|DuplicateName),$' tally/gardens.rye"]
+assert refusals.out contains "4" else "GardensError must keep its four named refusals -- NameEmpty, NameTooLong, Full, DuplicateName"
+
+let admits = run ["sh" "-c" "grep -c -F 'try self.admits' tally/gardens.rye"]
+assert admits.out contains "2" else "both add and add_division weigh the admission, and add_division does it before divide carves the parent"
+
+say "GREEN: tally gardens -- facts held; max_gardens=8 and max_name_len=32 pinned, each refused by name."

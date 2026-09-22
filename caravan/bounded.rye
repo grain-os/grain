@@ -1,0 +1,194 @@
+//! Caravan bounded -- supervision composed with bounded memory.
+//!
+//! The Caravan seed proved one thing: a parent watches a dependent and
+//! restarts it on fall. This program proves the next: a dependent that
+//! works inside a bounded Tally garden, allocates within the budget,
+//! and the parent verifies the dependent ran within its bounds.
+//!
+//! The composition: supervision (Caravan) + bounded memory (Tally),
+//! running together in one program. The dependent creates its own garden,
+//! works in it, asserts the invariants hold, and exits. The parent
+//! supervises with restart-on-fall, just as before.
+//!
+//! This is the step between the seed and the microkernel. In the full
+//! Caravan, the parent issues a capability to a shared Tally region;
+//! here the dependent proves it can live within a bound it states for
+//! itself. Honesty before enforcement.
+//!
+//! Usage:
+//!   bounded                Run as supervisor
+//!   bounded dependent          Run as bounded dependent (allocate within garden)
+//!   bounded dependent fail     Run as bounded dependent that exceeds its garden
+
+const std = @import("std");
+const assert = std.debug.assert;
+const print = std.debug.print;
+
+const caravan_bounded_version = "20260621.015712";
+
+// =========================================================================
+// § The bounded region -- lifted to caravan/region.rye on 20260825.010500
+// =========================================================================
+//
+// This rung held a byte-for-byte copy of the region, as did `chain.rye` and `twin.rye`. Three
+// copies meant a comment written into it cost three times what it read, so the carry meter refused
+// the invariants the law asks for. The body lives in one module now and this names it.
+// `caravan_region`, never `region`: two of these three rungs already bind a local `var region`
+// to an instance, and an import sharing that name shadows it.
+const caravan_region = @import("region.rye");
+const Region = caravan_region.Region;
+const buf_len_u32 = caravan_region.buf_len_u32;
+
+// =========================================================================
+// § Supervisor constants
+// =========================================================================
+
+/// The dependent's memory budget -- 256 bytes. Small on purpose: the proof
+/// is in the bound, not in the size.
+const dependent_budget: u32 = 256;
+
+/// Maximum restarts before the supervisor gives up.
+const max_restarts: u32 = 5;
+
+/// Planned failures: the dependent will exceed its garden once, get
+/// restarted, then run within bounds and succeed.
+const planned_failures: u32 = 1;
+
+// =========================================================================
+// § Entry point -- dispatch on mode
+// =========================================================================
+
+pub fn main(init: std.process.Init) !u8 {
+    const io = init.io;
+    const allocator = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(allocator);
+
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "dependent")) {
+        const should_fail = args.len >= 3 and std.mem.eql(u8, args[2], "fail");
+        return run_bounded_dependent(should_fail);
+    }
+
+    return run_supervisor(allocator, io, args);
+}
+
+// =========================================================================
+// § Bounded dependent -- works inside a Tally garden
+// =========================================================================
+
+fn run_bounded_dependent(should_fail: bool) u8 {
+    // Create a garden with a stated budget.
+    var backing: [dependent_budget]u8 = undefined;
+    var garden = Region.init(&backing);
+
+    // invariant: garden starts full
+    assert(garden.remaining() == dependent_budget);
+
+    // Allocate within the budget -- 64 bytes, well within 256.
+    const work_slice = garden.alloc(64) catch {
+        print("bounded dependent: allocation failed unexpectedly\n", .{});
+        return 1;
+    };
+
+    // postcondition: we got exactly what we asked for
+    assert(work_slice.len == 64);
+    // postcondition: remaining decreased by the allocation
+    assert(garden.remaining() == dependent_budget - 64);
+
+    // Write something into the allocated space to prove it's real memory.
+    for (work_slice) |*byte| byte.* = 0xAA;
+
+    if (should_fail) {
+        // Deliberately exceed the budget -- ask for more than remains.
+        // This simulates a dependent that falls from overallocation.
+        const too_much = garden.remaining() + 1;
+        _ = garden.alloc(too_much) catch {
+            print("bounded dependent: exceeded garden (intended failure)\n", .{});
+            return 1;
+        };
+        // unreachable if the garden bound holds -- which it does
+    }
+
+    // Allocate the rest of the budget -- fill to the edge.
+    const rest = garden.alloc(garden.remaining()) catch {
+        print("bounded dependent: edge allocation failed\n", .{});
+        return 1;
+    };
+    // postcondition: garden is exactly full
+    assert(garden.remaining() == 0);
+    assert(rest.len == dependent_budget - 64);
+
+    // Clear whole -- the season ends.
+    garden.clear();
+    // postcondition: garden is fully available again
+    assert(garden.remaining() == dependent_budget);
+
+    print("bounded dependent: garden held. budget {d}, used {d}, cleared.\n", .{
+        dependent_budget, dependent_budget,
+    });
+    return 0;
+}
+
+// =========================================================================
+// § Supervisor -- watches the bounded dependent
+// =========================================================================
+
+fn run_supervisor(allocator: std.mem.Allocator, io: std.Io, args: []const [:0]const u8) !u8 {
+    // invariant: we have at least argv[0]
+    assert(args.len >= 1);
+    const self_path = args[0];
+
+    print("caravan bounded: supervisor alive. budget {d} bytes, planned failures: {d}\n", .{
+        dependent_budget, planned_failures,
+    });
+
+    var restarts: u32 = 0;
+
+    while (true) {
+        // invariant: restarts bounded
+        assert(restarts <= max_restarts);
+
+        // First dependent exceeds its garden (planned failure); subsequent dependents stay within.
+        const dependent_arg: []const u8 = if (restarts < planned_failures) "fail" else "ok";
+
+        const argv = try allocator.alloc([]const u8, 3);
+        assert(argv.len == 3);
+        argv[0] = self_path;
+        argv[1] = "dependent";
+        argv[2] = dependent_arg;
+
+        var dependent = std.process.spawn(io, .{ .argv = argv }) catch |err| {
+            print("caravan bounded: could not start dependent ({s})\n", .{@errorName(err)});
+            return 1;
+        };
+
+        const term = try dependent.wait(io);
+        const code: u8 = switch (term) {
+            .exited => |c| c,
+            else => 255,
+        };
+
+        if (code == 0) {
+            print("caravan bounded: dependent exited cleanly after {d} restart(s).\n", .{restarts});
+            break;
+        }
+
+        restarts += 1;
+        print("caravan bounded: dependent fell (code {d}), restart {d}/{d}\n", .{
+            code, restarts, max_restarts,
+        });
+
+        if (restarts >= max_restarts) {
+            print("caravan bounded: restart limit reached.\n", .{});
+            return 1;
+        }
+    }
+
+    // postcondition: restarts match the plan
+    assert(restarts == planned_failures);
+    // postcondition: within the limit
+    assert(restarts < max_restarts);
+
+    const total_assertions: u32 = planned_failures + 2 + 7; // supervisor + dependent garden assertions
+    print("caravan bounded: {d} assertion(s) confirmed. supervision + bounded memory proven GREEN.\n", .{total_assertions});
+    return 0;
+}

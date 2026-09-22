@@ -1,0 +1,81 @@
+# The Manual -- Four Rooms for One System
+
+**Language:** EN
+**Last updated:** `20260908.071909` -- the boundary sentence at the door, naming the three prose rooms (elder: 2026-07-18, Glow eight heads synced - Acme tutorial voice)
+**Style:** Gauge, Door setting (see `../context/GAUGE_STYLE.md`)
+**Voice:** Quin
+**Audience:** Acme Corporation employees - operators on this tree
+**Members:** the rooms under [`./`](./) -- `grain-os`, `guides`, `reference`, `tutorials`, `video-scripts`
+**Status:** Founded -- reference at parity **142**; two tutorials open (first-witness - run-record), Cursor-and-the-compass retired `20260920.135100`; Caravan and Tally reference partial; Grain OS onboarding under `grain-os/`; Pixel/HAWM/TUBE/JABS path indexed
+**Where this sits:** home is [`../README.md`](../README.md) - a first hour in your hands is
+[`../docs-geode/tutorials/the-first-hour.md`](../docs-geode/tutorials/the-first-hour.md) - the whole
+path from nothing to a signed, sandboxed home is [`../SOURCE.md`](../SOURCE.md)
+
+---
+
+The manual teaches what already runs, and it has four rooms, each answering a different visitor. The four are **registers** rather than directories -- the `**Members:**` key above names the directories on disk, and one of the four lives outside this lane entirely. **Tutorials** teach by the hand -- Radiant and gentle, each one ending at a green witness. **Guides** serve the person mid-task. **Reference** serves the person looking something up: one living, versioned specification per stable surface. **Understanding** lives where it always has -- the essays in `foundations/` and the design records in `active-designing/` -- and this README points there rather than duplicating them.
+
+**Three prose rooms stand in this tree, and the manual is the one about your own machine.** Here you turn on disk encryption, raise a VPN, build an enclosure, flash a phone, and make your own key cards. [`../docs-geode/`](../docs-geode/README.md) is the shipping shelf, for the reader who receives the product rather than operates it; its [First Hour](../docs-geode/tutorials/the-first-hour.md) is the living beginner path, which is why this page's own header points there. [`../docs/`](../docs/README.md) is the compression shelf, one operator page per chapter for a hand already mid-run.
+
+Two front doors share this house. The **language path** teaches what you can type and witness today (Rishi; Glow runes as design + small prototypes). The **device path** teaches GrapheneOS on Pixel hardware and the HAWM/TUBE ladders. They meet at packaging -- see [`../docs/TUBE.md`](../docs/TUBE.md).
+
+The lane grows by the same law as the code: reference specifications open only when a surface stops moving, and every example in every room is drawn from the witnessed collection. The manual promises only what parity already shows.
+
+---
+
+## Two front doors
+
+### Language path (what you can type)
+
+| Surface | Role | Register |
+|---------|------|----------|
+| [`tutorials/first-witness.md`](tutorials/first-witness.md) | First `.rish` witness | Checkable |
+| [`tutorials/run-record-and-failures.md`](tutorials/run-record-and-failures.md) | Run-record fields and failures | Checkable |
+| [`cursor-and-the-compass.md`](../.cursor-archive/manual-tutorials/cursor-and-the-compass.md) | Foundations - witness habitat - Cursor rules - log - send | Fossil -- retired `20260920.135100` |
+| [`reference/rishi-language.md`](reference/rishi-language.md) | Rishi language reference (parity **142**) | Checkable |
+| [`../glow/`](../glow/) | Eight rune heads + desk generators (`glow/gen/`) | Checkable -- pin [`../glow/README.md`](../glow/README.md) |
+| Acme Glow first code | [`../expanding-prompts/yonder/20260717-213242_glow-first-code-beside-glass-and-open-runes.md`](../expanding-prompts/yonder/20260717-213242_glow-first-code-beside-glass-and-open-runes.md) | Checkable pointers + open-rune horizon |
+| Rune grammar brief | [`../active-designing/date/20260716/20260716-033000_sameness-and-the-rune-glow-grammar-riscv.md`](../active-designing/date/20260716/20260716-033000_sameness-and-the-rune-glow-grammar-riscv.md) | Design -- full Glow textbook still horizon |
+| TAME (law) | [`../context/TAME_GUIDANCE.md`](../context/TAME_GUIDANCE.md) - Glow scope ER [`../external-research/20260713-225841_glow-supplement-scoping-runes-auras-jet-state.md`](../external-research/20260713-225841_glow-supplement-scoping-runes-auras-jet-state.md) | Root seated; Glow supplement still horizon |
+
+A beginner Glow-language textbook waits on a general parser. Until then, learn Rishi; run the eight green rune heads and desk hops in [`../glow/`](../glow/); read the Acme first-code prompt above for which runes still open.
+
+### Device path (GrapheneOS / Pixel / HAWM / TUBE)
+
+| Surface | Role | Register |
+|---------|------|----------|
+| [`guides/pixel-10a-grapheneos-setup.md`](guides/pixel-10a-grapheneos-setup.md) | Flash GrapheneOS on a Pixel 10a | Checkable (guide) |
+| [`../docs/COMPASS.md`](../docs/COMPASS.md) | Day-one rose compressor - [`compass_card.kyri`](../docs/compass_card.kyri) | Checkable compress |
+| [`../docs/HAWM.md`](../docs/HAWM.md) | HAWM ladder compressor | Checkable compress |
+| [`../docs/TUBE.md`](../docs/TUBE.md) | App-manifest + NativeActivity APK compressor | Checkable compress |
+| [`../docs/STOA.md`](../docs/STOA.md) | Glow language SLC compressor (STOA0-3) | Checkable compress |
+| [`../gratitude/grapheneos/`](../gratitude/grapheneos/) | Upstream GrapheneOS docs (MIT mirror) | Study library |
+| [`grain-os/`](grain-os/) | Grain OS onboarding hub (variants still scaffold) | Mixed -- see Get Started for real vs proposed |
+
+Living ledger (full register): [`../context/specs/two-dev-environments-and-mobile-emulation.md`](../context/specs/two-dev-environments-and-mobile-emulation.md).
+
+---
+
+## What Lives Here
+
+- **`grain-os/`** -- Grain OS onboarding hub ([`grain-os/README.md`](grain-os/README.md)): overview, get-started, four-variant scaffold.
+- **`reference/rishi-language.md`** -- the Rishi language and command-line reference (version `20260702.184312`, parity **142**); section8 conditionals witnessed `20260702.205630`.
+- **`reference/caravan-capabilities.md`** -- hosted capability table (witnessed behavior only).
+- **`reference/tally-gardens.md`** -- named bounded memory regions (witnessed behavior only).
+- **`tutorials/first-witness.md`** -- run, read, write: your first `.rish` witness against the living suite.
+- **`tutorials/run-record-and-failures.md`** -- the four run-record fields and RW-4 failure paths.
+- **`cursor-and-the-compass.md`** -- retired `20260920.135100`, held whole at [`.cursor-archive/manual-tutorials/`](../.cursor-archive/manual-tutorials/cursor-and-the-compass.md); its stitched first-day shape (foundations -> witness habitat -> rules -> log -> send) may seed a future single-editor tutorial.
+- **`guides/macos-ai-jail-setup.md`** -- the macOS sandbox-exec enclosure, witnessed green.
+- **`guides/self-hosted-vpn-setup.md`** -- the self-hosted WireGuard VPN, client half witnessed here, server half a real deploy artifact for your own VPS.
+- **`guides/key-cards-setup.md`** -- making your identity key cards (SSH + GPG fingerprints as a scannable, printable image), audited end to end on macOS.
+- **`guides/filevault-setup.md`** -- turning on macOS disk encryption, the single highest-priority security fix for a work machine.
+- **`guides/pixel-10a-grapheneos-setup.md`** -- installing GrapheneOS on a Pixel 10a via the official web installer, transcribed from GrapheneOS's own instructions, with the device's own published verified-boot key hash to check at the end.
+- **`guides/cloud-agent-toolchain-setup.md`** -- raising `rye` / `rishi` inside a Cursor Cloud Agent sandbox (July 15 path).
+- **`video-scripts/`** -- three newcomer video scripts, written to be recorded: [`intro-what-is-grain.md`](video-scripts/intro-what-is-grain.md) (what Grain is, zero prior knowledge), [`first-module-walkthrough.md`](video-scripts/first-module-walkthrough.md) (build a module and watch it go green), and [`contributing-walkthrough.md`](video-scripts/contributing-walkthrough.md) (write one the Grain way and send it back). Each scene names its visual, its on-screen text, and its voiceover; every command shown is real.
+- **`guides/20260731-014410_opus-bench-raise.md`** -- Opus in-container raise: restore `vendor/zig-toolchain/lib` plus the `zig` wrapper; M1 census GREEN beside it.
+
+*Next rooms, in season: Aurora interface reference when the surface stabilizes; a Glow language reference when a general parser lands; utility pages rendered from their own `.kyri` man records when the toolset's first lap lands.*
+
+---
+
+*May every page teach only what runs, and every visitor leave with exactly what they came for.*

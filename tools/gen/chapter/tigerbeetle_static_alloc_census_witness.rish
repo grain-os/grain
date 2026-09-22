@@ -1,0 +1,37 @@
+# tools/gen/chapter/tigerbeetle_static_alloc_census_witness.rish -- e33 static alloc.
+#
+#   rishi/bin/rishi run tools/gen/chapter/tigerbeetle_static_alloc_census_witness.rish
+#
+# Requires gratitude/tigerbeetle submodule present.
+# Clean-room: presence + counts only - never copies into rye/.
+# Leaf only -- no nested elder choirs.
+
+say "tb-static-alloc: Language EN — allocate at startup; nothing dynamic after."
+say "tb-static-alloc: Style Radiant — bounds named upfront; latency stays honest."
+say "tb-static-alloc: Lens TAME — e33 · clean-room study · almanac seat 39."
+
+# AN ABSENT OPTIONAL GITLINK IS A FACT ABOUT THE HOST, NEVER A DEFECT (`20260908.202239`).
+# `gratitude/tigerbeetle` is a submodule this tree STUDIES and never links, so a clone that has not
+# initialised it is a correct clone. The hard assert this replaces made the witness UNROSTABLE: a
+# row would red the fleet on every machine without the checkout, which is why it was never rostered
+# -- and an unrostered witness runs nowhere, so the assert bought a red nobody would ever hear.
+#
+# The census script already answers in three ways: exit 2 `absent`, exit 1 `thin`, exit 0 `ok`.
+# Only `thin` is a defect. Reading `census.ok` cannot tell 1 from 2, so the SKIP is decided here on
+# the clone and the failure is asserted below as a negative on `thin`.
+let clone = run ["test" "-d" "gratitude/tigerbeetle/src"]
+if (clone.ok == false) then say "tb-static_alloc: SKIP -- gratitude/tigerbeetle is an uninitialised submodule here; run git submodule update --init gratitude/tigerbeetle to read this census"
+if (clone.ok == false) then say "GREEN: tb-static_alloc -- skipped honestly, the clone this census reads is absent"
+if (clone.ok == false) then exit 0
+
+let census = run ["sh" "tools/fixtures/t/tigerbeetle_static_alloc_census.sh"]
+say census.out
+assert census.ok else "tb-static-alloc: census failed or thin"
+assert census.out contains "CLONE=present" else "tb-static-alloc: want CLONE=present"
+assert census.out contains "verdict=ok" else "tb-static-alloc: want verdict=ok"
+assert census.out contains "GUIDE_STATIC=yes" else "tb-static-alloc: held guide must teach static allocation"
+assert census.out contains "GUIDE_LIMIT=yes" else "tb-static-alloc: guide must put a limit on everything"
+assert census.out contains "TAME_STATIC=yes" else "tb-static-alloc: TAME must teach allocate-at-startup"
+assert census.out contains "STYLE=yes" else "tb-static-alloc: clone must hold docs/TIGER_STYLE.md static law"
+
+say "GREEN: tb-static-alloc — guide·limit·TAME·style ok · density holds · almanac next"

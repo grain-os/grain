@@ -1,0 +1,358 @@
+#!/bin/sh
+# shell_portable_control.sh -- the newest portable helpers, proven by doing.
+#
+# WHY A CONTROL RATHER THAN A READING. `resolve_path`, `sed_inplace`, and `search_text` exist so a
+# guard reads the same on both piers, and the only honest proof of that is behavior: resolve a real
+# symlink and compare against the tool this bench does have, edit a real file and read its bytes
+# and its mode back, search a real file with grep on a pier that ships no ripgrep. A count of call
+# sites says a spelling changed; this says the spelling still works.
+#
+#   sh tools/fixtures/s/shell_portable_control.sh
+#
+# `resolve_path` is compared against `readlink -f` wherever this host carries a GNU one. On a bench
+# without it the comparison is SKIPPED and said so out loud, because a comparison against a missing
+# tool proves nothing and a silent skip is the vacuous pass this whole family was booked for.
+set -eu
+
+root=$(pwd)
+. "$root/tools/fixtures/s/shell_portable.sh"
+
+pen=$(mktemp -d)
+trap 'rm -rf "$pen"' EXIT INT TERM
+
+pass=0
+fail=0
+skip=0
+ok()   { pass=$((pass + 1)); echo "  ok   $1"; }
+bad()  { fail=$((fail + 1)); echo "  MISS $1"; }
+note() { skip=$((skip + 1)); echo "  skip $1"; }
+
+echo "shell-portable-control: resolve_path, sed_inplace, the build lock, and search_text, proven on real files"
+
+mkdir -p "$pen/a/b" "$pen/other"
+echo hello > "$pen/a/b/file.txt"
+echo spaced > "$pen/other/two words.txt"
+ln -s "$pen/a/b" "$pen/link-to-dir"
+ln -s "$pen/a/b/file.txt" "$pen/link-to-file"
+
+# Does this bench carry a readlink that answers -f? The parity cases need one.
+if readlink -f "$pen/a/b/file.txt" >/dev/null 2>&1; then have_rl=yes; else have_rl=no; fi
+
+parity() { # $1 label, $2 path
+  if [ "$have_rl" = no ]; then note "$1 (no readlink -f on this host)"; return; fi
+  _a=$(readlink -f "$2" 2>/dev/null || echo NONE)
+  _b=$(resolve_path "$2" 2>/dev/null || echo NONE)
+  if [ "$_a" = "$_b" ]; then ok "$1"; else bad "$1 (readlink=$_a resolve=$_b)"; fi
+}
+
+parity "a plain file resolves as readlink -f does"        "$pen/a/b/file.txt"
+parity "a symlink to a file follows one hop"              "$pen/link-to-file"
+parity "a symlink to a directory follows one hop"         "$pen/link-to-dir"
+parity "a path carrying a space resolves whole"           "$pen/other/two words.txt"
+parity "a directory resolves"                             "$pen/a/b"
+
+# Relative input, resolved against the working directory the way readlink -f does.
+( cd "$pen/a" && if [ "$have_rl" = yes ]; then
+    _a=$(readlink -f b/file.txt); _b=$(resolve_path b/file.txt)
+    [ "$_a" = "$_b" ] || exit 1
+  fi ) && ok "a relative path resolves against the working directory" \
+        || bad "a relative path resolves against the working directory"
+
+# An absent directory has no absolute answer, so the helper refuses rather than inventing one.
+resolve_path "$pen/nowhere/at/all/x" >/dev/null 2>&1 && bad "an absent directory refuses" || ok "an absent directory refuses"
+resolve_path "" >/dev/null 2>&1 && bad "an empty path refuses" || ok "an empty path refuses"
+
+# --- THE BOUNDED MULTI-HOP WALK (seated 20260916, REDS %762) ------------------------------------
+# `resolve_path` followed ONE hop until this stamp, and one hop names the wrong answer for any
+# chain longer than that -- which this tree files 41 times, one of them three deep. The bound is
+# 40, the depth the host kernel itself enforces, so these legs prove it from BOTH sides: a chain
+# the machine could open resolves, and the first chain it could not refuses. A bound proven in one
+# direction cannot be told from no bound at all.
+chain="$pen/chain"
+mkdir -p "$chain"
+echo deep > "$chain/base"
+( cd "$chain" && _prev=base && _i=1 && while [ $_i -le 45 ]; do ln -s "$_prev" "l$_i"; _prev="l$_i"; _i=$((_i + 1)); done )
+
+[ "$(resolve_path "$chain/l3")" = "$chain/base" ] \
+  && ok "a three-hop chain walks to its fixed point" \
+  || bad "a three-hop chain walks to its fixed point"
+
+# The deepest chain this tree actually files is 3; 40 is where the kernel stops. Both are legs.
+[ "$(resolve_path "$chain/l40")" = "$chain/base" ] \
+  && ok "a chain at the kernel's own limit still resolves" \
+  || bad "a chain at the kernel's own limit still resolves"
+
+resolve_path "$chain/l41" >/dev/null 2>&1 \
+  && bad "a chain past the kernel's limit refuses" \
+  || ok "a chain past the kernel's limit refuses"
+
+# A cycle is the reason the elder header declined a loop at all. It costs a bounded walk now.
+ln -s cyc_b "$chain/cyc_a"
+ln -s cyc_a "$chain/cyc_b"
+resolve_path "$chain/cyc_a" >/dev/null 2>&1 \
+  && bad "a symlink cycle refuses rather than hanging" \
+  || ok "a symlink cycle refuses rather than hanging"
+
+# And the multi-hop walk agrees with the elder tool wherever this bench carries one.
+parity "a three-hop chain agrees with the elder tool"   "$chain/l3"
+parity "a forty-hop chain agrees with the elder tool"   "$chain/l40"
+
+# --- sed_inplace -------------------------------------------------------------------------------
+printf 'alpha\nbeta\n' > "$pen/edit.txt"
+chmod 755 "$pen/edit.txt"
+before_mode=$(ls -l "$pen/edit.txt" | cut -c1-10)
+sed_inplace 's|alpha|ALPHA|' "$pen/edit.txt"
+[ "$(head -1 "$pen/edit.txt")" = ALPHA ] && ok "sed_inplace edits the file" || bad "sed_inplace edits the file"
+[ "$(tail -1 "$pen/edit.txt")" = beta ] && ok "sed_inplace leaves untouched lines alone" || bad "sed_inplace leaves untouched lines alone"
+after_mode=$(ls -l "$pen/edit.txt" | cut -c1-10)
+[ "$before_mode" = "$after_mode" ] && ok "sed_inplace keeps the file's mode ($after_mode)" || bad "sed_inplace keeps the file's mode ($before_mode -> $after_mode)"
+[ -z "$(find "$pen" -name '*.sp.*' 2>/dev/null)" ] && ok "sed_inplace leaves no temporary behind" || bad "sed_inplace leaves no temporary behind"
+
+cp "$pen/edit.txt" "$pen/same.txt"
+sed_inplace 's|nothing-matches-this|x|' "$pen/edit.txt"
+cmp -s "$pen/edit.txt" "$pen/same.txt" && ok "a script matching nothing leaves the file byte-identical" || bad "a script matching nothing leaves the file byte-identical"
+
+sed_inplace 's|a|b|' "$pen/absent.txt" >/dev/null 2>&1 && bad "sed_inplace refuses a missing file" || ok "sed_inplace refuses a missing file"
+
+# --- lock_acquire / lock_release ---------------------------------------------------------------
+# The lock replaces `flock -w`, which macOS does not ship at all (REDS %279), so what has to be
+# proven is behavior rather than a spelling: one holder at a time, a bounded refusal rather than a
+# hang, and the one property a descriptor lock has for free -- release when its owner dies.
+lk="$pen/build.lock.d"
+
+lock_acquire "$lk" 2 && ok "an unheld lock is taken" || bad "an unheld lock is taken"
+[ -d "$lk" ] && ok "the lock is a directory" || bad "the lock is a directory"
+[ "$(cat "$lk/pid" 2>/dev/null)" = "$$" ] && ok "the holder writes its own pid inside" || bad "the holder writes its own pid inside"
+
+# A SECOND acquire against a live holder waits its bound and refuses by return code. This is the
+# refusal proven from the failing side: a lock that never refuses is not a lock.
+held_start=$(date +%s)
+( lock_acquire "$lk" 1 ) && bad "a held lock refuses a second holder" || ok "a held lock refuses a second holder"
+held_end=$(date +%s)
+[ "$((held_end - held_start))" -ge 1 ] && ok "the refusal waited its bound rather than failing instantly" \
+  || bad "the refusal waited its bound rather than failing instantly"
+
+lock_release "$lk"
+[ -d "$lk" ] || ok "release frees the lock"
+[ -d "$lk" ] && bad "release frees the lock"
+lock_acquire "$lk" 2 && ok "a released lock is takeable again" || bad "a released lock is takeable again"
+lock_release "$lk"
+
+# A lock whose owner has gone is reaped rather than waited out. A pid that no process carries is
+# what a killed build leaves behind, and waiting out the bound for it would turn one crash into
+# every later run refusing.
+mkdir -p "$lk"
+# Reap a pid that has certainly exited: a child run and waited on.
+( exit 0 ) & dead=$!
+wait "$dead" 2>/dev/null || true
+printf '%s\n' "$dead" > "$lk/pid"
+lock_acquire "$lk" 2 && ok "a lock whose owner has died is reaped" || bad "a lock whose owner has died is reaped"
+lock_release "$lk"
+
+# An empty or non-numeric pid file is a lock caught mid-creation, so it is waited on rather than
+# reaped -- reaping there would hand two holders the same lock.
+mkdir -p "$lk"; : > "$lk/pid"
+( lock_acquire "$lk" 1 ) && bad "an empty pid file is waited on rather than reaped" || ok "an empty pid file is waited on rather than reaped"
+mkdir -p "$lk"; printf 'not-a-pid\n' > "$lk/pid"
+( lock_acquire "$lk" 1 ) && bad "a non-numeric pid file is waited on rather than reaped" || ok "a non-numeric pid file is waited on rather than reaped"
+rm -rf "$lk"
+
+# Releasing a lock nobody holds costs nothing, so a caller may release on every exit path.
+lock_release "$pen/never-held.d" && ok "releasing an unheld lock is harmless" || bad "releasing an unheld lock is harmless"
+
+# --- search_text -------------------------------------------------------------------------------
+# The helper is grep, so a green here is the reading the two roster reds (dated_pattern,
+# equinox_e123) were waiting on. Written when this pier carried no ripgrep; ripgrep arrived on
+# `20260905` and the legs are unchanged by that, which is the point -- a helper that only reads
+# right on the bench that happens to lack a tool is not a portable helper.
+printf 'alpha\nbeta\n' > "$pen/hay.txt"
+search_text -q alpha "$pen/hay.txt" && ok "search_text finds a match" || bad "search_text finds a match"
+search_text -q missing "$pen/hay.txt" && bad "search_text misses a missing needle" || ok "search_text misses a missing needle"
+search_text -q -i ALPHA "$pen/hay.txt" && ok "search_text -i matches across case" || bad "search_text -i matches across case"
+printf 'a|b\n' > "$pen/pipe.txt"
+search_text -q -F 'a|b' "$pen/pipe.txt" && ok "search_text -F treats a pipe as literal" || bad "search_text -F treats a pipe as literal"
+search_text -q 'al|zz' "$pen/hay.txt" && ok "search_text alternation matches without -F" || bad "search_text alternation matches without -F"
+printf 'hello\n' | search_text -q hello && ok "search_text reads stdin when no file is given" || bad "search_text reads stdin when no file is given"
+search_text -z alpha "$pen/hay.txt" >/dev/null 2>&1 && bad "search_text refuses an unknown flag" || ok "search_text refuses an unknown flag"
+
+
+# --- have_tool and require_tool ------------------------------------------------------------------
+# The reflex: a guard that cannot run its instrument refuses, and says which instrument. Proven from
+# both sides, because a refusal shown only in the passing direction cannot be told from a bypass.
+# The absent name is one no bench carries and no PATH shim can accidentally supply.
+absent=grain-no-such-instrument-20260905
+
+have_tool grep && ok "have_tool finds a tool this bench carries" || bad "have_tool finds a tool this bench carries"
+have_tool "$absent" && bad "have_tool refuses a tool no bench carries" || ok "have_tool refuses a tool no bench carries"
+# A silent predicate must stay silent, or a caller branching on it pollutes the reading it prints.
+[ -z "$(have_tool "$absent" 2>&1)" ] && ok "have_tool says nothing either way" || bad "have_tool says nothing either way"
+ht_rc=0; ( have_tool ) >/dev/null 2>&1 || ht_rc=$?
+[ "$ht_rc" -eq 2 ] && ok "have_tool with no name is misuse, not absence" || bad "have_tool with no name is misuse, not absence"
+
+require_tool grep >/dev/null 2>&1 && ok "require_tool passes a tool that is present" || bad "require_tool passes a tool that is present"
+[ -z "$(require_tool grep 2>&1)" ] && ok "require_tool prints nothing when the tool is there" || bad "require_tool prints nothing when the tool is there"
+
+rt_out=$(require_tool "$absent" 2>/dev/null || true)
+rt_rc=0; require_tool "$absent" >/dev/null 2>&1 || rt_rc=$?
+[ "$rt_rc" -eq 127 ] && ok "require_tool refuses with the shell's own not-found status" \
+  || bad "require_tool refuses with the shell's own not-found status (rc=$rt_rc)"
+printf '%s\n' "$rt_out" | grep -q "^instrument=$absent\$" && ok "the refusal NAMES the instrument" \
+  || bad "the refusal NAMES the instrument"
+printf '%s\n' "$rt_out" | grep -q '^verdict=instrument_absent$' && ok "the refusal carries its own verdict" \
+  || bad "the refusal carries its own verdict"
+# On stdout rather than stderr: the reading that sent a lap to the wrong file was on stderr, which a
+# witness reading `run` output does not keep. This leg reads stdout ALONE, so a helper that printed
+# to stderr would miss it.
+[ -n "$(require_tool "$absent" 2>/dev/null || true)" ] && ok "the refusal reaches stdout, where a witness reads" \
+  || bad "the refusal reaches stdout, where a witness reads"
+
+rt_use=$(require_tool "$absent" 'the roots row read' 2>/dev/null || true)
+printf '%s\n' "$rt_use" | grep -q '^instrument_for=the roots row read$' && ok "an optional purpose is carried through" \
+  || bad "an optional purpose is carried through"
+printf '%s\n' "$rt_out" | grep -q '^instrument_for=' && bad "no purpose means no purpose line" \
+  || ok "no purpose means no purpose line"
+rq_rc=0; ( require_tool ) >/dev/null 2>&1 || rq_rc=$?
+[ "$rq_rc" -eq 2 ] && ok "require_tool with no name is misuse, not absence" \
+  || bad "require_tool with no name is misuse, not absence"
+
+# The absent-tool probe keeps its own five-tool PATH. Dropping a host directory
+# can also drop sh; asking whether rg exists first skips this proof without rg.
+# dirname walks the root, and tr/xargs/printf serve the portable helper's probe.
+# A fixed set keeps both host layouts answering the same two checks.
+e122=tools/fixtures/e/equinox_e122_roots_bench_kinds_scan.sh
+norg="$pen/without-rg"
+mkdir -p "$norg"
+for tool in sh dirname tr xargs printf; do
+  # printf is also a shell builtin; xargs needs its executable peer on PATH.
+  tool_path=""
+  old_ifs=$IFS; IFS=:
+  for tool_dir in $PATH; do
+    [ -n "$tool_dir" ] || tool_dir=.
+    if [ -x "$tool_dir/$tool" ] && [ ! -d "$tool_dir/$tool" ]; then
+      tool_path=$(CDPATH= cd "$tool_dir" && printf '%s/%s' "$(pwd -P)" "$tool")
+      break
+    fi
+  done
+  IFS=$old_ifs
+  [ -n "$tool_path" ] || { echo "verdict=probe_tool_absent tool=$tool"; exit 1; }
+  ln -s "$tool_path" "$norg/$tool"
+done
+e122_rc=0
+e122_out=$(cd "$root" && PATH="$norg" sh "$e122" 2>&1) || e122_rc=$?
+if [ "$e122_rc" -eq 127 ] && printf '%s\n' "$e122_out" | grep -q '^instrument=rg$'; then
+  ok "a real guard without its instrument names rg rather than a file"
+else
+  bad "a real guard without its instrument names rg rather than a file (rc=$e122_rc)"
+fi
+printf '%s\n' "$e122_out" | grep -q '^verdict=instrument_absent$' \
+  && ok "the absent instrument has its own verdict" \
+  || bad "the absent instrument has its own verdict"
+# capture_evidence: a file that already fits under the bound is copied whole, byte for byte --
+# the fix must cost nothing on the guards that were never truncated.
+short_src="$pen/short.txt"
+: > "$short_src"
+i=1
+while [ "$i" -le 50 ]; do echo "line $i" >> "$short_src"; i=$((i + 1)); done
+capture_evidence "$short_src" "$pen/short.evidence.txt" 200
+if cmp -s "$short_src" "$pen/short.evidence.txt"; then
+  ok "a short answer is kept whole, byte for byte"
+else
+  bad "a short answer is kept whole, byte for byte"
+fi
+
+# capture_evidence: a long answer keeps its OWN header, not only its tail -- the real fault this
+# helper closes. Shaped after rye_compiled_reach's own 812-line answer: a header naming paths and
+# ceiling, a long body, a verdict line at the very end.
+long_src="$pen/long.txt"
+: > "$long_src"
+echo "paths=1994 bodies=1761 ceiling=18" >> "$long_src"
+echo "header line two" >> "$long_src"
+echo "header line three" >> "$long_src"
+i=1
+while [ "$i" -le 808 ]; do echo "uncompiled body $i" >> "$long_src"; i=$((i + 1)); done
+echo "verdict=over_ceiling" >> "$long_src"
+capture_evidence "$long_src" "$pen/long.evidence.txt" 200
+grep -q '^paths=1994 bodies=1761 ceiling=18$' "$pen/long.evidence.txt" \
+  && ok "a bounded capture keeps the guard's own header" \
+  || bad "a bounded capture keeps the guard's own header"
+grep -q '^verdict=over_ceiling$' "$pen/long.evidence.txt" \
+  && ok "a bounded capture keeps the guard's own verdict line" \
+  || bad "a bounded capture keeps the guard's own verdict line"
+grep -q 'lines omitted' "$pen/long.evidence.txt" \
+  && ok "a bounded capture SAYS what it skipped" \
+  || bad "a bounded capture SAYS what it skipped"
+ce_lines=$(wc -l < "$pen/long.evidence.txt")
+[ "$ce_lines" -le 200 ] && ok "the bounded capture stays at or under its own ceiling" \
+  || bad "the bounded capture stays at or under its own ceiling ($ce_lines)"
+
+# The fault this replaces: a plain `tail -n 200` on the same file drops the header entirely --
+# proving the OLD behavior actually loses the reading the new one keeps.
+if tail -n 200 "$long_src" | grep -q '^paths=1994'; then
+  bad "the elder bare tail was already keeping the header (nothing to fix)"
+else
+  ok "the elder bare tail drops the header this helper restores"
+fi
+
+# ---------------------------------------------------------------------------------------------
+# key_value -- a bolded key's value, cut where the next key begins.
+#
+# EVERY LEG IS SHOWN FROM BOTH SIDES. The whole point of the cut is that a folded header row reads
+# differently under it, so each case that must change is asserted beside a case that must not.
+echo "shell-portable-control: key_value, on the folded header rows this tree actually writes"
+
+kv_is() { # $1 label, $2 expected, $3 key, $4 line
+  _got=$(key_value "$3" "$4")
+  if [ "$_got" = "$2" ]; then ok "$1"; else bad "$1 (got [$_got] wanted [$2])"; fi
+}
+
+kv_is "a key standing alone gives its whole value" \
+  " Living" Status '**Status:** Living'
+kv_is "a key on a folded row stops at the next key" \
+  " Living - " Status '**Stamp:** x - **Status:** Living - **Room:** vision'
+kv_is "the neighbour's own value is reachable under its own name" \
+  " vision" Room '**Stamp:** x - **Status:** Living - **Room:** vision'
+kv_is "emphasis inside a value survives the cut, because a key wants the colon" \
+  " Living -- see **start here** now" Status '**Status:** Living -- see **start here** now'
+kv_is "a key name is a prefix, so **Status of play:** still answers to Status" \
+  " Landed - " Status '**Status of play:** Landed - **Voice:** Kyri'
+kv_is "an absent key prints nothing, which is what the whole-line readers also did" \
+  "" Room '**Status:** Living'
+kv_is "the FIRST occurrence wins, stating grep -o | head -1's rule once" \
+  " one - " Status '**Status:** one - **Room:** x - **Status:** two'
+kv_is "a trailing bold that carries no colon is value, never a key" \
+  " Gauge, Field setting -- **Mixed room**: four gates" Style \
+  '**Status:** Living - **Style:** Gauge, Field setting -- **Mixed room**: four gates'
+
+# THE CASE THAT MADE THIS A RED RATHER THAN A TIDY. This is the real line from
+# foundations/20260823-111029_the-seed-that-ships-every-fifth-round.md, whose Status said only
+# `Living` while the token the two-rooms doorway looks for stood in the **Style:** key next door.
+kv_real='**Language:** EN - **Status:** Living - **Style:** Gauge, Field setting -- **Mixed room**: the four gates are named witnesses that run'
+room_re='(^|[^A-Za-z])(checkable|vision(ary)?|mixed|research for understanding)([^A-Za-z]|$)'
+printf '%s\n' "$kv_real" | grep -qiE "\*\*Status:\*\*.*$room_re" \
+  && ok "the elder whole-line read DID find a room token on that line" \
+  || bad "the elder whole-line read DID find a room token on that line"
+printf '%s\n' "$(key_value Status "$kv_real")" | grep -qiE "$room_re" \
+  && bad "the cut still finds it, so the cut changed nothing" \
+  || ok "the cut does NOT find it, which is the whole repair"
+
+# A MUTATION, so a control that could pass with the cut removed is not this one. Strike the inner
+# match out of a real copy of the library and the value runs to the end of the line again.
+kv_mut=$pen/shell_portable_mutant.sh
+sed 's|if (match(rest, /\\\*\\\*\[^\*\]\[^\*\]\*:\\\*\\\*/)) rest = substr(rest, 1, RSTART - 1)||' \
+  "$root/tools/fixtures/s/shell_portable.sh" > "$kv_mut"
+if cmp -s "$kv_mut" "$root/tools/fixtures/s/shell_portable.sh"; then
+  bad "the mutation edited a byte of the library copy"
+else
+  ok "the mutation edited a byte of the library copy"
+  kv_mut_out=$(sh -c '. "$1"; key_value Status "$2"' _ "$kv_mut" "$kv_real" 2>/dev/null || true)
+  printf '%s\n' "$kv_mut_out" | grep -qiE "$room_re" \
+    && ok "without the cut the neighbour's token returns, so the leg above is load-bearing" \
+    || bad "without the cut the neighbour's token returns, so the leg above is load-bearing"
+fi
+
+
+echo "have_readlink_f=$have_rl"
+echo "pass=$pass"
+echo "skip=$skip"
+echo "fail=$fail"
+if [ "$fail" -eq 0 ]; then echo "verdict=ok"; else echo "verdict=behavior_missed"; exit 1; fi

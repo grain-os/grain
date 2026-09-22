@@ -1,0 +1,106 @@
+#!/bin/sh
+# loom_trend_control.sh -- the loom reader proven on planted logs in a throwaway repository.
+#
+# The plants are the shapes the tree actually writes: a numeric key across days, a text key, a key
+# that collides across two families, a key nobody ever wrote, and a vocabulary larger than
+# the `--keys` cap.
+#
+#   sh tools/fixtures/l/loom_trend_control.sh
+#
+# Prints `pass=N fail=N`. Bounded: 21 cases, one pen holding a real git repository.
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+tool="$root/tools/l/loom_trend.sh"
+pen=${TMPDIR:-/tmp}/loom-trend-pen-$$
+trap 'rm -rf "$pen"' EXIT INT TERM
+
+pass=0; fail=0
+check() { if [ "$3" = "$2" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf 'FAIL %s -- wanted %s, got %s\n' "$1" "$2" "$3" >&2; fi; }
+has() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
+
+mkdir -p "$pen/session-logs/date/20260101" "$pen/session-logs/date/20260102"
+cd "$pen"; git init -q .; git config user.email pen@example.invalid; git config user.name pen
+
+printf 'stamp 20260101.010000\nloom roster=a guards=10 seconds=100\n' > session-logs/date/20260101/20260101-010000_one.kyri
+printf 'stamp 20260102.020000\nloom roster=a guards=30 seconds=80\n'  > session-logs/date/20260102/20260102-020000_two.kyri
+# a DIFFERENT family writing the same key name, which is what makes a bare reading incomparable
+printf 'stamp 20260102.030000\nloom probe=b seconds=2\n'              > session-logs/date/20260102/20260102-030000_three.kyri
+git add -A >/dev/null; git commit -qm plant
+
+# THE SHIPPED TOOL IS RUN WHERE IT STANDS, with LOOM_ROOT pointed at the pen, rather than copied
+# into the pen first. The elder shape copied one file, and on `20260916` the reader grew a sibling
+# -- `tools/fixtures/l/loom_values.sh`, which carries the journal grammar for both loom readers --
+# so every case here failed at a `No such file or directory` and the witness went red on committed
+# bytes. A pen that copies its subject has to be edited again each time the subject grows a
+# neighbour; LOOM_ROOT exists exactly so it need not be, and the sibling control already reads this
+# way. Run 2>&1 so a refusal is a compared string rather than a silent one.
+run() { LOOM_ROOT="$pen" sh "$tool" "$@" 2>&1; }
+
+out=$(run guards --summary)
+check "a numeric key is summarised"      yes "$(has "$out" 'numeric=2')"
+check "the first value is the oldest"    yes "$(has "$out" 'first=10 at 20260101-010000')"
+check "the last value is the newest"     yes "$(has "$out" 'last=30 at 20260102-020000')"
+check "and a rise is named a rise"       yes "$(has "$out" 'direction=rising')"
+
+out=$(run seconds --summary)
+check "a bare key reads every family"    yes "$(has "$out" 'values=3')"
+check "so its minimum is the small one"  yes "$(has "$out" 'min=2')"
+
+out=$(LOOM_FAMILY=roster run seconds --summary)
+check "a family scopes the reading"      yes "$(has "$out" 'values=2')"
+check "and the intruder is excluded"     yes "$(has "$out" 'min=80')"
+check "a fall is named a fall"           yes "$(has "$out" 'direction=falling')"
+
+out=$(run roster --summary)
+check "a text key says it is not numeric" yes "$(has "$out" 'direction=not_numeric')"
+
+out=$(run nosuchkey --summary)
+check "an unwritten key says so"         yes "$(has "$out" 'verdict=key_never_written')"
+check "rather than printing a flat line" no  "$(has "$out" 'direction=')"
+
+out=$(run guards)
+# THE LISTING CARRIES THE SOURCE LINE, so a reader sees the scope a value was measured in. A key is
+# comparable only within one scope, and this reader once merged a single fast leg with a whole run.
+check "a listing shows the loom line"    yes "$(has "$out" 'loom roster=a guards=10 seconds=100')"
+
+# THE MODE THIS CONTROL NEVER EXERCISED (`20260917`). Thirteen legs stood above and not one ran
+# `--keys` -- the mode `.claude/rules/session-logs.md` calls the map of what the journal actually
+# holds. It ended `| head -60` and said nothing about what it dropped, so a reader could not tell a
+# small journal from a truncated reading of a large one. A cap is lawful here; a silent one is not.
+# Both counts are asserted from both sides, because a listing proven only where nothing was dropped
+# cannot be told from one that drops in silence.
+
+# UNDER the cap first, on the pen as it already stands: roster, guards, seconds, probe.
+out=$(run --keys)
+check "a small journal names its vocabulary" yes "$(has "$out" 'keys_distinct=4')"
+check "and shows all of it"                  yes "$(has "$out" 'keys_shown=4')"
+check "listing exactly the rows it claims"   4   "$(printf '%s\n' "$out" | grep -cE '^ *[0-9]+ ')"
+
+# OVER the cap: 70 keys nobody would see past the sixtieth.
+mkdir -p session-logs/date/20260103
+i=1
+while [ "$i" -le 70 ]; do
+  printf 'stamp 20260103.0400%02d\nloom probe=c k%02d=%d\n' "$i" "$i" "$i" \
+    > "session-logs/date/20260103/20260103-0400$(printf %02d "$i")_k$i.kyri"
+  i=$((i+1))
+done
+git add -A >/dev/null; git commit -qm plant-many-keys
+
+out=$(run --keys)
+distinct=$(printf '%s\n' "$out" | sed -n 's/^keys_distinct=//p')
+shown=$(printf '%s\n' "$out" | sed -n 's/^keys_shown=//p')
+rows=$(printf '%s\n' "$out" | grep -cE '^ *[0-9]+ ')
+check "a capped listing still names the whole" yes "$([ "$distinct" -gt 60 ] && echo yes || echo no)"
+check "while saying how many it showed"        60  "$shown"
+check "and showing exactly that many"          60  "$rows"
+
+out=$(run --keys --all)
+distinct=$(printf '%s\n' "$out" | sed -n 's/^keys_distinct=//p')
+shown=$(printf '%s\n' "$out" | sed -n 's/^keys_shown=//p')
+rows=$(printf '%s\n' "$out" | grep -cE '^ *[0-9]+ ')
+check "--all lifts the cap to the whole"       "$distinct" "$shown"
+check "and prints every key it counted"        "$distinct" "$rows"
+
+printf 'pass=%d fail=%d\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

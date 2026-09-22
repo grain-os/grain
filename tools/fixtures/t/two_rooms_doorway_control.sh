@@ -1,0 +1,573 @@
+#!/bin/sh
+# tools/fixtures/t/two_rooms_doorway_control.sh -- prove the doorway reading by doing, in a pen.
+#
+# WHY. A guard that cannot red guards nothing (REDS row 59), and this one had never been proven
+# from the failing side at all. It builds small git repositories in a temporary pen, plants one
+# condition in each, runs the real scan inside them, and checks that the refusals bite and the
+# honest readings stay free. Nothing here touches the tree it is run from.
+#
+# THE TWO SHARPEST LEGS ARE ABOUT REACH RATHER THAN VERDICT. `folded_page_read` proves a page on a
+# `date/` shelf is seen at all -- the 607 pages a shell glob dropped in silence -- and
+# `flat_only_roster_refused` plants the elder glob back and proves the scan now REFUSES rather
+# than reporting a smaller clean tree. A refusal proven only in the passing direction cannot be
+# told from a bypass.
+#
+# USAGE
+#   sh tools/fixtures/t/two_rooms_doorway_control.sh
+#
+# Driven by tools/t/two_rooms_doorway.rish. Run from the repository root.
+
+set -u
+
+root=$(pwd)
+rishi_bin=$root/rishi/bin/rishi
+for f in \
+  tools/fixtures/t/two_rooms_doorway_roster.sh \
+  tools/fixtures/t/two_rooms_doorway_scan_one.sh \
+  tools/fixtures/t/two_rooms_doorway_scan.rish
+do
+  [ -f "$root/$f" ] || { echo "control_verdict=fixture_missing:$f" >&2; exit 1; }
+done
+[ -x "$rishi_bin" ] || { echo "control_verdict=rishi_missing" >&2; exit 1; }
+
+pen=$(mktemp -d)
+trap 'rm -rf "$pen"' EXIT INT TERM
+
+# A page: $1 path, $2 the Status body (empty means no Status line at all).
+page() {
+  mkdir -p "$(dirname "$1")"
+  printf '# pen page\n\n' > "$1"
+  [ -n "$2" ] && printf '**Status:** %s\n' "$2" >> "$1"
+  printf '\nbody\n' >> "$1"
+}
+
+# A page whose door speaks under **Room:** instead: $1 path, $2 the Room body, $3 optional Status.
+page_room() {
+  mkdir -p "$(dirname "$1")"
+  printf '# pen page\n\n' > "$1"
+  [ -n "${3:-}" ] && printf '**Status:** %s\n' "$3" >> "$1"
+  printf '**Room:** %s\n' "$2" >> "$1"
+  printf '\nbody\n' >> "$1"
+}
+
+# A repository holding one page of each honest kind, plus whatever the caller plants.
+build() {
+  d=$pen/$1
+  mkdir -p "$d"
+  ( cd "$d" \
+    && git init -q . \
+    && git config user.email pen@example.invalid \
+    && git config user.name Pen \
+    && mkdir -p tools/fixtures/t \
+    && cp "$root/tools/fixtures/t/two_rooms_doorway_roster.sh" tools/fixtures/t/ \
+    && cp "$root/tools/fixtures/t/two_rooms_doorway_scan_one.sh" tools/fixtures/t/ \
+    && cp "$root/tools/fixtures/t/two_rooms_doorway_scan.rish" tools/fixtures/t/ ) >/dev/null 2>&1
+  echo "$d"
+}
+
+commit_all() { ( cd "$1" && git add -A && git commit -qm 'pen: doorway subject' ) >/dev/null 2>&1; }
+
+# Every leg runs the REAL scan, at ceiling zero unless the leg says otherwise, so a single
+# counted page is the difference between free and refused. The third argument is the LIVING
+# ceiling, held at zero for the same reason: a stampless page naming no room is one page, and one
+# page must be the whole difference between free and refused.
+scan_at() {
+  ( cd "$1" \
+    && TWO_ROOMS_DOORWAY_CEILING="$2" TWO_ROOMS_LIVING_CEILING="${3:-0}" \
+       "$rishi_bin" run tools/fixtures/t/two_rooms_doorway_scan.rish 2>/dev/null )
+}
+
+# The honest tree: one page per room, one of them folded onto a date/ shelf, each naming a room.
+honest() {
+  d=$1
+  page "$d/external-research/20260901-010101_a.md" 'Living -- checkable'
+  page "$d/active-designing/20260901-010102_b.md" 'Living -- vision'
+  page "$d/docs/20260901-010103_c.md" 'Living -- mixed'
+  page "$d/docs-geode/20260901-010105_e.md" 'Living -- checkable'
+  page "$d/manual/20260901-010106_f.md" 'Living -- mixed'
+  page "$d/foundations/20260901-010107_g.md" 'Living -- vision'
+  page "$d/context/specs/20260901-010108_h.md" 'Living -- checkable'
+  page "$d/active-designing/date/20260901/20260901-010104_d.md" 'Living -- research for understanding'
+}
+
+# 1. The honest tree -- every page names its room. Free, reading zero, all four rooms reached.
+d=$(build honest); honest "$d"; commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'verdict=ok' && echo "named_room_free=yes" || echo "named_room_free=no"
+echo "$out" | grep -q 'doorway fails=0 ' && echo "clean_reads_zero=yes" || echo "clean_reads_zero=no"
+echo "$out" | grep -q 'folded=1' && echo "folded_page_read=yes" || echo "folded_page_read=no"
+echo "$out" | grep -q 'geode=1 ' && echo "geode_room_read=yes" || echo "geode_room_read=no"
+echo "$out" | grep -q 'manual=1 ' && echo "manual_room_read=yes" || echo "manual_room_read=no"
+echo "$out" | grep -q 'foundations=1 ' && echo "foundations_room_read=yes" || echo "foundations_room_read=no"
+echo "$out" | grep -q 'context=1 ' && echo "context_room_read=yes" || echo "context_room_read=no"
+
+# 2. A Status that names no room -- counted, named, refused.
+d=$(build no_room); honest "$d"
+page "$d/external-research/20260902-020202_silent.md" 'Living'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=1 ' && echo "no_room_counted=yes" || echo "no_room_counted=no"
+echo "$out" | grep -q 'FAIL external-research/20260902-020202_silent.md Status does not name a room' \
+  && echo "no_room_named=yes" || echo "no_room_named=no"
+
+# 3. No Status line at all -- counted.
+d=$(build no_status); honest "$d"
+page "$d/external-research/20260902-030303_bare.md" ''
+commit_all "$d"
+scan_at "$d" 0 | grep -q 'doorway fails=1 ' && echo "no_status_counted=yes" || echo "no_status_counted=no"
+
+# 4. Stamped before the seating -- grandfathered, free.
+d=$(build before); honest "$d"
+page "$d/external-research/20260101-010101_elder.md" 'Living'
+commit_all "$d"
+scan_at "$d" 0 | grep -q 'verdict=ok' && echo "before_seating_free=yes" || echo "before_seating_free=no"
+
+# 5. No one-clock stamp in the basename -- outside the DATED ratchet, and inside the living one.
+#    The elder leg read this page as grandfathered and stopped there. The mark law reads the same
+#    absence the other way -- a stampless basename means LIVING -- so the page is free of `fails`
+#    and counted in `living_silent`, which is the whole of the 20260911 repair in one plant.
+d=$(build unstamped); honest "$d"
+page "$d/external-research/PLAIN.md" 'Living'
+commit_all "$d"
+out=$(scan_at "$d" 0 1)
+echo "$out" | grep -q 'verdict=ok' && echo "unstamped_free=yes" || echo "unstamped_free=no"
+echo "$out" | grep -q 'doorway fails=0 ' && echo "unstamped_not_dated=yes" || echo "unstamped_not_dated=no"
+echo "$out" | grep -q 'living_silent=1 ' && echo "living_silent_counted=yes" || echo "living_silent_counted=no"
+echo "$out" | grep -q 'LIVING-SILENT external-research/PLAIN.md' \
+  && echo "living_silent_named=yes" || echo "living_silent_named=no"
+echo "$out" | grep -q 'stampless=1 ' && echo "stampless_counted=yes" || echo "stampless_counted=no"
+out=$(scan_at "$d" 0 0)
+echo "$out" | grep -q 'FAIL doorway living ratchet: 1 living pages name no room' \
+  && echo "living_over_ceiling_refused=yes" || echo "living_over_ceiling_refused=no"
+# The refusal must DECIDE the verdict too, never name a fault and report ok -- the same leg the
+# reach refusals already carry, and the one a naming-only check cannot tell from a bypass.
+echo "$out" | grep -q 'verdict=ok' \
+  && echo "living_over_ceiling_verdict=no" || echo "living_over_ceiling_verdict=yes"
+
+# 6. A folded page naming no room -- counted. The three the fold hid, in miniature.
+d=$(build folded_fail); honest "$d"
+page "$d/active-designing/date/20260820/20260820-131713_landed.md" 'LANDED -- fold C'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=1 ' && echo "folded_fail_counted=yes" || echo "folded_fail_counted=no"
+
+# 7. yonder and a README stay outside the reach, even carrying a failing Status.
+d=$(build excluded); honest "$d"
+page "$d/active-designing/yonder/20260902-040404_deferred.md" 'Living'
+page "$d/active-designing/date/20260901/README.md" 'Living'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'verdict=ok' && echo "yonder_excluded=yes" || echo "yonder_excluded=no"
+# Counted rather than grepped-for-absence: `grep -qv PATTERN` answers yes whenever ANY line
+# fails to match, which is a test that cannot fail (REDS %503). The honest tree holds seven
+# pages -- one per room, `manual/`, `foundations/` and `context/` joining 20260908 -- and two more
+# were planted, so the reach must still read eight. This number moves whenever a room joins, and that
+# is the point: the leg
+# reads a count rather than an absence, so a room added to `honest()` without being added here
+# says so out loud on the lap it lands.
+echo "$out" | grep -q 'doorway pages=8 ' && echo "readme_excluded=yes" || echo "readme_excluded=no"
+
+# 8. THE ELDER DEFECT, planted. A roster narrowed to the flat room must refuse rather than
+#    report a smaller clean tree -- the folded floor is what tells those two apart.
+d=$(build flat_only); honest "$d"
+page "$d/active-designing/date/20260820/20260820-131713_landed.md" 'LANDED -- fold C'
+commit_all "$d"
+cat > "$d/tools/fixtures/t/two_rooms_doorway_roster.sh" <<'ELDER'
+#!/bin/sh
+for f in external-research/*.md active-designing/*.md docs/*.md; do
+  [ -f "$f" ] || continue
+  case "$f" in */README.md) continue ;; esac
+  echo "$f"
+done
+ELDER
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'FAIL doorway reach: no folded page read' \
+  && echo "flat_only_roster_refused=yes" || echo "flat_only_roster_refused=no"
+
+# 9. The ratchet, from both sides: two failing pages free at a ceiling of two, refused at one.
+d=$(build ratchet); honest "$d"
+page "$d/external-research/20260902-050505_one.md" 'Living'
+page "$d/external-research/20260902-050506_two.md" 'Living'
+commit_all "$d"
+scan_at "$d" 2 | grep -q 'verdict=ok' && echo "under_ceiling_free=yes" || echo "under_ceiling_free=no"
+scan_at "$d" 1 | grep -q 'FAIL doorway ratchet: 2 pages name no room' \
+  && echo "over_ceiling_refused=yes" || echo "over_ceiling_refused=no"
+
+# 10. THE SECOND KEY. A page naming its room under **Room:** is free -- the elder read only
+#     **Status:** and counted two pages spelling `Mixed` as pages that named no room.
+d=$(build room_key); honest "$d"
+page_room "$d/external-research/20260902-060601_room_key.md" 'Mixed. The curve is measured; the reading is proposed.'
+commit_all "$d"
+scan_at "$d" 0 | grep -q 'verdict=ok' && echo "room_key_free=yes" || echo "room_key_free=no"
+
+# 11. THE OTHER LAW WEARING THE SAME WORD. `.claude/rules/design-rooms.md` calls a DIRECTORY a
+#     room, so a **Room:** naming one names no register -- counted, and named as a Room line
+#     rather than misreported as a missing Status.
+d=$(build room_directory); honest "$d"
+page_room "$d/active-designing/20260902-060602_directory.md" 'Design essay -- worth reading with the code deleted'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=1 ' && echo "room_directory_counted=yes" || echo "room_directory_counted=no"
+echo "$out" | grep -q 'FAIL active-designing/20260902-060602_directory.md Room does not name a room' \
+  && echo "room_directory_named=yes" || echo "room_directory_named=no"
+
+# 12. BOTH KEYS ARE READ. A lifecycle Status beside a Room token is free; neither key alone
+#     decides, so a page is never counted for answering under the other one.
+d=$(build both_keys); honest "$d"
+page_room "$d/docs/20260902-060603_both.md" 'vision' 'Living'
+commit_all "$d"
+scan_at "$d" 0 | grep -q 'verdict=ok' && echo "both_keys_free=yes" || echo "both_keys_free=no"
+
+# 13. THE ROOM A HAND FORGOT TO NAME. The roster's rooms are a hand-written list, so the way it
+#     narrows now is by room rather than by depth: a roster reading every depth of only the elder
+#     three passes every other leg in this file and still leaves the shipping shelf unread. It
+#     must refuse. This is leg 8's defect one axis over, planted the same way -- the elder list
+#     restored -- and proven from the failing side, because a reach leg is exactly the kind of
+#     check that reports a smaller clean tree instead of an error.
+d=$(build room_missing); honest "$d"
+commit_all "$d"
+cat > "$d/tools/fixtures/t/two_rooms_doorway_roster.sh" <<'THREEROOM'
+#!/bin/sh
+git ls-files 'external-research/*.md' 'active-designing/*.md' 'docs/*.md' 2>/dev/null |
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    */README.md) continue ;;
+    */yonder/*|*/archive/*) continue ;;
+  esac
+  [ -f "$f" ] || continue
+  printf '%s\n' "$f"
+done
+THREEROOM
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'FAIL doorway reach: docs-geode read no page' \
+  && echo "geode_missing_refused=yes" || echo "geode_missing_refused=no"
+# And the same plant must not walk free on its verdict either -- a scan that names a refusal and
+# then reports ok is a report wearing a gate's clothes.
+echo "$out" | grep -q 'verdict=ok' && echo "geode_missing_verdict_refused=no" || echo "geode_missing_verdict_refused=yes"
+
+# 14. THE SIBLING PREFIX. `docs/` and `docs-geode/` part at the fourth character, and a reach leg
+#     written with a loose prefix would let one room's pages satisfy the other's. With ONLY a
+#     docs-geode page planted and no `docs/` page at all, the docs reach must still refuse.
+d=$(build sibling_prefix)
+page "$d/external-research/20260901-010101_a.md" 'Living -- checkable'
+page "$d/active-designing/20260901-010102_b.md" 'Living -- vision'
+page "$d/active-designing/date/20260901/20260901-010104_d.md" 'Living -- mixed'
+page "$d/docs-geode/20260901-010105_e.md" 'Living -- checkable'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'FAIL doorway reach: docs read no page' \
+  && echo "sibling_prefix_distinct=yes" || echo "sibling_prefix_distinct=no"
+echo "$out" | grep -q 'geode=1 ' && echo "sibling_prefix_geode_counted=yes" || echo "sibling_prefix_geode_counted=no"
+
+# 15. THE ROOM BOUGHT RATHER THAN FOUND FREE. `manual/` joined 20260908 after its 7 silent doors
+#     were repaired, and a room admitted by a repair narrows exactly like a room admitted free: a
+#     roster reading the elder four passes every other leg here and leaves the manual unread. It
+#     must refuse, and it must not report ok while refusing -- leg 13 one room over.
+d=$(build manual_missing); honest "$d"
+commit_all "$d"
+cat > "$d/tools/fixtures/t/two_rooms_doorway_roster.sh" <<'FOURROOM'
+#!/bin/sh
+git ls-files 'external-research/*.md' 'active-designing/*.md' 'docs/*.md' 'docs-geode/*.md' 2>/dev/null |
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    */README.md) continue ;;
+    */yonder/*|*/archive/*) continue ;;
+  esac
+  [ -f "$f" ] || continue
+  printf '%s\n' "$f"
+done
+FOURROOM
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'FAIL doorway reach: manual read no page' \
+  && echo "manual_missing_refused=yes" || echo "manual_missing_refused=no"
+echo "$out" | grep -q 'verdict=ok' && echo "manual_missing_verdict_refused=no" || echo "manual_missing_verdict_refused=yes"
+
+# 16. AND THE REPAIR ITSELF IS A READING. The seven manual doors each carried a Status line that
+#     answered the lifecycle question and never the register one -- the split `context/TWO_ROOMS.md`
+#     tabulates. A page shaped like those, planted in the manual, must be counted and named rather
+#     than passed by its room's membership.
+d=$(build manual_silent); honest "$d"
+page "$d/manual/20260902-020204_setup.md" 'Setup guide -- the general shape runs today'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=1 ' && echo "manual_silent_counted=yes" || echo "manual_silent_counted=no"
+echo "$out" | grep -q 'FAIL manual/20260902-020204_setup.md Status does not name a room' \
+  && echo "manual_silent_named=yes" || echo "manual_silent_named=no"
+echo "$out" | grep -q 'verdict=ok' && echo "manual_silent_refused=no" || echo "manual_silent_refused=yes"
+# And the same door repaired the way this lap repaired the real seven walks free.
+d=$(build manual_repaired); honest "$d"
+page "$d/manual/20260902-020204_setup.md" 'Setup guide -- the general shape runs today. **Mixed room**: what runs now is checkable; what waits is named as a horizon.'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=0 ' && echo "manual_repaired_free=yes" || echo "manual_repaired_free=no"
+echo "$out" | grep -q 'verdict=ok' && echo "manual_repaired_verdict=yes" || echo "manual_repaired_verdict=no"
+
+# 17. THE SIXTH ROOM, AND THE LARGER HALF OF THE BILL. `foundations/` joined 20260908 after its 35
+#     silent doors were read and repaired one at a time. A roster reading the elder five passes
+#     every leg above and leaves the foundations unread, so it must refuse, and the refusal must
+#     decide the verdict -- legs 13 and 15, one room over again.
+d=$(build foundations_missing); honest "$d"
+commit_all "$d"
+cat > "$d/tools/fixtures/t/two_rooms_doorway_roster.sh" <<'FIVEROOM'
+#!/bin/sh
+git ls-files 'external-research/*.md' 'active-designing/*.md' 'docs/*.md' 'docs-geode/*.md' 'manual/*.md' 2>/dev/null |
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    */README.md) continue ;;
+    */yonder/*|*/archive/*) continue ;;
+  esac
+  [ -f "$f" ] || continue
+  printf '%s\n' "$f"
+done
+FIVEROOM
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'FAIL doorway reach: foundations read no page' \
+  && echo "foundations_missing_refused=yes" || echo "foundations_missing_refused=no"
+echo "$out" | grep -q 'verdict=ok' && echo "foundations_missing_verdict_refused=no" || echo "foundations_missing_verdict_refused=yes"
+
+# 18. AND THE REPAIR IS A READING HERE TOO. The 35 foundations doors each answered the lifecycle
+#     question -- `Living`, `Landed`, `Canon`, `Foundation` -- and never the register one. A page
+#     shaped like those must be counted and named, and the same door repaired the way this lap
+#     repaired the real 35 must walk free.
+d=$(build foundations_silent); honest "$d"
+page "$d/foundations/20260902-020205_pillars.md" 'Foundations -- direction pillars siloed'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=1 ' && echo "foundations_silent_counted=yes" || echo "foundations_silent_counted=no"
+echo "$out" | grep -q 'FAIL foundations/20260902-020205_pillars.md Status does not name a room' \
+  && echo "foundations_silent_named=yes" || echo "foundations_silent_named=no"
+echo "$out" | grep -q 'verdict=ok' && echo "foundations_silent_refused=no" || echo "foundations_silent_refused=yes"
+d=$(build foundations_repaired); honest "$d"
+page "$d/foundations/20260902-020205_pillars.md" 'Foundations -- direction pillars siloed -- **Vision room**: five disciplines that orient how the pier builds; nothing here is bound by a witness.'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=0 ' && echo "foundations_repaired_free=yes" || echo "foundations_repaired_free=no"
+echo "$out" | grep -q 'verdict=ok' && echo "foundations_repaired_verdict=yes" || echo "foundations_repaired_verdict=no"
+
+# 19. A STATUS SENTENCE THAT RUNS ON TAKES THE OTHER KEY. `scan_one` keeps the FIRST line of the
+#     Status, so a token appended to a Status whose sentence continues below lands mid-clause and
+#     breaks the prose. Two of this lap's 35 are shaped exactly so, and both name their room in a
+#     `**Room:**` line beneath the block instead. Proven from the failing side first: the run-on
+#     Status alone is counted and named, and the same page with the Room line beneath walks free.
+d=$(build runon_status); honest "$d"
+mkdir -p "$d/foundations"
+{
+  printf '# pen page\n\n'
+  printf '**Status:** Canon -- a founding statement. Every claim about running software marks itself\n'
+  printf 'proven or proposed, per the two-rooms law.\n'
+  printf '\nbody\n'
+} > "$d/foundations/20260902-020206_runon.md"
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'FAIL foundations/20260902-020206_runon.md Status does not name a room' \
+  && echo "runon_status_named=yes" || echo "runon_status_named=no"
+echo "$out" | grep -q 'verdict=ok' && echo "runon_status_refused=no" || echo "runon_status_refused=yes"
+d=$(build runon_repaired); honest "$d"
+mkdir -p "$d/foundations"
+{
+  printf '# pen page\n\n'
+  printf '**Status:** Canon -- a founding statement. Every claim about running software marks itself\n'
+  printf 'proven or proposed, per the two-rooms law.\n'
+  printf '**Room:** Mixed -- the founding argument orients, and every claim about running software marks itself.\n'
+  printf '\nbody\n'
+} > "$d/foundations/20260902-020206_runon.md"
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=0 ' && echo "runon_room_key_free=yes" || echo "runon_room_key_free=no"
+echo "$out" | grep -q 'verdict=ok' && echo "runon_room_key_verdict=yes" || echo "runon_room_key_verdict=no"
+
+# 20. THE SEVENTH ROOM, AND THE ONE THE LAW IS WRITTEN IN. `context/` holds `TWO_ROOMS.md` itself
+#     and joined 20260908 after its 38 silent doors were read and repaired. A roster reading the
+#     elder six passes every leg above and leaves the law's own room unread, so it must refuse and
+#     the refusal must decide the verdict -- legs 13, 15 and 17, one room over again.
+d=$(build context_missing); honest "$d"
+commit_all "$d"
+cat > "$d/tools/fixtures/t/two_rooms_doorway_roster.sh" <<'SIXROOM'
+#!/bin/sh
+git ls-files 'external-research/*.md' 'active-designing/*.md' 'docs/*.md' 'docs-geode/*.md' 'manual/*.md' 'foundations/*.md' 2>/dev/null |
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in
+    */README.md) continue ;;
+    */yonder/*|*/archive/*) continue ;;
+    */fixtures/*) continue ;;
+  esac
+  [ -f "$f" ] || continue
+  printf '%s\n' "$f"
+done
+SIXROOM
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'FAIL doorway reach: context read no page' \
+  && echo "context_missing_refused=yes" || echo "context_missing_refused=no"
+echo "$out" | grep -q 'verdict=ok' && echo "context_missing_verdict_refused=no" || echo "context_missing_verdict_refused=yes"
+
+# 21. AND THE REPAIR IS A READING HERE TOO. The 38 spec doors each answered the lifecycle question
+#     -- `Seated`, `Living`, `Proposal` -- and never the register one. A page shaped like those,
+#     planted in the seventh room, must be counted and named rather than passed by membership.
+d=$(build context_silent); honest "$d"
+page "$d/context/specs/20260902-020207_seam.md" 'Seated -- the maintainer word; closes the seam with prose only'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=1 ' && echo "context_silent_counted=yes" || echo "context_silent_counted=no"
+echo "$out" | grep -q 'FAIL context/specs/20260902-020207_seam.md Status does not name a room' \
+  && echo "context_silent_named=yes" || echo "context_silent_named=no"
+echo "$out" | grep -q 'verdict=ok' && echo "context_silent_refused=no" || echo "context_silent_refused=yes"
+
+# 22. AND THE SECOND KEY IS THE REPAIR THIS LAP ACTUALLY SHIPPED. Every one of the 38 kept its
+#     dense Status whole and gained a `**Room:**` line beneath it, because a spec Status here
+#     carries parity pins and links an appended token would land inside. The exact shape must
+#     walk free, and carry the verdict -- a fix proven only where it fails is half a proof.
+d=$(build context_repaired); honest "$d"
+page_room "$d/context/specs/20260902-020207_seam.md" \
+  'mixed -- the seam landed at its parity pin; the second seam stays unopened' \
+  'Seated -- the maintainer word; closes the seam with prose only'
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=0 ' && echo "context_repaired_free=yes" || echo "context_repaired_free=no"
+echo "$out" | grep -q 'verdict=ok' && echo "context_repaired_verdict=yes" || echo "context_repaired_verdict=no"
+
+# 23. A PLANT IS AN INPUT, NEVER A PAGE SPEAKING FROM A ROOM. `context/fixtures/` holds the only
+#     fixture pages any of the seven rooms supply -- a planted broken table, a planted `but`, a
+#     planted incomplete ledger -- and their bytes are read by the guard under test. Today all 8
+#     pass free for lacking a stamp; a stamped one must still pass free, or this census would ask
+#     a plant to name a register and change the very bytes another guard reads.
+d=$(build context_fixture); honest "$d"
+page "$d/context/fixtures/20260902-020208_planted.md" ''
+commit_all "$d"
+out=$(scan_at "$d" 0)
+echo "$out" | grep -q 'doorway fails=0 ' && echo "fixture_plant_free=yes" || echo "fixture_plant_free=no"
+echo "$out" | grep -q 'context=1 ' && echo "fixture_plant_uncounted=yes" || echo "fixture_plant_uncounted=no"
+
+
+# 24. A LIVING PAGE THAT NAMES ITS ROOM WALKS FREE, and reads zero. The repair this lap made to
+#     sixteen real doors is exactly this shape -- a stampless page gaining a token -- and a fix
+#     proven only where it fails is half a proof.
+d=$(build living_named); honest "$d"
+page "$d/context/specs/PLAIN.md" 'Living -- checkable'
+commit_all "$d"
+out=$(scan_at "$d" 0 0)
+echo "$out" | grep -q 'living_silent=0 ' && echo "living_named_uncounted=yes" || echo "living_named_uncounted=no"
+echo "$out" | grep -q 'stampless=1 ' && echo "living_named_stampless=yes" || echo "living_named_stampless=no"
+echo "$out" | grep -q 'verdict=ok' && echo "living_named_free=yes" || echo "living_named_free=no"
+
+# 25. THE TWO NUMBERS STAY APART. A dated page naming no room and a living page naming no room are
+#     two faults with two repairs -- one of them impossible, since dated testimony keeps every word
+#     it wrote. Merged into one reading, repairing a living door would hide a dated regression.
+d=$(build both_ratchets); honest "$d"
+page "$d/external-research/20260902-070701_dated.md" 'Living'
+page "$d/external-research/PLAIN.md" 'Living'
+commit_all "$d"
+out=$(scan_at "$d" 1 1)
+echo "$out" | grep -q 'doorway fails=1 ' && echo "ratchets_split_dated=yes" || echo "ratchets_split_dated=no"
+echo "$out" | grep -q 'living_silent=1 ' && echo "ratchets_split_living=yes" || echo "ratchets_split_living=no"
+scan_at "$d" 0 1 | grep -q 'FAIL doorway ratchet: 1 pages name no room' \
+  && echo "ratchets_split_dated_gates=yes" || echo "ratchets_split_dated_gates=no"
+
+# 26. A DAY SHELF'S INDEX IS A TABLE OF CONTENTS, never a page speaking from a room. The 21 such
+#     shelves in `active-designing/date/` became visible the moment living doors were read, every
+#     one of them silent; they leave the population rather than joining a ratchet nobody can work.
+d=$(build shelf_index); honest "$d"
+page "$d/active-designing/date/README-index-20260901.md" 'Chapter index -- OPEN while the day runs'
+commit_all "$d"
+out=$(scan_at "$d" 0 0)
+echo "$out" | grep -q 'doorway pages=8 ' && echo "shelf_index_excluded=yes" || echo "shelf_index_excluded=no"
+echo "$out" | grep -q 'verdict=ok' && echo "shelf_index_free=yes" || echo "shelf_index_free=no"
+
+# 27. THE DOOR IS A KEY'S OWN LINE, never a mention of it. `context/TWO_ROOMS.md` -- the law this
+#     guard enforces -- writes "`**Status:**` or `**Room:**`" inside its `Last updated` line, three
+#     lines above a Status reading `checkable-room canon`, and the elder anywhere-in-the-head grep
+#     returned that sentence and called the law's own door silent.
+d=$(build door_line); honest "$d"
+mkdir -p "$d/docs"
+{
+  printf '# pen page\n\n'
+  printf '**Last updated:** the door is read from **Status:** or **Room:**\n'
+  printf '**Status:** Living -- checkable\n\nbody\n'
+} > "$d/docs/20260902-080801_mention.md"
+commit_all "$d"
+out=$(scan_at "$d" 0 0)
+echo "$out" | grep -q 'doorway fails=0 ' && echo "prose_mention_not_the_door=yes" || echo "prose_mention_not_the_door=no"
+echo "$out" | grep -q 'verdict=ok' && echo "prose_mention_verdict=yes" || echo "prose_mention_verdict=no"
+
+# 28. AND THE SHARED HEADER ROW STILL READS. Reading line-starts ALONE misreported 92 pages as
+#     having no Status at all, so the anywhere-in-line match stays as the fallback. Both legs
+#     matter: the preference above and this fallback fail in opposite directions.
+d=$(build header_row); honest "$d"
+mkdir -p "$d/docs"
+{
+  printf '# pen page\n\n'
+  printf '**Stamp:** `20260902.080802` - **Voice:** Kyri - **Status:** Living, mixed -- measured\n\nbody\n'
+} > "$d/docs/20260902-080802_row.md"
+commit_all "$d"
+scan_at "$d" 0 0 | grep -q 'doorway fails=0 ' && echo "header_row_read=yes" || echo "header_row_read=no"
+
+# 29. THE KEY NEXT DOOR IS NOT THIS KEY'S ANSWER (20260917). `door_line` returns everything after
+#     the key on the line, and this tree folds several keys onto one header row joined by ` - `, so
+#     a room token in a NEIGHBOUR's value was read as this page's own. `names_room` cuts each value
+#     at the next key now. Measured over this guard's own 1,363-page roster the day the cut landed:
+#     130 joined key reads, 47 reaching past their own key, and ONE page -- a real one -- whose
+#     entire verdict rested on the token next door. Both sides: the page whose Status says only
+#     `Living` while its Style key spells `Mixed room` must FAIL, and the page whose own Status
+#     names its room on the same folded row must still pass.
+d=$(build neighbour_key); honest "$d"
+mkdir -p "$d/docs"
+{
+  printf '# pen page\n\n'
+  printf '**Language:** EN - **Status:** Living - **Style:** Gauge, Field setting -- **Mixed room**: the gates are witnesses\n\nbody\n'
+} > "$d/docs/20260902-090901_neighbour.md"
+commit_all "$d"
+out=$(scan_at "$d" 0 0)
+echo "$out" | grep -q 'doorway fails=1 ' && echo "neighbour_token_counted=yes" || echo "neighbour_token_counted=no"
+echo "$out" | grep -q 'FAIL docs/20260902-090901_neighbour.md Status does not name a room' \
+  && echo "neighbour_token_named=yes" || echo "neighbour_token_named=no"
+
+# 30. AND THE CURE THE REAL PAGE TOOK: a `**Room:**` line accreted beside what the Style line
+#     already said. Same page, one line added, and the door answers under the key the law reads.
+{
+  printf '# pen page\n\n'
+  printf '**Language:** EN - **Status:** Living - **Style:** Gauge, Field setting -- **Mixed room**: the gates are witnesses\n'
+  printf '**Room:** mixed\n\nbody\n'
+} > "$d/docs/20260902-090901_neighbour.md"
+commit_all "$d"
+scan_at "$d" 0 0 | grep -q 'doorway fails=0 ' && echo "accreted_room_frees=yes" || echo "accreted_room_frees=no"
+
+# 31. THE READER IS CARRIED, AND THE CARRIED TWIN READS THE SAME. The pen copies `scan_one` alone,
+#     so `tools/fixtures/s/shell_portable.sh` is absent here by construction and every leg above ran
+#     on the local twin. This asserts that out loud, then runs the SAME page against the sourced
+#     branch in the real tree, so a twin that drifted from the library would part the two answers.
+( cd "$d" && [ ! -f tools/fixtures/s/shell_portable.sh ] ) \
+  && echo "pen_has_no_library=yes" || echo "pen_has_no_library=no"
+pen_page=$pen/20260902-090902_carried.md
+{
+  printf '# pen page\n\n'
+  printf '**Language:** EN - **Status:** Living - **Style:** Gauge, Field setting -- **Mixed room**: the gates\n\nbody\n'
+} > "$pen_page"
+carried_out=$( ( cd "$d" && sh tools/fixtures/t/two_rooms_doorway_scan_one.sh "$pen_page" 20260101-000000 ) 2>&1 || true )
+sourced_out=$( ( cd "$root" && sh tools/fixtures/t/two_rooms_doorway_scan_one.sh "$pen_page" 20260101-000000 ) 2>&1 || true )
+[ "$carried_out" = "$sourced_out" ] \
+  && echo "carried_and_sourced_agree=yes" || echo "carried_and_sourced_agree=no"
+printf '%s\n' "$sourced_out" | grep -q 'Status does not name a room' \
+  && echo "carried_leg_reads_the_cut=yes" || echo "carried_leg_reads_the_cut=no"
+
+# 32. A MUTATION, so this is a control rather than a hope: strike the cut out of a real copy of
+#     `scan_one` inside the pen and the neighbour's token passes the page again.
+mut=$pen/scan_one_mutant.sh
+# THE DELIMITER IS `#` BECAUSE THE PATTERN CARRIES A PIPE. Written with `s|...|...|` first, sed
+#     refused the expression, wrote an EMPTY mutant, and an empty script exits 0 -- which this leg
+#     would have read as "without the cut the neighbour passes". A mutation that fails to mutate can
+#     look exactly like the mutation working, so the mutant is size-checked as well as compared.
+sed 's#st=$(key_value Status "$(door_line Status "$door_head_local" | head -1)")#st=$(door_line Status "$door_head_local" | head -1)#' \
+  "$root/tools/fixtures/t/two_rooms_doorway_scan_one.sh" > "$mut"
+if cmp -s "$mut" "$root/tools/fixtures/t/two_rooms_doorway_scan_one.sh" || [ ! -s "$mut" ]; then
+  echo "cut_mutation_edited=no"
+else
+  echo "cut_mutation_edited=yes"
+  mut_rc=0
+  ( cd "$root" && sh "$mut" "$pen_page" 20260101-000000 ) >/dev/null 2>&1 || mut_rc=$?
+  [ "$mut_rc" = 0 ] && echo "without_cut_neighbour_passes=yes" || echo "without_cut_neighbour_passes=no"
+fi
+
+echo "control_verdict=ok"

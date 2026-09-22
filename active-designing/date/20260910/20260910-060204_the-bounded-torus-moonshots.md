@@ -1,0 +1,412 @@
+# The Bounded Torus -- Twelve Moonshots for the Diffuser Lane
+
+**Stamp:** `20260910.060204`
+**Room:** vision -- a proposal page. Every line below is a proposal, and each one waits for its own first witness.
+**Status:** Proposed -- vision. Nothing here runs today.
+**Lane:** Diffuser -- moonshots and whitepaper research, walked in tandem with Bakery
+**Style:** Gauge at the Field setting
+**Voice:** Kyri
+**Row 1 erratum:** `20260916.025923` -- row 1 was ranked FIRST on *runs today in Rye; one assert carries the whole claim*, and it ran: the first witness landed on `20260910.062400` as `tools/rye/wrap_ring.rye` (207 lines) under `tools/w/wrap_ring_witness.rish`, rostered as the guard `wrap_ring` at `tier cadence`. It is **GREEN on metal** read `20260916.025923`, in **2.78 seconds** including a compile of the binary from source and **1.70** on a second run. **The row's own falsifier is refused by construction rather than by a race:** every page carries the lap that wrote it, so a reader holding a page from a spent lap is refused by name, and `(i + C) % C == i` -- which holds for every C and says nothing about memory -- cannot stand in for the claim. **What the witness sharpened:** a reader's page is safe for exactly ONE circumference of writes, which is the bound stated as a distance rather than as a count, since a lap-0 page is overwritten only when the ring reaches it again. **What it does not reach:** one ring at `circumference = 16` and `page_bytes = 64`, single threaded, in one program. No second writer thread ever runs, so the falsifier is answered by the lap tag rather than by concurrency. **And nothing had turned it.** `grep -c '^ran wrap_ring '` over `construction/standing-equipment-runs.kyri` read **0** receipts in the six days between seating and this reading, because a `tier cadence` guard waits on a rota nothing was turning until `20260915`. **The witness figures are WALLED** -- `wrap_ring` reds if the ring stops refusing -- and **the receipt count is FREE**, so run that grep rather than reading the zero. Every other word on this page is kept as written.
+**Row 3 erratum:** `20260916.025923` -- row 3 was ranked SECOND on *runs today on a witness the tree already owns*, and it ran: the first witness landed on `20260910.063900` as `tools/fixtures/c/cyclic_witness_scan.sh` (83 lines) under `tools/c/cyclic_witness_witness.rish`, rostered as the guard `cyclic_witness` at `tier cadence`. It is **GREEN on metal** read `20260916.025923` in **1.25 seconds**, nine control behaviors passing with residue shown from both sides, and the sampled witness `tools/f/fleet_clockout_witness.rish` reads `entry` and `exit` digests equal at `e3b0c442...b852b855`, `residue_paths=0`, `verdict=cycles`. **What the claim actually covers:** the digest is taken over `git status --porcelain` before and after, so *cycles* means the **working tree** returns rather than the witness's own memory, and a write into a gitignored path -- which is where a lap is supposed to write -- is deliberately outside the reading. **The row's own confidence reads true:** one green cycle proves one witness cycles, and the class stays open. **And nothing had turned it either.** `grep -c '^ran cyclic_witness '` over `construction/standing-equipment-runs.kyri` read **0** receipts, which row 11's own erratum had already named from the other side on `20260915.212827` -- *left **unrun**, its instrument being the cadence-tier `cyclic_witness`* -- while this page still read row 3 as untouched. **The witness figures are WALLED** and **the receipt count is FREE**; run the grep rather than reading the zero. Every other word on this page is kept as written.
+**Row 6 erratum:** `20260911.081019` -- row 6 was ranked third on *one host read away*, and the read says no. `tools/fixtures/e/energy_instrument_scan.sh` answers `joule_source=none` and `tier=counters` on this pier, so the millijoule witness cannot be built here. The counters-tier reshaping, its measurement, and its witness stand at [`20260911-081019_the-unit-this-pier-can-carry.md`](20260911-081019_the-unit-this-pier-can-carry.md). Every other word on this page is kept as written.
+**Row 4 erratum:** `20260911.195059` -- row 4 was ranked sixth on *cheap to try; the saving rests on locality yet to be measured*, and the locality is measured. Its falsifier fires at radius ZERO: `tools/fixtures/a/aether_falloff_scan.sh` reads 288 of 345 seated guards carrying no coordinate at all, so the woken share of the roster is **0.881** before any radius is opened, and the 57 guards the map does place saturate at **two hops**. The row attributes the covering to a DENSE roster; the cause is ABSENCE, which wants a map row rather than a radius. Even a finished map would leave three distinct radii before saturation, so a 1/r intensity has nothing continuous to grade. The reading stands at [`20260911-195059_the-field-with-no-distance.md`](20260911-195059_the-field-with-no-distance.md). Recommended re-rank: last of the twelve. **Every figure in this clause is FREE** -- the roster grows and the window slides, and it read 291 of 348 at `0.888` within the hour -- so run `sh tools/fixtures/a/aether_falloff_scan.sh` rather than reading these. Every other word on this page is kept as written.
+**Rows 2, 5, 7 erratum:** `20260917.233424` -- five whole-file reads across Aurora, Mantra, and Caravan (twice) asked whether a composable periodic seam already sits uncomposed in the tree, waiting for one of these three rows to lay a torus over it. Three read checked negative; the other two found real but narrow structure -- Caravan's `queue.rye` and `cycle.rye` carry two independent one-axis rings nobody has composed, and Tally's three gardens compose cleanly into a buildable two-axis index that stays a relabeling of an already-linear store. **No row's stated confidence moves**, because each was already a claim about building new structure rather than discovering hidden structure, and five checks confirm the premise rather than change it. What moves is the cost picture behind row 2's own ranking note ("a table first, a Caravan change much later"): five reads now stand behind that "much later" being a fresh design rather than a composition. Full synthesis, falsifier, and the one buildable item this thread produced (`tally/torus_index.rye`, sized for Bakery) at [`20260917-233424_the-torus-thread-closes-five-checks-one-buildable-seam.md`](20260917-233424_the-torus-thread-closes-five-checks-one-buildable-seam.md). **This is not exhaustive** -- 108 of Caravan's 114 tracked files, plus Comlink, Tablecloth's real store, Amphora, and Brix, carry zero reads from this thread. Every other word on this page is kept as written.
+
+**Row 2 erratum:** `20260912.021711` -- row 2 was ranked seventh on *a table first, a Caravan change much later*, and the table cannot be drawn. Its falsifier fires on seated code rather than on a future process: `caravan/capabilities.rye` declares five rights as bits of a `u8` mask and compares them in `Rights.contains(have, need)`, returning `(have & need) == need`, which is subset containment -- the Boolean lattice, never a line. `tools/fixtures/c/capability_lattice_scan.sh` reads the ten masks the `caravan/` room actually constructs and finds **32 of their 45 unordered pairs incomparable**. The sharper half is the sign: a radius-only checker admits **48** of the seated conferrals the lattice refuses and refuses **0** that it allows, since popcount is monotone under subset -- so every error a ring model can make is an **over-grant**, silent by construction. The angle half fails on arithmetic beside it: a privilege is a SET of rights, so naming one needs `2^n` sectors, at which point the sector index IS the mask. What survives is the hop bound, supplied by the lattice height. The reading stands at [`20260912-021711_the-privilege-that-was-never-a-line.md`](20260912-021711_the-privilege-that-was-never-a-line.md). Recommended re-rank: last, beside row 4, for the same underlying cause -- a radius over a population carrying no usable distance. **Every figure in this clause is FREE** -- the room constructs new composites as it grows -- so run `sh tools/fixtures/c/capability_lattice_scan.sh` rather than reading them; the witness walls the instrument rather than the counts, on purpose, since these describe a capability model that is correct. Every other word on this page is kept as written.
+**Row 5 erratum:** `20260912.042053` -- row 5 was ranked eighth on *a toy cloth stands well clear of the real store*, and the toy is unnecessary: the reading is available on the tree's own bytes today. Its falsifier is clustering, and clustering **cannot happen**. `tools/fixtures/t/torus_fold_scan.sh` hashes a strided sample of tracked files with the tree's own SHA3-512, reads two digest bytes as coordinates on a 256 x 256 torus, and finds chi-squared **58.50** and **71.75** on two independent byte offsets against a p=0.001 critical value of **103.51** at 63 degrees of freedom. **The failing falsifier is what kills the row.** A cryptographic hash is built to avalanche, and that one property is both why the fold is even and why its adjacency carries no relation: toroidal pair distance has the closed form **128** for uniform coordinates, and same-directory pairs read **126.250** and **122.531** while a file against itself with **one byte changed** reads **130.844** and **122.469** -- every one inside three standard errors of random. Two documents differing in a single character land as far apart as two strangers, so the trade row 5 anticipated is one a hash cannot offer. **What survives is placement rather than adjacency:** even shards for free at any grid, and a bounded four-neighbour replica set uniform at every cell, which is row 1's wrap applied to storage. Recommended re-aim rather than re-rank: keep the row, drop the adjacency sentence, and let its first witness measure shard evenness under growth. The reading stands at [`20260912-042053_the-fold-that-had-nothing-to-hold.md`](20260912-042053_the-fold-that-had-nothing-to-hold.md). **Every figure in this clause is FREE** -- the tree grows and the stride moves with it -- so run `sh tools/fixtures/t/torus_fold_scan.sh` rather than reading them; the witness walls the instrument rather than the counts, since a three-sigma test over six populations refuses about one run in sixty by construction. Every other word on this page is kept as written.
+
+
+**Row 5 second erratum:** `20260915.175000` -- the first erratum kept row 5 alive on a remainder and recommended a re-aim: *even shards for free at any grid, and a bounded four-neighbour replica set uniform at every cell.* **The remainder does not survive either.** `tools/fixtures/t/torus_place_scan.sh` compares every property in it against a RING of the same cell count, on the ground that a property a line also has is not a property a second axis supplies. **Evenness belongs to the digest:** two folds reading different bits of one SHA3-512 digest read chi-squared **74.02** and **73.02** against a p=0.001 critical **103.51** at 63 degrees of freedom, and agree on where to place a name **8** times in 511 against the **7.98** chance alone gives. **Uniformity belongs to vertex-transitivity**, which a ring has too, so it is geometry rather than a finding. **And spread comes out against the grid:** the shortest contiguous run of storage indices whose loss destroys every copy of some cell reads **17** for the torus, **5** for a ring taking its nearest four, and **33** for a ring free to choose offsets of one and two rows -- all three matching their closed forms `2g+1`, `5` and `4g+1`. A torus hands down a FIXED offset set, `{1, g}`; a ring chooses, and choosing wins. What is worth keeping is declustering, which needs no torus. Recommended disposition: **breach** -- the row is superseded in this living page and the history keeps every word. **One door stays open:** every reading in both papers rests on a key that avalanches, and a key carrying locality on purpose is a claim nobody here has proposed. The reading stands at [`20260915-175000_the-axis-that-carried-nothing.md`](20260915-175000_the-axis-that-carried-nothing.md). **Every figure in this clause is FREE** -- run `sh tools/fixtures/t/torus_place_scan.sh` rather than reading them. Every other word on this page is kept as written.
+
+**The open door, closed `20260915.181000`.** Both row 5 errata end on the same sentence -- *a key carrying locality on purpose is a claim nobody here has proposed* -- and it is now proposed and priced. `tools/fixtures/l/locality_key_scan.sh` compares the crudest locality-bearing key there is, the file's own leading two bytes, against the SHA3-512 digest over the same tracked population at the same 64-cell grid. **It buys what it promises:** the prefix key survives a one-byte edit at offset 32 for every probe while the digest survives none, and two files from one room sit **0.410** cells apart against the digest's **15.693** and the **16.000** two independent uniform keys give. **And it sells two things for it.** Evenness: chi-squared **13134.05** against a p=0.001 critical **103.51**, on a population where the digest reads **79.05**. And confidentiality: an observer holding keys alone places **0.5353** of files in the right room against a no-key plurality baseline of **0.3471** over 44 rooms. **The finding is that these are one quantity read three ways** -- a key that lets a reader find neighbours groups documents, and a key that groups documents tells an observer which group each is in -- so the avalanche both torus readings ran into is what BUYS the other two properties. The control proves the last two separable rather than one restated, by planting prefixes clustered exactly as in the real case with rooms assigned round robin. The reading stands at [`20260915-181000_the-key-that-carries-locality.md`](20260915-181000_the-key-that-carries-locality.md). **Every figure in this clause is FREE** -- run `sh tools/fixtures/l/locality_key_scan.sh` rather than reading them. Every other word on this page is kept as written.
+
+**Row 8 erratum:** `20260915.211724` -- row 8 was ranked ninth on *a three-node fixture is cheap; the routing claim is deep*, and the claim splits in two before the fixture is reached. Its sentence carries a COST claim and a DELIVERY claim, and only the first survives. `tools/fixtures/m/bearing_quorum_scan.sh` builds a g x g torus in arithmetic at four grids and reads all three halves. **The cost half stands:** an announce along the row plus a query along the column is **2g - 2** messages against a dissemination floor of **N - 1**, the ratio falls **0.400** to **0.061** across g = 4 to 32, and the exponent of cost against node count reads **0.5237** over the two largest grids. **The delivery half does not:** one announce reaches **g of N** nodes, a share of **0.031** at g = 32, while the intersection of an announce row with a query column reads exactly **ONE** for all **1,360** distinct cases. So the scheme is a **quorum system** rather than a broadcast -- it costs the square root of N precisely because its guarantee is intersection rather than coverage, and row 8's own word *consensus* describes a coverage the measurement denies. **And the wrap is worth exactly one cut**, which is the one finding belonging to the torus rather than to the grid beside it: a cycle loses coverage in **zero** cut positions and answers nobody silently, a path of the same length loses **1,300** and answers **372,368** queriers silently, and two cuts split the cycle in all **650** cases -- so row 8's own falsifier fires on a path and is extinguished by the wrap. Recommended **re-aim rather than re-rank, and a rank of fourth**: keep the row and its three-node fixture, drop the word *consensus*, and let it state the guarantee it actually carries. The reading stands at [`20260915-211724_the-bearing-that-meets-rather-than-floods.md`](20260915-211724_the-bearing-that-meets-rather-than-floods.md). **Every figure in this clause is HELD** -- the scan opens no file, so none can move under this tree -- and `sh tools/fixtures/m/bearing_quorum_scan.sh` reads them back. Every other word on this page is kept as written.
+**Row 11 erratum:** `20260915.212827` -- row 11 was ranked eleventh on *follows the measurements it means to bind*, and the measurements have arrived: nine rows now carry landed readings, so the row's own assumption and falsifier are both checkable. `tools/fixtures/w/whitepaper_definitions_scan.sh` judges each of the three definitions by RUNNING the sibling instruments and reading their emitted keys rather than the errata that describe them. **One of three stands.** *A bound when space wraps* holds on `cost_half=stands` and `wrap_worth_one_cut=yes`. *A radius when privilege is distance* is refuted on three keys across two instruments -- **32** incomparable unordered pairs and **48** over-admissions where a line reads zero of each, and a mapped saturation radius of **2** where a gradient needs three. *A topos when every proof is a cycle* is left **unrun**, its instrument being the cadence-tier `cyclic_witness`, and the scan proves the answer cannot turn on it by recomputing with that definition forced to stand. **The survivors need a ring rather than a torus:** each definition states how many independent cycles the space must carry, and the maximum among the supported ones reads **1** on a page titled for a torus -- two ideas wearing one name, which is row 11's own falsifier arriving along an axis its sentence never named. **And that falsifier cannot fire at all:** each definition bounds the space from below, lower bounds compose by maximum, and over all **27** verdict assignments the conflicting count reads **0** under `atleast` and **5** under `exact`, so the hinge is visible rather than argued. Recommended **re-aim**: keep the row, drop the radius definition, replace the falsifier with *a definition the paper binds is refuted by a green witness in this tree*, and write the smaller paper the measurements support. The reading stands at [`20260915-212827_the-paper-that-checked-its-own-premise.md`](20260915-212827_the-paper-that-checked-its-own-premise.md). **Every figure in this clause is HELD** -- the assignment sweep is arithmetic and each borrowed key comes from a gated sibling -- and `sh tools/fixtures/w/whitepaper_definitions_scan.sh` reads them back. Every other word on this page is kept as written.
+**Row 12 erratum:** `20260915.221500` -- row 12 was ranked tenth on *sequenced after the first green, by its own definition*, and the greens have arrived: ten rows carry landed readings, so the METHOD row 12 proposes can be held against what the ordering actually did. `tools/fixtures/w/workload_trial_scan.sh` reads the three things a falsifier of its shape needs, and they fail separately. **The metal clause fired, and no trial ran it.** Of the nine instruments the errata name, classified by what their own executable lines open with one delegation hop followed, **four touch metal**, two read tracked bytes, two are arithmetic, one reads a host facility, and **none is absent**; six re-ranks or re-aims were recommended. Every one of the four produced a **refusal** -- a compiler declining a trap with no bound, a digest avalanching two near-identical files apart, a tick loop proving three closed forms -- where row 12 proposes a comparison of **degree**. **And degree has no operand:** across all twelve row bodies the count of numeric effect claims reads **zero**, so the falsifier cannot fire in either direction. That is row 11's finding arriving along a second road, and two of the twelve rows now carry falsifiers structurally incapable of firing. **And the pier puts a floor under any single trial:** a deterministic workload measuring a change of exactly zero read a baseline spread of **16.7 to 54.8 percent** of its median across eight readings at load average 8 to 13, with **40 to 100 percent** of zero-change trials landing inside the band -- so up to six trials in ten reported a difference where nothing had changed, and any improvement under roughly a fifth is invisible to one trial here. Recommended **re-aim, keeping the rank of tenth**: keep the row and its one-page trial report, drop the sentence making a trial's number the thing that funds the ordering, and replace the falsifier with one that can fire -- *the trial's number sits inside the baseline spread, measured at the baseline size the trial names, against an effect size some row proposed.* The reading stands at [`20260915-221500_the-trial-with-nothing-to-compare.md`](20260915-221500_the-trial-with-nothing-to-compare.md). **The funding and timing figures in this clause are FREE** -- the first rise as rows land, the second move with what the other seven ships are doing -- so run `sh tools/fixtures/w/workload_trial_scan.sh` rather than reading them; what is **walled** is the zero effect sizes and the presence of every named instrument. Every other word on this page is kept as written.
+**Row 9 erratum:** `20260911.190217` -- row 9 was ranked fifth at *one to two weeks* on *a fake clock is enough for the first witness*, and the clock is not enough. Its proposed first witness prints parked and running sector counts, which are properties of the parking rule; its falsifier is about BACKLOG, which needs an arrival rate and a service rate the clock holds nowhere -- so that witness stays green whatever the falsifier does. `tools/rye/duty_cycle_backlog.rye` supplies the missing terms and proves three closed forms against a tick loop: a park stays under `S * (1 - rho)`, it drains in `k * rho / (1 - rho)` spans, and the worst wait is `k` spans with utilization entering it nowhere. So row 9's own *3 of 8* states two entry conditions -- utilization at or under 62.5 pct, and a latency budget of at least three sector-spans. The reading stands at [`20260911-190217_the-clock-that-could-not-hear-the-queue.md`](20260911-190217_the-clock-that-could-not-hear-the-queue.md). Every other word on this page is kept as written.
+**Row 10 erratum:** `20260911.111917` -- row 10 was ranked fourth at *three to six weeks*, and it already stood. Measured through `glow/bin/glow_run` on this pier: a trap written with no bound refuses at exit 1 with `MissingBound`, and the same trap with `32` written in is accepted at exit 0 -- row 10's first witness verbatim, reachable because `glow/rune_bounded_trap.rye` has held the required-bound rune since `20260716`. Its falsifier also retires twice over: the dependent form `|-  (lent records)` is ACCEPTED, and of 451 tracked `.glow` sources exactly two carry a trap, both fixtures, so there is no real Glow loop to falsify against. What was genuinely open is the gate's third cell, now closed by `tools/g/glow_trap_bound_witness.rish`. The reading stands at [`20260911-111917_the-loop-that-already-refused.md`](20260911-111917_the-loop-that-already-refused.md). Every other word on this page is kept as written.
+**Row 7 erratum:** `20260916.042700` -- row 7 was ranked twelfth and last, on *paper until a board exists*, and it was the last of the twelve carrying no erratum. **Both halves are gradeable before any board arrives.** `tools/fixtures/a/aurora_placement_scan.sh` grades the geometry in arithmetic and the operand on this tree's bytes, under `tools/a/aurora_placement_witness.rish`, GREEN on metal in **12 seconds** over a control of **54 legs, 0 failures**, four mutations each bitten. **The row's own falsifier cannot fire at the first grid it names.** At **k = 2** the wrap link duplicates a link the mesh already has, since `i + 1 mod 2` and `i - 1 mod 2` name the same node -- so a 2 x 2 torus and a 2 x 2 mesh are **one graph**: diameter **2** apiece, **4** distinct links apiece, mean hop **1.3333** apiece. A mesh board takes nothing away, because the wrap was a duplicate. **At 16 cores it fires and is worth something:** diameter **6 to 4**, mean hop **2.6667 to 2.1333**, a fifth of the average distance for 8 more links. **And the placement map has no operand.** It minimizes `sum w(i,j) x hops(i,j)`, so it wants a module-to-module communication weight; this tree holds **structure** -- 44 rooms carrying Rye, 1,084 import sites resolving through hand-filed symlinks into **75** directed room pairs over **225** edges, one edge per importing source file, a startup read and a hot loop indistinguishable. Of **9,188** `loom` keys in the tracked journal, **242** name a room and **4** name two, all four counting files or symlinks. That is row 12's *degree has no operand* arriving on a second road. **And 44 rooms outnumber 4 nodes eleven to one**, so the map is first a coarsening the row never states. Recommended **re-aim, keeping the rank of twelfth**: keep the row and its placement map, drop the 4-core grid from the sentence, name the coarsening as the first step, and replace the falsifier with one that can fire -- *at the smallest grid the row names, the torus and the mesh are the same graph*, or *no measurement in this tree gives a weight between two named modules*. The reading stands at [`20260916-042700_the-grid-that-was-already-flat.md`](20260916-042700_the-grid-that-was-already-flat.md). **The geometry figures are HELD** -- the reading opens no file for them -- and **every operand figure is FREE**, so run `sh tools/fixtures/a/aurora_placement_scan.sh` rather than reading them. Every other word on this page is kept as written.
+
+**Row 7 second erratum:** `20260916.095958` -- the first erratum raised one question and set it aside: whether the static import graph, read as a LOWER BOUND on coupling rather than as a weight, would be enough to start. It is, with a named tolerance, and the answer turns on a distinction the question left open. **A proxy graph departs from the truth two independent ways.** SCALE drift keeps the edges and lets the numbers wander; STRUCTURE drift moves the edges, since an import read once at startup stays silent all day and two rooms that skip each other in source may speak through a third. Measured on this tree's own 32-room, 68-pair graph at the 16-node grid, twenty draws a rung: **scaling every weight by a factor drawn from `[1, 256]` leaves the computed layout where it stood** -- the gain share reads `0.8574` at one and `0.8732` at 256 -- while **structure drift takes it apart**, `0.8574` at zero percent, `0.3827` at sixty, `0.0571` at eighty and **`-0.1057`** at a hundred, where a layout built on an unrelated graph finishes behind chance by a tenth and so proves the instrument from the far side. The static graph therefore tolerates roughly two thirds of its edges wandering and still places better than chance, a band of seventy to ninety percent across five seeds. **The baseline is what makes that number mean anything:** a node holding many rooms pays zero for the traffic inside it, so the baseline deals rooms at random into the SAME node-occupancy profile the computed layout produced, and the first draft's unconstrained baseline read the opposite finding, the computed layout finishing BEHIND chance, because the true minimum of an unconstrained placement is every room on one node at cost zero. **And the placement's missing operand is two terms rather than one.** A node holds a bounded amount of code, and that term this tree does hold: **34,941,409** tracked non-symlink Rye bytes, of which `caravan` alone is **40 percent** and **6.43x** an equal sixteenth, so **every assignment of MODULES to nodes overflows a node at either grid the row names** -- while the largest single file is a quarter of a node's share, so the unit fits one level down. Recommended **re-aim a second time, keeping the rank of twelfth**: name which FILES sit on which node rather than which modules, since the coarsening the first erratum called the harder half is forced rather than optional, and state the operand as the static import graph read as a lower bound with its tolerance attached. The reading stands at [`20260916-095958_the-two-ways-a-proxy-drifts.md`](20260916-095958_the-two-ways-a-proxy-drifts.md). **The capacity and graph figures are FREE**, so run `sh tools/fixtures/a/aurora_placement_scan.sh` rather than reading them. Every other word on this page is kept as written.
+
+**Row 7 third erratum:** `20260917.142006` -- the second erratum closed on a named step and nobody had taken it: *name which FILES sit on which node rather than which modules, since the coarsening the first erratum called the harder half is forced rather than optional.* This is that step, and the unit it names carries a ceiling the sentence never reaches. `tools/fixtures/a/aurora_file_placement_scan.sh` reads 1,761 tracked non-symlink Rye sources at **35,113,670** bytes and compares the largest single file, `caravan/farewell.rye` at **568,249**, against each grid's equal share: **6.5 percent** of a quarter, **25.9 percent** of a sixteenth, and **103.6 percent** of a sixty-fourth. So the file unit fits at 4 and 16 nodes and **overflows at 64**, one grid above the largest the row names -- the escape the coarsening bought is one grid wide. **And most of the graph was never visible.** Imports resolved at FILE granularity through the hand-filed symlinks give **7,549** unordered edges over **1,561** endpoint files against the room graph's **67** pairs, **112.672** edges per pair -- and **6,389 of the 7,549, a share of 0.8463, have both ends in ONE room**, so a room-level graph cannot represent them and a module placement would have had every one of them free by construction. **That is the price the constraint charges.** The capacity-constrained greedy layout keeps **0.2184** of edges on one node at sixteen where a room layout keeps **0.8463**, so **0.6279 of the graph turns from free traffic into real hops** purely because the unit had to get smaller. The layout is still worth computing on the reading that decides it: against a COUNT-MATCHED floor -- every file dealt at random into the same per-node file count, so a layout free to pile files up cannot win on occupancy alone -- it gains **0.3651** at sixteen nodes, with **0** files unseated. Recommended **re-aim a third time, keeping the rank of twelfth**: keep the row and its placement map, say FILES rather than modules, name the 64-node ceiling the file unit carries, and state that capacity costs the map about five eighths of the locality a module placement would have had for nothing. The reading stands at [`20260917-142006_the-unit-the-capacity-forced.md`](20260917-142006_the-unit-the-capacity-forced.md). **Every figure in this clause is FREE** -- the tree grows and `caravan` grows fastest -- so run `sh tools/fixtures/a/aurora_file_placement_scan.sh` rather than reading them. Every other word on this page is kept as written.
+
+**Row 7 fourth erratum:** `20260917.163338` -- the third erratum's own paper named its weakest joint in its own words: the structure-drift tolerance it attached to the operand was **borrowed** from the room-granularity sibling rather than re-measured at file granularity. This is that re-measurement, by the sibling's method unchanged, at its threshold of `0.10` and its grid of 16 nodes. **The borrowing was sound, and the number it agreed with was a ladder rung.** `tools/fixtures/a/aurora_file_placement_scan.sh` reading 4 silences a rising share of the 7,549 file edges and lets the same count of unseen pairs carry traffic, holding the computed layout FIXED and costing it against a count-matched floor under the same distorted edges: the gain falls `0.366240` at zero, `0.141855` at sixty, `0.106710` at seventy and **`-0.001378`** at a hundred, where a layout costed against a graph it shares nothing with lands at chance to three decimals and proves the instrument from the far side. So `file_drift_crossing_pct=71.90`, above the **roughly two thirds** the paper cited. **On the sibling's five rungs both graphs answer 60**, which is a readout coarser than the effect: interpolating each graph's own live ladder gives **77.37** for 67 room pairs against **71.90** for 7,549 file edges, so the file unit's tolerance is genuinely lower and by **five points** rather than by the collapse its `0.2184`-against-`0.8463` locality would suggest -- because the count-matched floor is dealt into the layout's own occupancy, so the occupancy difference cancels and only the graph's contribution is left. **And the decay is straight, so the tolerance has a closed form.** Gain falls as `g0(1 - p)` to within `0.004641` over eight rungs, giving `1 - keep/g0 = 72.70` against the measured `71.90` -- the tolerance is set by the layout's own undistorted gain and the threshold, and the unit enters only through `g0`. That law holds on ~7,500 edges and fails on 67 room pairs (departure `0.1144`) and on the pen's 32 (`0.0703`), which is an inference from three points rather than a measured scaling law and is named as one. Recommended: **keep the third erratum's re-aim exactly**, and let its tolerance sentence say **seven tenths, measured here**, rather than two thirds borrowed. Rank stays twelfth. The reading stands at [`20260917-163338_the-tolerance-that-was-a-ladder-rung.md`](20260917-163338_the-tolerance-that-was-a-ladder-rung.md). **The ladder figures are FREE** -- the tree grows -- so run the scan rather than reading them; what is **walled** is that the sweep bites, reaches the far side, and falls straight. Every other word on this page is kept as written.
+
+**Row 6 erratum:** `20260917.203312` -- row 6 was ranked third at *one to two weeks*, and it was the
+last of the twelve carrying no erratum. Its own assumption named the one thing that would have to be
+true before any witness could be written -- *this pier's CPU exposes RAPL counters to a reader with
+the permissions we have* -- and nobody had checked it against a real host. `tools/fixtures/e/energy_readout_scan.sh`
+checks it five ways rather than one: powercap RAPL, raw MSR, perf's energy-pkg event, hwmon, and
+nvidia-smi. **Every door reads no, and each for its own reason.** Powercap carries no readable
+`intel-rapl:*/energy_uj`; MSR's own device node is absent; `perf` is not installed; hwmon exposes no
+power or energy input; no GPU tool is present. `cpuinfo_hypervisor_flag=yes`, and the hypervisor
+names itself `microsoft` under `systemd-detect-virt` -- so the CPU underneath is a real AMD
+EPYC-Rome, and the absence is the hypervisor's own choice of what to pass through rather than a
+missing kernel feature or a fixable permission. **This falsifies the row's own sentence on this one
+host, and no further.** The scan reads only the machine it runs on, and this fleet sails eight;
+running it on the other seven is the only way to close the wider question, and every one of those
+seven readings is free. Recommended **re-aim, keeping the rank of third**: split the first witness
+in two -- the facility probe is landed and belongs on every pier as a standing guard, cheap enough
+to run before any RAPL-specific code is written, and the millijoule-beside-bytes Meter row waits on
+a pier that answers `verdict=facility_available`, which none has yet been asked. The reading stands
+at [`20260917-203312_the-pier-that-cannot-hear-its-own-joules.md`](20260917-203312_the-pier-that-cannot-hear-its-own-joules.md).
+**Every figure in this clause is HELD for this host** -- the scan reads real system paths once and
+they do not move between runs here -- and it is **UNMEASURED for the other seven piers**, so run
+`sh tools/fixtures/e/energy_readout_scan.sh` on each rather than assuming this reading generalizes.
+Every other word on this page is kept as written.
+
+**Row 6 second erratum:** `20260918.001715` -- the first erratum's own falsifier reached only the
+direct counters; a reader locked out of RAPL might still bound a coarse proxy from clock frequency
+or heat, since power draws roughly as the cube of frequency and heat is downstream of power. The
+scan now probes two further doors, held apart from the joule-bearing verdict on their own flag so
+neither can be mistaken for an energy count: **cpufreq** at
+`/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq` and **thermal** at
+`/sys/class/thermal/thermal_zone*/temp`. **Both read absent, for the same underlying reason as the
+five before them** -- no cpufreq sysfs tree at all, and zero thermal zones exposing a readable
+`temp`. Seven independent doors now read no under one probe, in one 1.13-second run, which sharpens
+the first erratum's finding from "the direct counters are hidden" to "every locally observable
+power-adjacent signal is hidden, not only the direct ones." The hypervisor's name also moved from a
+hand-run check into the scan itself: `virt_detect_bin=systemd-detect-virt virt_name=microsoft` now
+prints beside the door table on every run. Recommended: **keep the first erratum's re-aim exactly**;
+this widens the standing guard's scope rather than changing its recommendation. The reading stands
+at [`20260918-001715_the-two-proxies-that-were-also-absent.md`](20260918-001715_the-two-proxies-that-were-also-absent.md).
+**Every figure in this clause is HELD for this host**, exactly as the first erratum's are, and
+**UNMEASURED for the other seven piers**. Every other word on this page is kept as written.
+
+**Erratum:** `20260916.055111` -- this page's **ranking section** was graded whole, and it
+holds where it claimed and not where it would have flattered. Against **read order**, which is
+what the ranking claimed to predict, the ten rows it actually governed read at Spearman rho
+**0.9879** with one inversion in forty-five pairs -- ranks three through nine read in exact rank
+order. Against **survival** it looks like foresight and is confounded: the top four ranks produced
+every surviving row, and `claim_stands_preexisting=3` counts all three survivors as work that
+already had a witness or already stood, row 10's required-bound rune since `20260716`. So the
+section ordered *reading* well and predicted *truth* by placing finished work first. The
+falsifier column was the weaker half. Reading:
+[`20260916-055111_built-in-an-hour-read-in-six-days.md`](20260916-055111_built-in-an-hour-read-in-six-days.md),
+instrument `tools/fixtures/r/rank_outcome_scan.sh`.
+
+**Round two opened:** `20260918.002526` -- the ladder now stands with all twelve rows carrying a
+landed witness or a re-aimed finding, and three of those findings point at real, unbuilt next
+steps: chosen offsets for a declustering ring (row 5's second erratum), a two-field key splitting
+locality from confidentiality (the open-door piece), and a standard cross-fleet shape for row 6's
+own "run it on the other seven piers" ask. All three are stated as claims with falsifiers at
+[`20260918-002526_round-two-three-moonshots-grounded-in-round-ones-refusals.md`](../../20260918-002526_round-two-three-moonshots-grounded-in-round-ones-refusals.md).
+The third carries its first concrete step: `tools/fixtures/e/energy_readout_scan.sh`'s own header
+now names the `loom` line shape a run on another pier should copy, so seven honest measurements
+compose into one trend rather than living as seven unread lines.
+
+---
+
+## What this page is
+
+Twelve ideas sit here, one to a row. Each carries a claim, a smallest first witness, a horizon,
+the assumptions it rests on, the fact that would falsify it, and a plain confidence. Each row
+stands alone, so a lane can take any one of them and leave the other eleven where they are.
+
+The lane's shape is a torus. A torus is a surface that wraps in two directions, like the skin of
+a doughnut. Walk far enough along it and you arrive where you began. Three properties follow, and
+all three serve this tree's existing discipline. Distance on a torus is bounded, so a coordinate
+system built on one has a maximum by construction. Every path returns, so a proof written on one
+has a period. And a torus has two angles rather than one, so a name and a privilege can travel on
+separate axes.
+
+The complementary shape is polar. Polar coordinates name a point by radius and bearing. Where
+Cartesian coordinates ask *how far along each wall*, polar asks *how far out, and which way*.
+That question fits a supervision tree, where distance from the root already means something real.
+
+**One sentence of honesty before the twelve.** This page proposes; witnesses decide. A claim here
+enters the checkable room the day a witness on metal binds it, and stays here until then.
+
+**Row 11 paper landed:** `20260917.204915` -- the `20260915.212827` reading recommended writing the
+paper the measurements support rather than the three-definition paper row 11 first proposed. That
+paper is written: [`20260917-204915_bounded-cyclic-computing.md`](20260917-204915_bounded-cyclic-computing.md)
+binds two definitions -- a bound as a period, a proof that returns as a cycle -- against four
+witnesses read live at its own stamp (`wrap_ring`, `glow_trap_bound`, `bearing_quorum`,
+`cyclic_witness`), and drops the radius definition on the same three-instrument refusal the
+`20260915.212827` reading already found. One correction rides along: `cyclic_witness` had stood
+"unrun" because its `tier cadence` roster rota carries zero receipts, and this paper is the first
+place anything ran the instrument directly rather than reading the roster's silence about it --
+it passes, `verdict=cycles`, on metal. The ladder's twelve rows now all carry either a landed
+witness or a re-aimed finding; row 11 was the last to close.
+
+**The open question row 11 left is answered:** `20260917.205920` --
+[`the-age-that-must-not-wrap.md`](20260917-205920_the-age-that-must-not-wrap.md) reads
+`caravan/dwell.rye` and `tally/region.rye` beside `wrap_ring` and finds three live counters
+answering row 11's leftover question -- should Caravan and Tally adopt "declare the period, get the
+bound for free" as a standing convention -- in three different ways, each stated in the module's own
+comment before this paper restated it: a cyclic position wraps, a cumulative history saturates, an
+exhaustible resource refuses. All three readings are live witnesses at that paper's own stamp.
+
+---
+
+## The twelve, single-stranded
+
+### 1. The wrap is the bound
+
+**Claim.** Working memory is a torus of fixed circumference C pages. The TAME bound and the period
+of the ring are one number rather than two, so a reader who knows the circumference knows the
+budget.
+
+**First witness.** A Rye ring buffer of C pages whose wrap is asserted at the seam: the index after
+C steps equals the index at step zero, and the assert says so out loud.
+
+**Horizon.** One week on this pier.
+
+**Assumptions.** Rye compiles here today; C is a comptime constant; the buffer holds fixed-size
+pages.
+
+**Falsifier.** The assert holds while a second writer overwrites a page a reader still holds, which
+would show the wrap bounds the index alone rather than the memory.
+
+**Confidence.** High. The mechanism is a ring buffer, which is ordinary; the claim it carries is
+that the ring's period IS the declared bound, and one witness settles that.
+
+### 2. Caravan as pole
+
+**Claim.** The process graph reads in polar coordinates. Radius is privilege -- 0 supervisor,
+1 Pond, 2 desk, 3 wire -- and angle is capability class. A message names a hop `(dr, dtheta)`, and
+the supervisor refuses any hop past the declared maximum.
+
+**First witness.** One hop table, 16 rings by 8 sectors, with every legal hop marked and the
+refusal path proven from both sides.
+
+**Horizon.** Two to four weeks, as a table and a checker ahead of any Caravan change.
+
+**Assumptions.** Privilege in Caravan is already ordered; capability classes are countable and
+number eight or fewer at this stage.
+
+**Falsifier.** A real supervised process needs a privilege that sits between two rings, which would
+show privilege is a lattice rather than a line.
+
+**Confidence.** Medium. The radius half rests on an order Caravan already keeps. The angle half is
+the guess.
+
+### 3. Cyclic topos
+
+**Claim.** A proof that returns to its start state is a loop with a declared period P, and its log
+stays size P forever. Witnesses become cycles rather than lines.
+
+**First witness.** One existing witness rewritten so the hash of its exit state equals the hash of
+its entry state, printed as a Meter row.
+
+**Horizon.** One week on this pier, using a witness the tree already runs.
+
+**Assumptions.** The chosen witness owns its own state; its state is hashable; its teardown is
+already complete enough to return.
+
+**Falsifier.** The exit hash differs from the entry hash for a witness that passes, which would
+show the witness leaves residue and the cycle claim covers the report rather than the state.
+
+**Confidence.** High for one witness, low for the class. One green cycle proves one witness cycles;
+a general law needs many.
+
+### 4. Aether as falloff field
+
+**Claim.** Listening has a radius. Intensity falls with distance -- 1/r, chosen on `20260910` for
+this first pass -- and rows beyond the radius stay cold.
+
+**First witness.** A roster scan that wakes only the rows within path-distance R of the touched
+row, with the woken count and the wall time both printed.
+
+**Horizon.** Two weeks, as a scan-level experiment beside the existing roster.
+
+**Assumptions.** Path distance between roster rows is computable and cheap; the roster has real
+locality to exploit.
+
+**Falsifier.** The woken set at any useful R covers most of the roster, which would show the roster
+is dense and a radius buys the same work under a new name.
+
+**Confidence.** Medium. The saving depends entirely on locality that this page has yet to measure.
+
+### 5. Tablecloth on a torus
+
+**Claim.** The hash space folds onto a 2-torus, so names that sit near each other in the fold sit
+near each other in storage.
+
+**First witness.** A 256 by 256 toy cloth, standing beside the store rather than inside it, with
+the neighbour distance for a sample of names reported.
+
+**Horizon.** Two to three weeks for the toy.
+
+**Assumptions.** A fold from the hash space onto two axes exists that keeps the distribution even;
+the toy stays a fixture and touches the real store on a later word.
+
+**Falsifier.** The fold clusters real names into a few cells, which would trade lookup evenness for
+adjacency at a price the store declines.
+
+**Confidence.** Medium-low. The idea is elegant, and evenness under a real name distribution is the
+open question.
+
+### 6. Joules as a Tally unit
+
+**Claim.** Energy joins bytes as a bounded quantity. A lap declares millijoules the way it declares
+allocations, in the same sentence.
+
+**First witness.** One Rye run wrapped in a RAPL read, printing a Meter row that carries
+millijoules beside bytes and wall time.
+
+**Horizon.** One to two weeks, given a host that exposes RAPL.
+
+**Assumptions.** This pier's CPU exposes RAPL counters to a reader with the permissions we have;
+the counter resolution is fine enough for one lap.
+
+**Falsifier.** Two identical runs report millijoules that differ by more than the effect any lap
+would try to measure, which would put the counter below the resolution the claim needs.
+
+**Confidence.** Medium-high for the reading, low for the bound. Reading energy is mechanical;
+choosing a ceiling anyone would keep is the harder half.
+
+### 7. Aurora as a small torus of cores
+
+**Claim.** Aurora targets a 4-core or 16-core network-on-chip whose topology Grain knows to be a
+torus, so placement and routing are computable ahead of time.
+
+**First witness.** A placement map: which module sits on which node, and the hop count for every
+pair, written as a paper artifact.
+
+**Horizon.** Paper until a board exists, which is a year or more out.
+
+**Assumptions.** A board of this shape becomes reachable; the module set is stable enough to place.
+
+**Falsifier.** The reachable boards are mesh rather than torus, which would leave the wrap-around
+hops the map depends on unavailable.
+
+**Confidence.** Low, and honestly so. This one is the furthest from metal.
+
+### 8. Mycelium that does not flood
+
+**Claim.** Consensus routing travels on polar bearings. A node announces along a meridian and
+confirms along a parallel, so message count grows with the perimeter rather than the area.
+
+**First witness.** A three-node fixture where one packet is withheld and the refusal comes back
+GREEN, proving the protocol reports the gap rather than papering over it.
+
+**Horizon.** Three to four weeks for the fixture.
+
+**Assumptions.** Nodes carry stable coordinates; the network stays small enough that a fixture is
+meaningful.
+
+**Falsifier.** The withheld packet leaves two nodes agreeing on different states with both
+reporting success, which would show the bearing scheme hides a partition.
+
+**Confidence.** Medium. The fixture is cheap; the general routing claim is a research question.
+
+### 9. Seasonal duty cycle
+
+**Claim.** Compute sleeps by sector of day. On a torus, "which sector is dark" is a coordinate
+rather than a schedule, so parking work is arithmetic.
+
+**First witness.** A fake clock that parks 3 of 8 sectors, with the parked and running sector counts
+printed each tick.
+
+**Horizon.** One to two weeks with a fake clock; longer for anything that touches a real one.
+
+**Assumptions.** The workload tolerates delay; a fake clock is enough to prove the parking logic.
+
+**Falsifier.** Parked sectors accumulate a backlog that the waking sectors take longer to clear
+than the parking saved, which would make the cycle a deferral rather than a saving.
+
+**Confidence.** Medium-high for the mechanism, medium for the saving.
+
+### 10. Glow loops with circumference
+
+**Claim.** A Glow loop declares its period the way a list declares its length. A loop that declares
+none is a type error at compile time, so unbounded iteration joins the class of things the compiler
+catches.
+
+**First witness.** The Glow compiler refuses a loop written with no C, and accepts the same loop
+once C is written in.
+
+**Horizon.** Three to six weeks, inside a language this tree already owns.
+
+**Assumptions.** Glow's type checker is the right seat for the check; every honest loop in the tree
+can name a period.
+
+**Falsifier.** A loop whose true period depends on runtime input appears in real Glow code, which
+would need a dependent form rather than a constant.
+
+**Confidence.** Medium-high. Grain owns the compiler, which is what makes this reachable.
+
+### 11. Whitepaper -- Bounded Topos Computing
+
+**Claim.** One paper binds the three definitions the other eleven rows lean on: what a bound is when
+space wraps, what a radius is when privilege is distance, and what a topos is when every proof is a
+cycle.
+
+**First witness.** A draft whose three definitions each cite a green witness from this list, so the
+paper rests on measurement rather than on itself.
+
+**Horizon.** Six to eight weeks, and it follows the first witnesses rather than leading them.
+
+**Assumptions.** At least two rows above go green first; the definitions survive contact with those
+results.
+
+**Falsifier.** The first two green witnesses give definitions that pull against each other, which
+would mean the paper describes two ideas wearing one name.
+
+**Confidence.** Medium. A paper written after the measurements is a summary; written before, it is a
+wish.
+
+### 12. The workload trial that pays for the rest
+
+**Claim.** Among the eleven above, the smallest trial that touches metal goes first, and its result
+funds the ordering of everything after it.
+
+**First witness.** A one-page trial report: the workload, the measurement, the wall time, the
+energy where a counter exists, and the next row the number points at.
+
+**Horizon.** Immediately after the first green witness above.
+
+**Assumptions.** The first trial produces a number comparable to a baseline this tree already has.
+
+**Falsifier.** The trial's number sits inside the run-to-run spread of the baseline, which would
+leave the ordering exactly where it started.
+
+**Confidence.** High as a method, unknown as a result. That gap is the point of running it.
+
+---
+
+## The ranking
+
+Ranked by what a lane can start on this pier, with no new hardware, this month.
+
+| Rank | Row | Why here |
+|---|---|---|
+| 1 | 1. The wrap is the bound | Runs today in Rye; one assert carries the whole claim |
+| 2 | 3. Cyclic topos | Runs today on a witness the tree already owns |
+| 3 | 6. Joules as a Tally unit | One host read away; gives every later row a unit |
+| 4 | 10. Glow loops with circumference | Grain owns the compiler; the seat is ours |
+| 5 | 9. Seasonal duty cycle | A fake clock is enough for the first witness |
+| 6 | 4. Aether as falloff field | Cheap to try; the saving rests on locality yet to be measured |
+| 7 | 2. Caravan as pole | A table first, a Caravan change much later |
+| 8 | 5. Tablecloth on a torus | A toy cloth stands well clear of the real store |
+| 9 | 8. Mycelium that does not flood | A three-node fixture is cheap; the routing claim is deep |
+| 10 | 12. The workload trial | Sequenced after the first green, by its own definition |
+| 11 | 11. Whitepaper | Follows the measurements it means to bind |
+| 12 | 7. Aurora on a core torus | Paper until a board exists |
+
+---
+
+## The one that goes first
+
+**Row 1, the wrap is the bound.** Two rows can run on this pier this week, and row 1 wins on the
+smaller surface. Its whole witness is a Rye ring buffer with an assert at the wrap, which is code
+this tree writes fluently and law it already keeps: bound everything, assert the invariant, name
+the maximum at construction. The claim it tests is the load-bearing one for the other eleven --
+that a period and a bound can be one number a reader holds in mind at once. Every later row leans
+on that sentence, so proving it early is worth more than proving it well.
+
+Row 3 is the close second, and the reason it sits second is scope rather than merit. Rewriting an
+existing witness as a cycle touches a file another lane owns, and it asks a second question at the
+same time: whether that particular witness returns cleanly. Row 1 asks one question of one new
+file. The lane takes the single-question door first, and row 3 follows the week after, with a
+sharper idea of what a declared period buys.
+
+**What would change this recommendation.** A host that exposes RAPL cleanly today would raise row 6,
+because a unit for energy makes every later measurement comparable. The reading is worth taking
+early, and it stays second in line while row 1 is one file away from green.
+
+---
+
+*May the circumference stay honest, and may the first assert land green.*

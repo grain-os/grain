@@ -1,0 +1,81 @@
+# tools/f/fleet_rearm_witness.rish -- the re-arm printer proven from both sides.
+#
+#   rishi/bin/rishi run tools/f/fleet_rearm_witness.rish
+#
+# fleet_rearm.sh prints per-seat status, stop reason, and relaunch paste, and
+# refuses the paste over a CUSTODY sentinel. This witness builds a pen of seat
+# trees and proves the wall both ways: a planted sentinel gates its seat and
+# withholds the paste; lifting the sentinel returns the paste. Absence is
+# reported rather than silent, and the field seat never earns a relaunch.
+
+say "fleet-rearm: Language EN -- the re-arm printer, proven in a pen."
+say "fleet-rearm: Style Gauge, Meter -- each leg names what it plants and what refuses."
+say "fleet-rearm: Lens TAME -- the sentinel wall shown refusing and then welcoming."
+
+# THE PEN IS UNIQUE PER RUN, never a constant name. Eight ships share this pier and run this
+# same witness from eight trees, so a fixed `${pen}` is one directory eight hands
+# build and `rm -rf` -- a peer wiping the pen mid-assert, and this witness sweeping a peer's.
+# The class is `%618`/`%601`; the ratchet had counted this file rather than refusing it, and a
+# ratchet migrates on touch. `mktemp -d` names it, so no two runs can collide (`20260908.174500`).
+let mk = run ["sh" "-c" "mktemp -d /tmp/fleet_rearm.XXXXXX"]
+assert mk.ok else "fleet-rearm: the pen could not be opened"
+let pen = trim mk.out
+
+say "fleet-rearm: building the pen -- one gated codex seat, one clean claude seat..."
+let build = run ["sh" "-c" "rm -rf ${pen} && mkdir -p ${pen}/grain ${pen}/grain-mind/.mind-state ${pen}/grain-silence/session-output && git init -q ${pen}/grain-mind && git init -q ${pen}/grain-silence && printf 'root refresh belongs to a hand\\n' > ${pen}/grain-mind/.mind-state/CUSTODY && printf 'lap 3 closed clean\\n' > ${pen}/grain-silence/session-output/silence.txt"]
+assert build.ok else "fleet-rearm: the pen failed to build -- read the shell's own words"
+
+say "fleet-rearm: the RED side -- a CUSTODY sentinel gates its seat..."
+let gated = run ["env" "FLEET_HOME=${pen}" "sh" "tools/f/fleet_rearm.sh"]
+assert gated.ok else "fleet-rearm: the printer refused to run at all"
+assert gated.out contains "GATED -- .mind-state/CUSTODY stands" else "fleet-rearm: the sentinel did not gate its seat"
+assert gated.out contains "root refresh belongs to a hand" else "fleet-rearm: the sentinel's own words were not shown to the hand"
+let no_paste = ?& [(gated.out contains "MIND_SEAT=cardinal") false]
+# invariant: the gated seat's paste is withheld -- the cardinal relaunch line is absent.
+assert no_paste == false else "fleet-rearm: unreachable"
+assert (gated.out contains "MIND_SEAT=cardinal") == false else "fleet-rearm: a relaunch paste crossed the CUSTODY wall"
+assert gated.out contains "fleet-loop.sh silence" else "fleet-rearm: the clean claude seat earned no relaunch line"
+assert gated.out contains "lap 3 closed clean" else "fleet-rearm: the claude seat's stop reason was not read"
+assert gated.out contains "last activity" else "fleet-rearm: the activity age went unspoken"
+assert gated.out contains "may still be RUNNING" else "fleet-rearm: fresh words earned no caution -- the pen's file is seconds old"
+assert gated.out contains "mystery -- ${pen}/grain-mystery" else "fleet-rearm: an absent seat vanished from the roster instead of being reported"
+assert gated.out contains "not on this host" else "fleet-rearm: absence was not named"
+
+say "fleet-rearm: the GREEN side -- lifting the sentinel returns the paste..."
+let lift = run ["sh" "-c" "rm ${pen}/grain-mind/.mind-state/CUSTODY"]
+assert lift.ok else "fleet-rearm: the pen sentinel could not be lifted"
+let open = run ["env" "FLEET_HOME=${pen}" "sh" "tools/f/fleet_rearm.sh"]
+assert open.ok else "fleet-rearm: the printer refused after the lift"
+assert open.out contains "MIND_SEAT=cardinal" else "fleet-rearm: the lifted seat still withheld its paste"
+assert (open.out contains "GATED") == false else "fleet-rearm: a gate reported with no sentinel on disk"
+
+say "fleet-rearm: a LIVE seat outside the elder name list still earns its paste..."
+# THE LEG THIS WITNESS DID NOT HAVE, and the drift it let stand. The relaunch arm used to spell six
+# seat names; the roster grew to eight live ships and five of them -- bakery, diffuser, grass, copal,
+# patchouli -- printed the word RELAUNCH followed by nothing at all. Every assertion above passed the
+# whole time, because every one named a seat the elder list happened to carry. So the leg is planted
+# with `copal`, a live roster seat that list never knew, and the sweep beneath it counts EMPTY pastes
+# across the whole card rather than trusting the one name.
+let newer = run ["sh" "-c" "mkdir -p ${pen}/grain-copal/session-output && git init -q ${pen}/grain-copal && printf 'lap 2 closed clean\\n' > ${pen}/grain-copal/session-output/copal.txt"]
+assert newer.ok else "fleet-rearm: the pen could not seat a newer roster ship"
+let armed = run ["env" "FLEET_HOME=${pen}" "sh" "tools/f/fleet_rearm.sh"]
+assert armed.ok else "fleet-rearm: the printer refused with a newer seat in the pen"
+assert armed.out contains "fleet-loop.sh copal" else "fleet-rearm: a live roster seat outside the elder name list printed RELAUNCH and then nothing"
+
+say "fleet-rearm: and NO seat anywhere on the card prints an empty paste..."
+# The reading is shape-based, over tools/fixtures/f/fleet_rearm_paste_scan.sh: it asks whether the
+# line beneath each RELAUNCH heading starts a command. A name-based check here would be the seventh
+# copy of the seat table, which is the fault this leg exists to catch. Proven from both sides on
+# metal `20260906`: the elder hand-spelled case reads empty_pastes=1 in this pen and 5 against the
+# real fleet home; the roster-driven form reads 0.
+let sweep_empty = run ["env" "FLEET_HOME=${pen}" "sh" "tools/fixtures/f/fleet_rearm_paste_scan.sh"]
+assert sweep_empty.ok else "fleet-rearm: the empty-paste scan could not run"
+assert sweep_empty.out contains "empty_pastes=0" else "fleet-rearm: a seat printed RELAUNCH with no command beneath it -- the hand is handed a blank"
+
+say "fleet-rearm: the field seat never earns a paste..."
+assert (open.out contains "no loop to re-arm") == true else "fleet-rearm: the field seat's non-loop nature went unspoken"
+
+let sweep = run ["sh" "-c" "rm -rf ${pen}"]
+assert sweep.ok else "fleet-rearm: the pen was left standing"
+
+say "GREEN: fleet-rearm -- the printer reports every seat, the sentinel wall refuses and welcomes, and the hand keeps the keystroke."

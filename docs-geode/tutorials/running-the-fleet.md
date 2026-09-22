@@ -1,0 +1,302 @@
+# Running the fleet -- launch, watch, and stop the ships
+
+**Language:** EN - **Style:** Gauge, Field setting (see [`../../context/GAUGE_STYLE.md`](../../context/GAUGE_STYLE.md))
+**Voice:** Kyri
+**Written:** `20260907.160051`
+**Updated:** `20260917.010735` -- every command below re-run, and the signal helper's fence tagged
+so its own declaration is finally read
+**Prior update:** `20260916.185029` -- the signal helper's field set, re-run rather than recalled
+**Status:** Living - **Room:** checkable -- every command below was run against this tree before it
+was written down, and the two that launch a ship were run in their own dry-run form
+**Where this sits:** home is [`../../README.md`](../../README.md) - a first hour in your hands is
+[`the-first-hour.md`](the-first-hour.md) - the room index is [`README.md`](README.md)
+
+---
+
+## Who this is for
+
+You have a pier with one or more Grain checkouts on it, and you want the unattended ships sailing.
+[The First Hour](the-first-hour.md) puts a working tree in your hands; this page starts where that
+one ends. Everything here lived in session logs and in the live operator card until now, and both of those
+are written for a hand who already knows the fleet.
+
+**One idea carries the whole page:** a seat is a chair rather than a computer, and one table binds
+a seat to its tree, its engine, and its lane. That table is `construction/fleet-roster.kyri`, named
+here rather than linked because the operator cards live in the maintainer's own field and the
+public seed carries no such room. The loop reads it, the watch reads it, and
+the launcher reads it, so all three read one answer. To add, retire, or rename a ship, you
+edit one row.
+
+```
+sh tools/fixtures/f/fleet_roster_scan.sh --live     # the seats sailing today
+sh tools/fixtures/f/fleet_roster_scan.sh --seats    # every seat, live and parked
+sh tools/fixtures/f/fleet_roster_scan.sh --resolve harvest
+```
+
+The last line answers `petrichor`. An elder seat name resolves to its living seat and says so, so muscle memory keeps working
+after a rename.
+
+## Launching one ship
+
+```
+cd ~/grain-petrichor
+mkdir -p session-output
+FLEET_BARE=1 sh tools/f/fleet-loop.sh petrichor 2>&1 | tee session-output/petrichor.txt
+```
+
+Three things in that line earn a sentence each.
+
+**The tree comes first, and the script holds it there.** `fleet-loop.sh` resolves the tree that
+*contains it* rather than your current directory, and it runs the lap only when that tree's
+basename matches the seat's `tree` row. So a bench holding eight sibling checkouts keeps each
+seat's laps on its own files -- one writer per checkout, which the tree books as REDS `%291`.
+
+**`FLEET_BARE=1` launches on the host directly.** A Linux lap runs inside
+`tools/ag/agent-jail.sh` by default; on the maintainer's word `20260906` this pier runs bare, so every
+launch carries the flag. A pier that wants the enclosure simply drops it.
+
+**The tee is the reading window.** Transcripts land inside the tree at
+`session-output/<seat>.txt`, with raw NDJSON beside it at `<seat>.jsonl` for a Claude seat. That
+directory is gitignored and shared on purpose: any ship reads a peer's output by named path rather
+than a hand pasting it.
+
+To see the command by itself, with the lap held:
+
+```
+FLEET_DRY=1 LOOP_LAPS=1 sh tools/f/fleet-loop.sh petrichor
+```
+
+which prints, on this tree today:
+
+```
+fleet-loop: seat=petrichor engine=claude root=/home/keeper/grain-petrichor hours=18 laps=1
+fleet-loop: FLEET_DRY=1 -- command only, no round-open, no lap
+claude --dangerously-skip-permissions --effort medium --output-format stream-json --verbose -p <tools/p/petrichor_seat_prompt.txt>
+```
+
+**The knobs, all bounded.** `LOOP_HOURS` sets the deadline (default 18, computed as epoch
+arithmetic so one script serves a Mac and a Linux pier). `LOOP_LAPS` bounds the lap count, with `0`
+meaning unbounded and `LOOP_LAPS=1` giving you exactly one round. `LOOP_LIMIT_WAIT` (default 300)
+and `LOOP_LIMIT_WAIT_MAX` (default 72) govern the hold described under *A spent session limit* below.
+`FLEET_STAGGER` offsets a launch by the seat's roster slot, so eight ships do not open their
+expensive phases in the same second.
+
+## The prompt a ship actually reads
+
+A seat prompt is a **file**, `tools/<first-letter>/<seat>_seat_prompt.txt` -- `tools/p/` for
+petrichor, `tools/b/` for bakery. The room is derived from the seat's own first letter, matching how
+`tools/` folds by first sprig letter, so a seat added tomorrow arrives findable by the same rule.
+
+What the agent receives is **the baton plus that stanza**.
+[`../../tools/f/fleet_baton.txt`](../../tools/f/fleet_baton.txt) holds the opening every ship
+shares -- voice, card, rota, thread, fleet, send, log, custody, close -- written once and prepended
+at launch. A directive seated on the baton reaches every ship on its next lap with no per-seat edit.
+A seat prompt is its lane stanza alone.
+
+The loop runs a lap only when both files read clean, and it says which one failed otherwise. A lap
+holding its lane is the whole point: on `20260906` seven ships ran a generic round because a prompt
+path moved while that check was still to come.
+
+## The watch -- so a loop that dies comes back
+
+A fleet loop ends four ways: three instant laps against an unreachable agent, a spent `LOOP_HOURS`
+deadline, an interrupt, or a closed terminal. Restarting itself is the one thing an exited loop
+leaves to somebody else, so the watch runs beside the ships in the same tmux session and re-arms
+any live seat whose `fleet-loop.sh` process is gone.
+
+```
+sh tools/f/fleet_watch.sh                    # watch until you stop it
+sh tools/f/fleet_watch.sh --once             # one pass, then exit
+sh tools/f/fleet_watch.sh --once --dry-run   # one pass, decided out loud, no keystroke
+```
+
+**The two flags sit on different axes, so they compose.** `--dry-run` bounds what a pass may *do*:
+it decides, prints, and sends no keystroke. `--once` bounds how many passes *run*, and is
+`WATCH_PASSES=1` spelled short. Reach for `--dry-run` by itself and you get the first line below and
+then nothing: the watcher keeps its default `WATCH_PASSES=0` and watches until you stop it, one
+silent pass a minute. The form you want when you are asking *what would this do* is both flags
+together, and it returns in under a second.
+
+The paired form answers, on this tree today:
+
+```
+fleet-watch 22:28:05: watching session 'pier' -- interval 60s, skip 'incense', arm-max 3, settle 180s (DRY RUN)
+fleet-watch 22:28:05: watch ended after 1 pass(es)
+```
+
+**Read that `skip 'incense'` twice, because it is the page's one surprise.** `WATCH_SKIP` defaults
+to `incense`, the captain's own bench, so the watch leaves that seat to a hand. Ask for it by
+passing `WATCH_SKIP=` explicitly, and the script reads that empty value as *skip nothing* on
+purpose -- it uses the `${WATCH_SKIP-incense}` form rather than `${...:-...}`, since the colon form
+treats an explicit empty as unset and restores the default. That one character cost a night of the
+captain's laps on `20260907`.
+
+**Every window is found by name.** The watch reads `tmux list-windows` on every pass and matches
+each name against the live seats in the roster. Both bindings already exist -- seat to tree in the
+roster, name to index in tmux -- so the watch keeps its own copy of neither, and reordering your
+windows leaves each ship's relaunch aimed at its own keyboard.
+
+**The enclosure choice travels with it.** The watch passes its own `FLEET_BARE` through to every
+re-arm, so a bare-launched fleet stays bare across every arm the watcher will ever make. Launch
+the watch the way you launched the ships.
+
+**What it leaves alone**, each in the safe direction: a seat whose loop already runs, read from the
+process table rather than guessed from a pane's words; a window whose pane sits mid-command, since
+somebody else has that keyboard; a seat name worn by two windows, because a watcher leaves an
+ambiguous choice to a hand; a tree carrying `.loop-gates-only`, `.mind-state/CUSTODY`, or
+`.mind-state/TRANSACTION`, since a gated choice belongs to a hand; a tree carrying `.loop-clockout`,
+since its operator asked it to stop; and a seat that has burned
+`WATCH_ARM_MAX` arms while surviving under `WATCH_SETTLE`, which is the loop's own quickfail law
+one level up.
+
+Its other knobs: `WATCH_SESSION` names the tmux session (default: this pane's, else `pier`),
+`WATCH_INTERVAL` the seconds between passes (60), `WATCH_ARM_MAX` the fruitless arms allowed (3),
+`WATCH_SETTLE` the seconds an armed loop must survive to count as taking hold (180), and
+`WATCH_PASSES` a pass ceiling (0, unbounded).
+
+## Stopping for real
+
+**The watch brings a stopped loop back, so a sentinel is what makes a stop stick.** That is the
+whole consequence of the section above, and it changes what stopping means.
+
+| To stop | Do this |
+|---|---|
+| One ship, after its current lap finishes | `touch .loop-clockout` in that ship's tree |
+| An agent with only custody gates left | `touch .loop-gates-only` during its lap |
+| One ship, this lap only | `LOOP_LAPS=1` at launch, or let `LOOP_HOURS` expire |
+| The watch itself | interrupt it, or launch it with `WATCH_PASSES=<n>` or `--once` |
+
+**A person's stop is `.loop-clockout`.** The loop checks it before opening a lap and after closing
+one. A running lap finishes its commit and send, then stops; the watch leaves that seat alone.
+The hand that set the file removes it when ready to resume. The loop keeps it until then.
+
+**The agent's gate report is `.loop-gates-only`.** It is a **file** rather than a printed word because the transcript echoes the
+prompt, and the prompt itself carries the letters `GATES-ONLY` -- a grep on the stream would
+false-stop the loop the moment it began. The loop clears the sentinel at the top of each lap and
+reads for it again at the close, so an agent writing it mid-lap stops the loop at that lap's end.
+The watch reads the same file and holds off.
+
+**An interrupt or a pass bound is what stops the watch**, and those two are the whole list. Said
+plainly here because a brief written from memory named a `.watch-stop` file, which appears nowhere
+in the tree -- a stop instruction earns its place by being run.
+
+### Ask before you signal
+
+Eight ships run one program name from eight trees, so a name-matching killer reaches the pier
+rather than your lap -- and the calling shell holds the pattern too, so it takes itself down with
+the rest. `tools/f/fleet_call.sh` resolves every candidate to its working directory and refuses
+anything outside this tree out loud:
+
+```sh
+sh tools/f/fleet_call.sh --pattern standing_equipment
+```
+
+which answers, on this tree today:
+
+<!-- volatile: the counts are one second's process table; the field names are held by the source -->
+```
+candidates=8 would_send=0 refused_foreign=6 refused_self=1 refused_unknown=1 refused_prose=9 over_bound=0 reading=exact root=/home/keeper/grain-petrichor verdict=ok
+```
+
+**The counts are one second's reading and the field names are the shape.** Yours will differ every
+run; what stays true is that a process in a sibling tree is refused by name rather than signaled in
+silence.
+
+**`refused_prose` is the refusal worth knowing**, and it exists because this page's own baton names
+this helper. The baton is prepended to every seat prompt and reaches each agent as one argument, so
+a plain substring test matched all eight peer agents while exactly one process was the tool. The
+helper asks for shape instead: a command word carries no whitespace, a prompt is prose, and every
+piece of a prompt holding the pattern carries spaces. A match landing only inside prose is counted
+here and reached with `--pid` when you mean it.
+
+**`reading=exact` names how the host answered.** Argument boundaries come from `/proc`, which a Mac
+lacks; there the flattened command line is all there is and the field reads `flattened`, which is an
+honest *this host cannot tell prose from a command word* rather than a silent second rule.
+
+**This block was stale for six days, and the sentence above it pointed at the stale half.** The
+elder quote carried six fields and told a reader to trust the field names over the counts;
+`refused_prose` and `reading` landed the day after this page was last updated, so the durable half
+was the half that moved. The elder counts were worse than volatile -- `candidates=20` was measured
+by the very over-reading `refused_prose` was seated to repair. Kept here rather than swept, because
+a tutorial promising *every command below was run* earns its own receipt when the promise lapses.
+
+**That fence carries a language tag, and for nine days it was the one thing keeping the block
+unread.** `tools/fixtures/t/tutorial_output_scan.sh` opens a checked pair on a fence marked `sh` or
+`bash`, so every bare fence on this page was invisible to it -- including this one, whose
+`<!-- volatile: -->` comment above is written for that reader and no other. Across the guard's
+80-page collection this page was the only one carrying a declaration and no tagged fence. Tagged
+`20260917`, the pair reads `volatile` and is run on every pass; the page's own promise is now held
+by a guard rather than by a memory of having run it.
+
+**The other bare fences on this page stay bare, and that is a decision rather than an oversight.**
+`tools/fixtures/t/tutorial_bare_fence_scan.sh` counts every unlabelled fence holding commands this
+tree could run, and it names two here -- the roster block near the top of this page and the watch
+block above. Tagging either would tell the elder guard to RUN it, and both would go wrong: the
+block under the roster commands is the *next command block* rather than their output, and the watch
+block's first line is `sh tools/f/fleet_watch.sh` with no flag, which watches until you stop it. A
+language tag is a promise about the block beneath, so it waits for a reader rather than a sweep.
+
+**A bare call reports and sends no signal.** Add `--signal TERM` to act on the selected processes.
+`--dry-run` forces a preview even when a signal is named, in either flag order. That separation
+was seated after an earlier default sent a signal when a hand meant only to ask what was running.
+For a routine ship stop, use `.loop-clockout` so the lap finishes whole.
+
+## Where the effort setting lives
+
+Four places name it, and on this tree today three agree:
+
+| Site | Reads |
+|---|---|
+| `tools/f/fleet-loop.sh` (two lines: the dry-run printf and the real invocation) | `--effort medium` |
+| `.claude/settings.json` -> `effortLevel` | `medium` |
+| the untracked per-clone `GLOW_PROFILE.kyri` | `effort medium` |
+| the tracked `GLOW_PROFILE.template.kyri` | `effort max` |
+
+**Read `ps` rather than a file to know what is running.** Editing any of these leaves already-running
+shells on their old value, so a change goes live when the loops are relaunched.
+`tools/d/declared_model_witness.rish` holds the *model* name in agreement across every site that
+declares it -- green when this page was written -- and its scan reports `declared_effort` from
+`.claude/settings.json` alone. So the fourth row above stands as a real difference outside any
+guard's reading, named here rather than swept.
+
+## A spent session limit is a hold, not a fault
+
+The loop classifies each finished lap `ok`, `limit`, `quickfail`, or `fault`, and it asks the limit
+question **first**, because a spent window answers instantly and an elder rule judging by elapsed
+time alone read that speed as a crash. On a `limit` verdict the loop holds `LOOP_LIMIT_WAIT` seconds
+at a time, up to `LOOP_LIMIT_WAIT_MAX` times, and the lap counter stays where it was. An overnight
+window that clears at 07:30 is therefore worked at 07:30 rather than at breakfast.
+
+**After a session limit or an account switch, log in on the host first.** Inside the enclosure,
+`--private-home` swaps `$HOME` for a tmpfs, so `agent-jail.sh` is what carries a `claude login`
+typed at the pier shell into a tree: it copies the host credential when the tree has yet to hold
+one, and again when the host's is strictly newer. Whichever hand moved last wins. Freshness is read
+only **after usability** -- a credential counts as copyable when its access token is a non-empty
+string -- because signing out rewrites the file with the same seven fields and empty tokens, which
+is valid JSON, correctly shaped, and the newest thing on disk. Reading mtime alone once turned one
+logged-out checkout into three. On a bare pier like this one, where `$HOME` stays the host's, that
+host login *is* the login every tree uses.
+
+## What one lap does
+
+1. **Round-open first.** `tools/f/fleet_round_open.sh` clears an interrupted rebase, stashes dead-lap
+   leavings, adopts the anointed order, and parks a true divergence -- so the card the ship reads is
+   the tree it stands on. When the fetch declines, the loop waits 60 seconds and asks again, which
+   keeps every lap on bytes it fetched itself.
+2. **The agent runs one round** against the baton plus its lane stanza.
+3. **The lap closes at a commit** rather than at `git add`, and its session log is born on that
+   day's shelf under `session-logs/date/YYYYMMDD/`.
+4. **The sentinel is checked**, then the loop sleeps 20 seconds and opens the next lap, until
+   `LOOP_LAPS` or the `LOOP_HOURS` deadline.
+
+## What stays a hand's
+
+The custody gates on the living operator card, `construction/ITINERARY.md`, are
+manual by law: funds and keys, provisioning and paying, the maintainer's own identity, and the
+public seed. Publishing the seed stays entirely a hand's. When gated work is all that remains, a
+ship writes the sentinel, prints `GATES-ONLY`, and stops -- which is a report to you rather than a
+failure.
+
+---
+
+*May your ships find their own trees, and may every stop you mean be a stop that holds.*

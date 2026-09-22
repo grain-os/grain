@@ -1,0 +1,165 @@
+# glow_desk_reach_witness.rish -- the desk witness's reach over the Glow desk corpus.
+#
+# Holds five readings at zero and one ratchet under a ceiling that only falls, over
+# tools/fixtures/g/glow_desk_reach_scan.sh. The scan's own head carries the reasoning; the short
+# form is that glow/gen/ holds 352 generated desks and exactly one guard runs any of them, by a
+# hand-written enumeration of 218 that nothing derives and nothing measured until now.
+#
+# The fifth zero arrived 20260907.122532, when `covered` learned to read the derived runner beside
+# the elder witness. For one lap the two answered differently about one population: the runner ran
+# 301 desks on a roster while this reading called 83 of them run by nothing.
+#
+# The fourth zero and the second ratchet arrived 20260907.020441. The witness runs every desk it
+# names with ZERO arguments, and tools/g/glow_run_worker.sh refuses an argument for any stem
+# absent from its hand-written `case` -- so the 46 desks in this room that the worker WILL take a
+# sample for are, all 46 of them, outside the witness's shape. Not one is covered. The elder
+# single ratchet of 129 carried those 46 beside 83 desks that cost one line each, and a reader
+# could not tell the two debts apart.
+#
+#   rishi/bin/rishi run tools/g/glow_desk_reach_witness.rish
+
+let scan = run ["sh" "tools/fixtures/g/glow_desk_reach_scan.sh"]
+assert scan.ok else "glow_desk_reach scan failed: ${scan.err_brief}${scan.out_brief}"
+
+# invariant: the corpus is present -- a scan reading zero desks has lost its subject, and every
+# reading below would then be trivially satisfied by an empty tree.
+assert scan.out contains "desks=" else "glow_desk_reach scan printed no desk count"
+
+# invariant: the two run-contract markers name one set. A desk declares it must not run in its
+# name and in its head; those are independent statements of one fact, and their parting is the
+# silent drift this guard exists to feel. Held at zero.
+assert scan.out contains "norun_disagree=0" else "glow_desk_reach: the name marker and the head marker name different desks -- a desk was renamed without re-declaring, or declared without renaming"
+
+# invariant: every desk the witness names is a desk on disk. An assertion against an absent file
+# proves nothing while reading exactly like proof. Held at zero.
+assert scan.out contains "phantom=0" else "glow_desk_reach: the desk witness names desks that are not on disk"
+
+# invariant: the witness never runs a desk that declares it must not run. When those two disagree,
+# one of them is lying, and which one is a language question rather than a repair. Held at zero.
+assert scan.out contains "contradicted=0" else "glow_desk_reach: the desk witness runs a desk whose own head declares it unrunnable"
+
+# invariant: the worker's sample-permission `case` names files that exist. A permitted stem with
+# no .glow anywhere in the tree is a dead branch -- the same fault `phantom` reads one enumeration
+# over, and gated for the same reason. Held at zero.
+assert scan.out contains "sample_phantom=0" else "glow_desk_reach: the run worker permits a sample for a stem that names no Glow file"
+
+# invariant: `covered` reads BOTH instruments that run desks in this tree, and prints each apart.
+# It read the elder hand-written witness alone until 20260907.122532, so it reported 83 desks "run
+# by nothing" on a lap where the rostered derived runner ran all 83 -- two instruments answering
+# differently about one population. The union is the answer to the question the reading's own name
+# asks; the parts stay printed so the elder witness's own drift is still visible beside it.
+assert scan.out contains "covered_witness=" else "glow_desk_reach scan printed no witness coverage count"
+assert scan.out contains "covered_runner=" else "glow_desk_reach scan printed no derived-runner coverage count"
+
+# invariant: nothing bare-runnable is run by nothing. This fell from a ratchet of 83 to a gate at
+# zero when the derived runner landed and ran the whole bare-runnable set. Its character changed
+# with its number: it is no longer a backlog counting down, it is the gate on two derivations
+# agreeing. tools/fixtures/g/glow_desk_reach_scan.sh excludes by the markers' INTERSECTION and
+# tools/fixtures/g/glow_desk_run_scan.sh by their UNION, so a desk half-declared reddens here and
+# at norun_disagree together -- the truth said twice rather than once.
+assert scan.out contains "uncovered_bare_ceiling=0" else "glow_desk_reach: the bare ceiling stands at zero -- a ceiling only falls"
+
+# invariant: the sample-taking population only falls, and it reached zero on 20260908.163900. Those
+# 46 desks cost a judgment apiece -- what argument proves this gate? -- and the elder reading
+# stopped there, because the only place named to hold 46 answers was a fourth hand-written
+# enumeration, which is the shape %532 booked. The answer was to stop looking for a place to keep
+# the list: each desk now carries its own sample in the head band its run-contract already uses,
+# `::  Sample: 3 5`, and the run scan gates a runnable sampled desk that declares none. Every one
+# of the 46 values was run on metal before it was written -- 46 of 46 GREEN through
+# tools/g/glow_run.rish -- so this is a gate on a measurement rather than a hope.
+assert scan.out contains "uncovered_sampled_ceiling=0" else "glow_desk_reach: the sampled ceiling stands at zero -- a ceiling only falls"
+
+# invariant: the printed sum is its two parts added, never a third spelled number that could
+# drift from them.
+assert scan.out contains "uncovered_ceiling=0" else "glow_desk_reach: the sum ceiling must equal 0 + 0"
+assert scan.out contains "verdict=ok" else "glow_desk_reach: the scan refused -- ${scan.out_brief}"
+
+# invariant: both refusal paths are reachable. A ceiling proven only in the passing direction
+# cannot be told from a bypass, so the guard drops each ceiling one under its live reading in turn
+# and requires the scan to refuse, naming each refusal apart from the marker gates and from the
+# other ceiling.
+# The bare gate stands at zero, so it cannot be proven by dropping the ceiling one further. It is
+# proven instead by taking the second instrument away: a runner selecting nothing leaves exactly
+# the 83 desks the elder witness never named run by nothing, on the live tree, and the gate fires.
+# This is the reading as it stood one lap ago, made reachable on purpose rather than remembered.
+# The pen sits in THIS TREE's own `.lap/`, the gitignored per-lap scratch room, rather than under a
+# shared /tmp with a name derived from `pwd` (the elder spelling, written against REDS %549 when
+# eight ships sharing one pier and one /tmp meant one ship's sweep could remove another's runner
+# mid-read). A path under this root cannot be reached by another ship at all, which is the same
+# guarantee without the arithmetic.
+#
+# The sibling ceiling is raised for this leg alone. Both gates stand at zero, and a silent runner
+# trips both at once -- so without the raise the sampled verdict would overwrite the bare one and
+# this leg would prove its sibling's refusal while naming its own.
+let mute = run ["sh" "-c" "mkdir -p .lap && { echo '#!/bin/sh'; echo 'exit 0'; } > .lap/glow-desk-reach-mute.sh"]
+assert mute.ok else "glow_desk_reach: could not write the silent runner -- ${mute.err_brief}"
+
+let under_bare = run ["sh" "-c" "GLOW_DESK_RUNNER=.lap/glow-desk-reach-mute.sh GLOW_DESK_UNCOVERED_SAMPLED_CEILING=9999 sh tools/fixtures/g/glow_desk_reach_scan.sh"]
+assert (under_bare.ok == false) else "glow_desk_reach: with the derived runner silent, the desks it alone runs must refuse at a bare ceiling of zero"
+assert under_bare.out contains "verdict=over_bare_ceiling" else "glow_desk_reach: want the bare ceiling refusal named -- ${under_bare.out_brief}"
+assert under_bare.out contains "covered_runner=0" else "glow_desk_reach: want the silent runner counted as covering nothing -- ${under_bare.out_brief}"
+
+# invariant: a runner that cannot answer refuses the whole reading. An empty selection and an
+# absent instrument look identical in the arithmetic and mean opposite things, so the scan names
+# the fault rather than letting a broken runner read as clean coverage of nothing.
+let no_runner = run ["sh" "-c" "GLOW_DESK_RUNNER=.lap/glow-desk-reach-absent.sh sh tools/fixtures/g/glow_desk_reach_scan.sh"]
+assert (no_runner.ok == false) else "glow_desk_reach: an absent derived runner must refuse"
+assert no_runner.err contains "no derived runner" else "glow_desk_reach: want the absent runner named -- ${no_runner.err_brief}"
+
+let sweep = run ["sh" "-c" "rm -f .lap/glow-desk-reach-mute.sh"]
+assert sweep.ok else "glow_desk_reach: could not clear the silent runner -- ${sweep.err_brief}"
+
+# invariant: the sampled gate is reachable too, and for the same reason the bare one needed a
+# second door. Both ceilings stand at zero now, so neither can be proven by dropping one lower.
+# This runner reproduces the selection as it stood before a desk could declare its own sample --
+# the real `--list` minus every desk carrying a `Sample:` line -- which leaves exactly the 46 run
+# by nothing, on the live tree. The bare ceiling is raised for this leg alone, so the refusal that
+# fires is named apart from its sibling rather than shadowing it.
+let blind = run ["sh" "-c" "mkdir -p .lap && p=.lap/glow-desk-reach-blind.sh; { echo '#!/bin/sh'; echo 'sh tools/fixtures/g/glow_desk_run_scan.sh --list | while IFS= read -r d; do head -6 \"$d\" | grep -q \"^::[[:space:]]*Sample:\" || printf \"%s\\n\" \"$d\"; done'; } > $p"]
+assert blind.ok else "glow_desk_reach: could not write the sample-blind runner -- ${blind.err_brief}"
+
+let under_sampled = run ["sh" "-c" "GLOW_DESK_RUNNER=.lap/glow-desk-reach-blind.sh GLOW_DESK_UNCOVERED_BARE_CEILING=9999 sh tools/fixtures/g/glow_desk_reach_scan.sh"]
+assert (under_sampled.ok == false) else "glow_desk_reach: with the runner blind to declared samples, those desks must refuse at a sampled ceiling of zero"
+assert under_sampled.out contains "verdict=over_sampled_ceiling" else "glow_desk_reach: want the sampled ceiling refusal named -- ${under_sampled.out_brief}"
+assert under_sampled.out contains "uncovered_sampled=46" else "glow_desk_reach: want all 46 sample-taking desks uncovered when the runner cannot see their declarations -- ${under_sampled.out_brief}"
+
+let sweep_blind = run ["sh" "-c" "rm -f .lap/glow-desk-reach-blind.sh"]
+assert sweep_blind.ok else "glow_desk_reach: could not clear the sample-blind runner -- ${sweep_blind.err_brief}"
+
+# invariant: the room can never again pass for the corpus. This scan's own door called glow/gen/
+# "the generated desk corpus for the language" until 20260907.045422, while 99 of the tree's 451
+# .glow files stood in five other rooms. corpus_glow and corpus_outside report and gate nothing --
+# a desk landing in src/gate/ is ordinary work in another lane, and those rooms have their own
+# runners -- so what they buy is a claim a reader can check rather than a sentence to believe.
+assert scan.out contains "corpus_glow=" else "glow_desk_reach scan printed no tree-wide corpus count"
+assert scan.out contains "corpus_outside=" else "glow_desk_reach scan printed no outside-the-room count"
+
+# invariant: a stem held by two files is bounded. The worker writes glow/bin/<stem>, caches
+# glow/.cache/<stem>.rye, and matches its sample-permission `case` on the stem alone, so two files
+# sharing a stem share one binary, one cache path and one run contract. Held under a ceiling that
+# a GATE AT ZERO from `20260908`, because the reading splits. The cost a shared stem carries -- one
+# built binary, one cache path, one sample permission -- is a cost two DIFFERENT programs pay, and
+# two byte-identical files pay none of it. One elder pair was a malformed plant under
+# tools/fixtures/g/ runnable only WITH an argument, on a permission the `case` grants to a real desk
+# of the same name; renaming it to gate-count-malformed.glow freed it. The other, the
+# sample-demo-fact-line-lits pair, is byte-identical because Zig refuses an @embedFile escaping the
+# root file's directory, so linengrow/gen/ must hold its own copy of the desk the product embeds.
+# It reads `stem_twin` and the gate stands at zero, so a differing pair reds on the lap it arrives
+# -- and so does this pair the day it drifts.
+assert scan.out contains "stem_collision=" else "glow_desk_reach scan printed no shared-stem count"
+assert scan.out contains "stem_collision_ceiling=" else "glow_desk_reach scan printed no shared-stem ceiling"
+assert scan.out contains "stem_twin=" else "glow_desk_reach scan printed no byte-identical-twin count"
+assert scan.out contains "stem_collision=0" else "glow_desk_reach: two DIFFERING .glow files share one stem"
+
+# invariant: the reading itself is proven on real desk rooms rather than trusted. The control
+# builds miniature desk rooms in a throwaway pen and plants each refusal, then lifts it --
+# 91 behaviors, both sides of every gate and of all three ceilings, and the two gates proven
+# independent: a sample-taking desk refuses at its own ceiling while the bare ceiling stands at
+# zero, which is the reading the elder sum could not express. The last of them is the one that
+# earns the prune: a permission whose only file is a build-cache leftover reads phantom, where the
+# elder spelling pruned .git alone and let the leftover keep the branch alive.
+let control = run ["sh" "tools/fixtures/g/glow_desk_reach_control.sh"]
+assert control.ok else "glow_desk_reach control failed: ${control.out_brief}"
+assert control.out contains "fail=0" else "glow_desk_reach control reported failures: ${control.out_brief}"
+
+say "GREEN: glow_desk_reach -- markers agree, no phantom, no contradiction, no dead permission, covered read from both instruments as a union, zero desks run by nothing -- bare or sample-taking, both gates at zero, the room named apart from the corpus, shared stems gated at zero with byte-identical twins reported apart, both refusals proven, 91 control behaviors green."

@@ -1,0 +1,110 @@
+# tame_style_scan_advise.rish -- TAME ratchet advisories over the scan roster.
+#
+# Native whole-roster path under max_list_items=1024 (advise crossed 256 -> 512
+# on 20260724; doorway crossed 512 -> 1024 on 20260725). Counts use map + length
+# + join + shell arithmetic (for-each cannot accumulate). camelCase uses grep
+# seam; >70-line ledger via tame_style_long_fn.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/t/tame_style_scan_advise.rish
+
+# tools/*.py count -- advisory echo beside the BLOCKING gate in
+# tame_style_scan_bans.rish (closed `20260724.212805`). Named exempts:
+# tools/fixtures/t/tools_py_exempt.txt. cast_a_chart.py stays outside tools/.
+# Prefer ! -path over \( -prune \) -- Rishi's run string escapes break find's
+# paren form (ok=false empty out). Host caches stay gitignored; skip them so a
+# Framework HAWM pack never false-counts NDK *.py under tools/.cache.
+let tools_py_run = run ["sh" "-c" "find tools -name '*.py' -type f ! -path 'tools/.cache/*' ! -path 'tools/.build/*' 2>/dev/null | wc -l | tr -d ' '"]
+assert tools_py_run.ok else "tame_style_scan_advise: tools py count failed"
+say "ratchet: tools/*.py count = ${trim tools_py_run.out} (blocking at zero in bans; cast_a_chart.py exempt outside tools/)"
+
+# THE ROOMS COME FROM ONE FILE, from 20260908 -- tools/fixtures/t/tame_style_rooms.txt, the same
+# list the bans half and the legacy parity copy read. Until that stamp this half named fifteen
+# rooms and two glow FILES while the bans half beside it named twenty rooms, so one script pair
+# read 857 files and 1,126 and a selftest called their counts equal. It did not catch the gap
+# because equal counts over unequal populations still compare equal: `image/`, `mikrophone/` and
+# `amphora/` stood in one list and not the other for weeks, and they happened to carry none of the
+# four patterns counted here. Parity held by luck.
+#
+# WHAT THE GAP HID: 137 genuine `@memcpy` application sites in authored Rye -- `glow/` above all,
+# this tree's own language implementation -- while the line below printed 0.
+let tame_rooms = "grep -v '^#' tools/fixtures/t/tame_style_rooms.txt | grep -v '^$'"
+let find_rye = "find $(${tame_rooms}) -name '*.rye' ! -type l ! -path '*/.cache/*' ! -path '*/bin/*' 2>/dev/null"
+
+# EACH COUNT IS ONE GREP THROUGH THE RUN SEAM, which is the idiom the camelCase line below has
+# always used, rather than the per-file map + join + shell arithmetic the other three used until
+# 20260908. That technique built one shell expression holding a term per file, and widening the
+# roster to 1,126 rooms-worth of files refused with `StringTooLong` on line 31 -- measured, after
+# a first guess that `max_list_items` would be what bit. The accumulator the comment above calls
+# for is a `wc -l`, and it has no length to outgrow.
+let memcpy_canonical = length (where (lines (read-file "tally/copy.rye")) as ln: ln contains "@memcpy(")
+let memcpy_app_run = run ["sh" "-c" "echo $(( $(grep -hF '@memcpy(' $(${find_rye}) 2>/dev/null | wc -l) - ${memcpy_canonical} ))"]
+assert memcpy_app_run.ok else "tame_style_scan_advise: memcpy count failed"
+let memcpy_app = memcpy_app_run.out
+
+let camel_run = run ["sh" "-c" "grep -hE '^( *)?(pub )?fn [a-z]+[A-Z]' $(${find_rye}) 2>/dev/null | wc -l | tr -d ' '"]
+assert camel_run.ok else "tame_style_scan_advise: camelCase count failed"
+
+# TWO OF THE THREE COUNT PROGRAM POSITION, from 20260908 -- tools/fixtures/t/tame_style_app_sites.sh,
+# which drops a `//` comment line, a `\\` multiline-string continuation, and an occurrence sitting
+# inside a string literal earlier on its own line. A line grep counts a LINE rather than a call, and
+# these two ratchets ask a lap to MIGRATE what they count, so a wrong line is a wrong edit.
+# Measured across the twenty rooms on the lap this landed: `parseInt(` read 125 of which 79 are
+# emitted text, all of them in `glow/` -- the emitter writing `std.fmt.parseInt(u32, argv[2], 10)`
+# into generated Rye, and its witnesses asserting `indexOf(rye_argv, "parseInt(u32")` on that
+# output. `Ed25519` read 26 of which 29 counted lines are `//` prose. `@memcpy(` measures
+# identically under both rules (0 emitted, 0 comment), so it keeps its two independent readings --
+# it is the one count the parity selftest compares numerically, and that is worth more than
+# uniformity here.
+let app_sites = "sh tools/fixtures/t/tame_style_app_sites.sh"
+
+let parseint_canonical_run = run ["sh" "-c" "${app_sites} 'parseInt(' tally/parse_int.rye"]
+assert parseint_canonical_run.ok else "tame_style_scan_advise: parseInt canonical count failed"
+let parseint_canonical = trim parseint_canonical_run.out
+let parseint_app_run = run ["sh" "-c" "echo $(( $(${app_sites} 'parseInt(' $(${find_rye}) 2>/dev/null) - ${parseint_canonical} ))"]
+assert parseint_app_run.ok else "tame_style_scan_advise: parseInt count failed"
+let parseint_app = parseint_app_run.out
+
+let ed25519_canonical_run = run ["sh" "-c" "${app_sites} --exclude fromEd25519 Ed25519 tally/kumara.rye"]
+assert ed25519_canonical_run.ok else "tame_style_scan_advise: Ed25519 canonical count failed"
+let ed25519_canonical = trim ed25519_canonical_run.out
+let ed25519_app_run = run ["sh" "-c" "echo $(( $(${app_sites} --exclude fromEd25519 Ed25519 $(${find_rye}) 2>/dev/null) - ${ed25519_canonical} ))"]
+assert ed25519_app_run.ok else "tame_style_scan_advise: Ed25519 count failed"
+let ed25519_app = ed25519_app_run.out
+
+say "ratchet: @memcpy application sites = ${trim memcpy_app} (migrate to copy_disjoint on touch)"
+say "ratchet: @memcpy canonical in tally/copy.rye = 1 (intentional inside copy_disjoint)"
+say "ratchet: camelCase fn declarations = ${trim camel_run.out} (snake_case on touch)"
+say "ratchet: parseInt( application sites = ${trim parseint_app} (program position; migrate to tally/parse_int.rye on touch; leading-zero footgun otherwise silent)"
+say "ratchet: Ed25519 application sites = ${trim ed25519_app} (program position; migrate to tally/kumara.rye on touch; identity at the seam)"
+say "ratchet: Ed25519 canonical in tally/kumara.rye = ${ed25519_canonical} (program position; intentional inside kumara seam)"
+say "ratchet: functions past 70 lines —"
+
+# Parenthesize every `== false` -- bare `f == "path" == false` empties the list
+# (Rish binds `==` tighter than intended; seated 20260717.181715).
+# THE ZERO-ASSERT LIST IS DRAWN BY `grep -L` AND FILTERED HERE, so the in-process list holds the
+# files that answered rather than every file asked. Materializing the whole widened roster would
+# put 1,126 items where `max_list_items` seats 1,024; the answer set is 127 and the exempt filters
+# below read exactly as they always did.
+let za_run = run ["sh" "-c" "grep -LF 'assert(' $(${find_rye}) 2>/dev/null | sort"]
+assert za_run.ok else "tame_style_scan_advise: zero-assert list failed"
+let za0 = where (lines za_run.out) as f: f != ""
+let za2 = where za0 as f: (f starts-with "comlink/guest_") == false
+let za3 = where za2 as f: (f starts-with "aurora/src/") == false
+let za4 = where za3 as f: (f == "brushstroke/font8x8_data.rye") == false
+let za5 = where za4 as f: (f == "caravan/supervisor_signal.rye") == false
+let za6 = where za5 as f: (f == "caravan/supervisor_exit.rye") == false
+let za7 = where za6 as f: (f == "pond/apps/window_input.rye") == false
+let za8 = where za7 as f: (f == "tally/maybe.rye") == false
+# tally/pedersen.rye is a pure re-export shim for tally/bud.rye (accrete-never-break
+# keeping the old import path green) -- every function is a one-line delegation and
+# every invariant it could name already lives, asserted, in bud.rye. An assert on the
+# shim's own `main` would name nothing real; it would restate a check bud.rye already
+# makes, purely to satisfy this ratchet. Exempt on that reading rather than force one.
+let za9 = where za8 as f: (f == "tally/pedersen.rye") == false
+for-each za9 as f do say "  ${f} (zero assert — review on touch)"
+say "ratchet: zero assert( files remaining = ${length za9} (honest exempt: virtio guests, aurora freestanding, signal handler, font table, thin line editor, exit constants, the dual-of-assert mark itself, a pure re-export shim)"
+
+let long_fn = run ["rishi/bin/rishi" "run" "tools/fixtures/t/tame_style_long_fn.rish"]
+say long_fn.out
+

@@ -1,0 +1,1864 @@
+//! The `rye` command-line tool -- the first version of the Rye language.
+//!
+//! Rye is a derivative of Zig 0.16.0. This first version is honest about what
+//! it is: a thin, careful front-end that runs `.rye` source through the Zig
+//! 0.16.0 toolchain. Rye source is Zig source for now; the language will grow
+//! its own shape over time. By standing on the same toolchain, every capability
+//! Zig 0.16.0 offers -- including SHA3-512 in the standard crypto library -- is
+//! Rye's too, by construction.
+//!
+//! The `rye` command is itself a Rye program -- this file, `src/main.rye` -- so
+//! Rye is, from here, written in Rye. Once a first `rye` binary exists, Rye
+//! builds itself with `rye build`; `bootstrap.sh` is the cold start before one
+//! does. The programs we author carry the `.rye` name; the standard library
+//! under `lib/std` keeps the `.zig` name the compiler looks for when we point it
+//! there with `--zig-lib-dir`. The line is clean: `.rye` is what we write, `.zig`
+//! is the library layout the toolchain reads.
+//!
+//! Commands:
+//!   rye version            Print the Rye version and its toolchain backend.
+//!   rye run <file.rye>     Compile and run a single .rye source file.
+//!   rye build <file.rye>   Compile a .rye source file to a binary. Flags after
+//!                          the file pass through to the toolchain, so Rye can
+//!                          aim at any target it supports -- including freestanding
+//!                          RISC-V, the ground Aurora's first seed wakes on.
+//!
+//! We locate the Zig toolchain in three readings, and pass the answer to the
+//! toolchain explicitly rather than guessing in the dark, so the backend in use
+//! is always clear. An explicit RYE_ZIG wins. Failing that, the pinned toolchain
+//! this tree fetches for itself, found beside this binary at
+//! `<exe_dir>/../../vendor/zig-toolchain/zig` -- the same reading `bootstrap.sh`
+//! already takes, so the cold start and the compiler it bootstraps answer one
+//! question one way. Last, a bare `zig` for the host's PATH to answer.
+//!
+//! Rye carries its own standard library at `rye/lib`: a copy of the toolchain's
+//! `std` that we are free to tend, with the unchanging remainder symlinked back
+//! to the pinned toolchain. We point the compiler at it with `--zig-lib-dir`,
+//! so `@import("std")` in a `.rye` program means *Rye's* std. We find that
+//! library beside this executable, at `<exe_dir>/../lib`, or through the
+//! RYE_LIB environment variable when it is set.
+//!
+//! BUILD RECEIPTS. A `build` or `build-lib` that names its output with
+//! `-femit-bin=<path>` earns a receipt: one SHA-256 over the whole import
+//! closure's bytes, the forwarded flags -- `-femit-bin=` joining as the bare
+//! fact that an output was named, since where it lands shapes no byte of it --
+//! the toolchain's bytes, the sorted
+//! standard-library tree, and this binary's own bytes, written beside the
+//! output as `<path>.ryekey`. When every one of those inputs is byte-identical
+//! on the next build, the toolchain is not spawned and the standing binary
+//! serves -- a skip of recompilation only, never of anything a program proves
+//! by running. Any input moving misses the receipt and builds fresh, and
+//! setting RYE_BUILD_FRESH bypasses receipts entirely. `run` never consults a
+//! receipt: running is the point of `run`. Every `@embedFile` target in the
+//! closure joins the key by content, and the stamp's second line holds the
+//! emitted binary's own hash, verified on every hit -- a truncated, torn, or
+//! hand-replaced output misses rather than serves. A build whose flags carry a
+//! file-valued or positional argument (`-T`, `-I`, `-L`, `-l`, a bare `.c`
+//! source) or whose closure reaches `@cImport` earns no receipt at all, since
+//! bytes outside the key would then shape the binary -- building fresh is the
+//! safe direction and the only one taken. Honest bounds, named rather than
+//! discovered: at most 4,096 standard-library files and 256 MiB of library
+//! bytes join a key, and an unreadable or larger tree builds fresh. Two builds
+//! racing one emit
+//! path can tear an output exactly as they could before receipts existed --
+//! the output hash then misses and the next build heals it, where a v1 receipt
+//! would have pinned it.
+
+const std = @import("std");
+const assert = std.debug.assert;
+const c = std.c;
+const Sha256 = std.crypto.hash.sha2.Sha256;
+
+/// Rye's version, stamped chronologically -- YYYYMMDD.HHMMSS, where later is
+/// larger. The scheme itself was the first divergence from Zig (20260617.213112):
+/// Rye names its versions on a clock while the backend keeps its honest semantic
+/// version, reported through `builtin.zig_version`. From there Rye accretes,
+/// nothing removed and only added, along two strands. Divergences in *substance*
+/// strengthen Rye's own `std`, each additive and parity-identical, recorded in
+/// the strengthening-compiler stack: the SHA3-512 wrappers (20260618.070012,
+/// 9998), the Keccak sponge (20260618.072512, 9997), and this stamp -- the std
+/// functions our own tools call, `mem.trim`, `mem.eql`, `mem.findScalar`, and
+/// `fmt.parseInt`, given postconditions, a precondition, and a `maybe` (9996).
+/// Accretions in *capability* grow the tool itself: the `build` command, and
+/// with it Aurora's first freestanding RISC-V seed, arrived at 20260618.191412.
+/// The `key` command arrived at 20260916.095816 -- the receipt key asked for
+/// without building, so a caller can find out whether a binary is current at
+/// the cost of a read. The remembered compiler digest arrived at
+/// 20260916.203519 -- `file_digest_remembered`, which reads the pinned
+/// toolchain's bytes once per compiler rather than once per keyed build. This
+/// stamp is also the staleness door `tools/fixtures/r/ryekey_control.sh` reads
+/// at its own opening: a binary built from an elder source with this string
+/// unmoved walks through that door and then behaves differently, which is
+/// exactly what happened on the lap the memo landed. A behavior change in this
+/// file moves this stamp. The backend stays honestly 0.16.0 throughout.
+const rye_version = "20260916.231500";
+
+/// The Zig toolchain version this first Rye stands upon.
+const zig_backend_version = "0.16.0";
+
+/// The backend's version on Rye's chronological clock: the UTC commit time of
+/// the pinned Zig 0.16.0 source (codeberg.org/ziglang/zig @ 24fdd5b7). Zig
+/// reports itself semantically as 0.16.0 through `builtin.zig_version`, and we
+/// never overwrite that truth; this simply reads the same pinned snapshot the
+/// Rye way, so even the ground we stand on carries a chronological name.
+const zig_backend_version_chrono = "20260413.181917";
+
+/// One tree, one toolchain spawn (REDS %281). The bridge writes `.zig` shadows
+/// beside the sources and clears them on the way out, so two builds sharing a
+/// tree delete each other's shadows mid-compile and the loser reports RED
+/// about correct code. The lock is a directory, because mkdir is atomic on
+/// both kernels this tree runs on; the pid inside lets a waiter tell a live
+/// holder from a corpse and clear only the corpse.
+const build_lock_dir = ".rye-build.lock";
+const build_lock_pid_file = ".rye-build.lock/pid";
+
+/// A waiter outlasts the longest honest build with room to spare; past this it
+/// names the holder and refuses, because a build held this long is its own
+/// question rather than a queue.
+const build_lock_max_wait_ms: u64 = 600_000;
+
+/// The poll between looks at a held lock -- short enough that a one-second
+/// build costs a waiter little, long enough to stay off the scheduler's toes.
+const build_lock_poll_ms: u64 = 50;
+
+/// The receipt key's domain separator, versioned so a future key shape can
+/// never collide with this one's stamps. Moved to v6 on `20260916` when the
+/// toolchain and library PATHS left the key below, and to v7 the same day when
+/// the OUTPUT'S path followed them -- the third of one class, each naming
+/// where something sat rather than what it compiled. **v8 on `20260916`** is a
+/// different kind of move: the compiler now joins the key as the 32-byte
+/// SHA-256 of its bytes rather than as the bytes themselves, so the digest the
+/// key speaks changes shape even where not one input byte moved. The bump buys
+/// legibility rather than safety -- a changed input set already speaks a
+/// different digest and misses, which is the safe direction -- so what it
+/// actually names is the one rebuild every standing receipt takes on the lap
+/// this lands: 96 of them on this ship at v6, and 94 standing when v7 landed,
+/// each hitting again afterward. **v9 on `20260916`** is the same kind of move
+/// one input over: the standard library tree now joins as the 32-byte SHA-256
+/// of its sorted content stream rather than as that stream, so the key changes
+/// shape where no library byte moved, and every standing receipt takes one
+/// rebuild before hitting again.
+const ryekey_marker = "ryekey-v9\x00";
+
+/// One file's remembered digest sits beside the `rye` binary under this prefix
+/// and suffix, in Kyri notation. The directory is gitignored, so a record is a
+/// build artifact rather than tracked content.
+const ryekey_cache_prefix = "rye-key-cache.";
+const ryekey_cache_suffix = ".kyri";
+
+/// The library tree's remembered digest sits beside the same binary under its
+/// own prefix. Two prefixes rather than one, because a record is reached by the
+/// digest of the path it speaks for and a tree's root could hash to the same
+/// sixteen characters a file's path does -- and a record read for the wrong
+/// subject would be refused on its `format` line and then overwritten, so the
+/// two would take turns evicting each other on every build. A prefix keeps
+/// them in separate names, where neither can reach the other at all.
+const ryekey_library_cache_prefix = "rye-key-library.";
+
+/// The library tree record's format word, which is also the domain separator at
+/// the head of the identity stream. One constant for both, so a future record
+/// shape cannot leave an elder identity readable under a new name.
+const ryekey_library_format = "rye-key-library-v1";
+
+/// A file's record is seven short lines and a library tree's is four. This
+/// bound refuses to read a record-shaped file that has grown into something
+/// else, with generous room over the ~200 bytes one measures.
+const ryekey_cache_max_bytes: u64 = 4096;
+
+/// HOW MANY RECORDS ONE MEMO FAMILY KEEPS, and why the set needed a number at
+/// all. A record is reached by the digest of its subject's path, so a new path
+/// means a new file rather than a replaced one, and nothing ever removed one --
+/// a control run building inside ten throwaway pens leaves ten records naming
+/// roots that were deleted the moment each pen closed. Measured `20260916`:
+/// 56 records beside this binary, 5 of them naming a path that still existed.
+/// `rye/bin/` is gitignored, so no meter in this tree can see the room and the
+/// only bound is the one this writer states (REDS %790).
+///
+/// THIRTY-TWO is generous over the live population by six times and small
+/// enough that a pen's leavings are gone within one ordinary working day. The
+/// ceiling is PER FAMILY rather than across both, which keeps the two families
+/// single-stranded exactly as the landing paper argued: a library build can
+/// never evict a file record, whatever the mix of subjects happens to be.
+///
+/// EVICTING A RECORD COSTS A REHASH AND NEVER A WRONG ANSWER. Every reader
+/// already treats an absent record as *read the bytes*, so the worst an
+/// over-eager ceiling buys is the slow path this memo exists to skip.
+const ryekey_record_family_max: u32 = 32;
+
+/// How many of one family's records a single eviction pass will hold in hand.
+/// The ceiling above is 32, so a room at this bound is already four orders of
+/// ordinary; past it the pass gives up rather than allocating without a limit.
+const ryekey_record_scan_max: u32 = 4096;
+
+/// A record's name carries the first sixteen characters of its subject's path
+/// digest, from `digest_record_path` above. The eviction pass spells the same
+/// width, so a name of any other shape is not this family's to delete.
+const ryekey_record_digest_chars = 16;
+
+/// A remembered digest is taken over a whole file, and the pinned toolchain
+/// measures 172,641,672 bytes today. This ceiling leaves deliberate growth room
+/// while a wildly wrong path meets a named limit rather than a long read.
+const ryekey_toolchain_max_bytes: u64 = 1024 * 1024 * 1024;
+
+/// A receipt stamp is two 64-hex lines -- the input key, then the emitted
+/// binary's own hash -- and this bound refuses to read a stamp-shaped file
+/// that has grown into something else.
+const ryekey_stamp_max_bytes: u64 = 256;
+
+/// An @embedFile target joins the key by content; this bound is generous over
+/// the corpora fixtures embedded today, so a grown fixture still hashes whole
+/// while a wildly wrong path meets a named limit.
+const ryekey_embed_max_bytes: u64 = 64 * 1024 * 1024;
+
+/// The emitted binary is hashed into the stamp and verified on every hit; the
+/// largest artifacts this tree emits sit far under this.
+const ryekey_emit_max_bytes: u64 = 256 * 1024 * 1024;
+
+/// The `rye` binary's own bytes join the key; this bound is an order of
+/// magnitude over the ~2.5 MB the binary measures today, so a grown binary
+/// still hashes whole while a wildly wrong path meets a named limit.
+const rye_self_max_bytes: u64 = 32 * 1024 * 1024;
+
+/// The seated library is 552 files and about 18 MiB. These ceilings leave
+/// deliberate growth room and turn an unexpected tree into a fresh build.
+const ryekey_library_max_files: u32 = 4096;
+const ryekey_library_max_bytes: u64 = 256 * 1024 * 1024;
+
+/// Where Rye's standard library sits relative to this binary: a hard-coded,
+/// relative template that holds no matter where the repository is cloned. The
+/// binary lives at `rye/bin/rye`, so its library is one step over at `rye/lib`
+/// -- that is, `../lib` from the binary's own directory.
+const rye_lib_relative_to_exe = "../lib";
+
+comptime {
+    // invariant: the template stays relative on purpose -- resolved against the binary's real
+    // location, it bakes in no absolute path and assumes nothing about the current directory, so an
+    // empty template or one beginning at root would tie this build to one machine's filesystem.
+    assert(rye_lib_relative_to_exe.len != 0);
+    assert(rye_lib_relative_to_exe[0] != '/');
+}
+
+/// Where the pinned toolchain sits relative to this binary: the same kind of
+/// relative template as `rye_lib_relative_to_exe`, one directory further out.
+/// The binary lives at `rye/bin/rye`, so the clone root is two steps up and the
+/// toolchain `tools/f/fetch-toolchain.sh` installs sits beneath it at
+/// `vendor/zig-toolchain/zig`.
+const zig_relative_to_exe = "../../vendor/zig-toolchain/zig";
+
+comptime {
+    // invariant: this template stays relative for the reason the library's does -- resolved
+    // against the binary's own location it names the same file from any working directory,
+    // where an absolute path would tie the build to one machine
+    assert(zig_relative_to_exe.len != 0);
+    assert(zig_relative_to_exe[0] != '/');
+}
+
+pub fn main(init: std.process.Init) !u8 {
+    // Allocate from the process garden -- cleared whole on exit by the runtime.
+    // A short-lived command needs no finer bookkeeping than that.
+    const garden = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(garden);
+    if (args.len < 2) {
+        print_usage();
+        return 0;
+    }
+
+    const command = args[1];
+    if (std.mem.eql(u8, command, "version")) {
+        print_version();
+        return 0;
+    } else if (std.mem.eql(u8, command, "run")) {
+        return bridge_to_zig(init, args, "run", "run", false);
+    } else if (std.mem.eql(u8, command, "build")) {
+        return bridge_to_zig(init, args, "build-exe", "build", false);
+    } else if (std.mem.eql(u8, command, "build-lib")) {
+        // Shared/static libraries for seams that export C ABI symbols --
+        // Glow's Android NativeActivity entry (libglowapp.so) is the first
+        // consumer. Flags pass through the same way `build` does.
+        return bridge_to_zig(init, args, "build-lib", "build-lib", false);
+    } else if (std.mem.eql(u8, command, "key")) {
+        // ASK WITHOUT BUILDING. The receipt key is computed by exactly the path
+        // a `build` takes -- same marker, same verb, same toolchain and library
+        // bytes, same closure walk, same flags, same self-bytes -- with staging,
+        // the lock, the stamp delete, and the spawn all left behind. One
+        // computation serves both verbs, so the answer this prints cannot drift
+        // from the key a build writes.
+        //
+        // It keys `build`, because `build` is the verb that earns a receipt:
+        // `run` is excluded by name below, and `build-lib` would need its own
+        // toolchain verb in the key. Widen it when a caller wants that.
+        return bridge_to_zig(init, args, "build-exe", "key", true);
+    } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help")) {
+        print_usage();
+        return 0;
+    } else {
+        std.debug.print("rye: unknown command '{s}'\n\n", .{command});
+        print_usage();
+        return 2;
+    }
+}
+
+fn print_usage() void {
+    std.debug.print(
+        \\rye {s} -- a Zig {s} derivative
+        \\
+        \\usage:
+        \\  rye version                 print the Rye version and toolchain backend
+        \\  rye run <file.rye>          compile and run a single .rye source file
+        \\  rye build <file.rye>        compile a .rye file to a binary (flags pass through)
+        \\  rye build-lib <file.rye>    compile a .rye file to a library (flags pass through)
+        \\  rye key <file.rye> -femit-bin=<path>
+        \\                              ask whether that binary is current, building nothing.
+        \\                              Prints verdict=hit|miss|unkeyable with both keys;
+        \\                              exits 0 on hit, 1 on anything meaning build.
+        \\
+    , .{ rye_version, zig_backend_version });
+}
+
+fn print_version() void {
+    std.debug.print(
+        \\rye {s}  (chronological: YYYYMMDD.HHMMSS, later is larger)
+        \\backend: zig {s}  (Rye clock: {s}; live value via builtin.zig_version)
+        \\
+    , .{ rye_version, zig_backend_version, zig_backend_version_chrono });
+}
+
+/// Bridge a `.rye` file to the toolchain: copy it to an adjacent `.zig`, hand
+/// that to `zig <zig_subcommand>` against Rye's own standard library, then clear
+/// the bridge away. `run` and `build` share this one path; only the toolchain
+/// verb and the spoken label differ. Flags after the file pass straight through,
+/// so a caller can aim a build at any target the toolchain supports.
+/// Hold still inside the lock's one unprotected window, on purpose, so a
+/// control can prove what a waiter does to a holder standing there. Zero
+/// unless `RYE_BUILD_LOCK_STALL_MS` names a number, which no build outside a
+/// control ever sets; a race proven only by running many builds and counting
+/// is a race nobody can show on demand.
+///
+/// The bound is named rather than open: a stall past it reads as a typo rather
+/// than an instruction, and a compiler that can be told to sleep forever by an
+/// environment variable is a worse thing than the race it was added to prove.
+const build_lock_stall_max_ms: u64 = 10_000;
+
+fn build_lock_stall(init: std.process.Init) void {
+    const raw = init.environ_map.get("RYE_BUILD_LOCK_STALL_MS") orelse return;
+    const want = std.fmt.parseInt(u64, std.mem.trim(u8, raw, " \n\r\t"), 10) catch return;
+    const ms = if (want > build_lock_stall_max_ms) build_lock_stall_max_ms else want;
+    // invariant: a deliberate stall stays inside the bound this file names.
+    assert(ms <= build_lock_stall_max_ms);
+    if (ms == 0) return;
+    // invariant: a stall that runs names a positive number of milliseconds.
+    assert(ms > 0);
+    var ts = c.timespec{
+        .sec = @intCast(ms / 1000),
+        .nsec = @intCast((ms % 1000) * 1_000_000),
+    };
+    _ = c.nanosleep(&ts, null);
+}
+
+/// Build the lock somewhere else, complete, and move it into place in one
+/// step. `rename` onto a directory that already holds a pid refuses with
+/// `DirNotEmpty`, so the move is both the claim and the test of it -- and the
+/// lock never exists without the pid inside, which is the whole point.
+///
+/// True means this process holds a complete lock. False means somebody else
+/// does, and the caller queues. The staging directory is cleaned either way, so
+/// a refused claim leaves nothing behind for the next build to puzzle over.
+fn build_lock_claim(init: std.process.Init, io: std.Io, dir: std.Io.Dir, garden: std.mem.Allocator) !bool {
+    const staging = try std.fmt.allocPrint(garden, "{s}.staging.{d}", .{ build_lock_dir, c.getpid() });
+    defer garden.free(staging);
+    const staged_pid = try std.fmt.allocPrint(garden, "{s}/pid", .{staging});
+    defer garden.free(staged_pid);
+    // invariant: a staging name is this process's own, never the lock's.
+    assert(!std.mem.eql(u8, staging, build_lock_dir));
+
+    // A staging directory of our own pid may survive a killed build. Clearing it
+    // is safe precisely because it carries our pid and we are alive.
+    dir.deleteFile(io, staged_pid) catch {};
+    dir.deleteDir(io, staging) catch {};
+    try dir.createDir(io, staging, .default_dir);
+    var cleanup_staging = true;
+    defer if (cleanup_staging) {
+        dir.deleteFile(io, staged_pid) catch {};
+        dir.deleteDir(io, staging) catch {};
+    };
+
+    var pidbuf: [32]u8 = undefined;
+    const pid_text = std.fmt.bufPrint(&pidbuf, "{d}\n", .{c.getpid()}) catch return false;
+    // invariant: a lock is moved into place already naming its holder.
+    assert(pid_text.len > 0);
+    // The refusal is NOT swallowed. A lock whose pid never landed is the exact
+    // state this protocol exists to make impossible, so a failed write refuses
+    // the claim rather than proceeding behind an anonymous lock.
+    dir.writeFile(io, .{ .sub_path = staged_pid, .data = pid_text }) catch return false;
+
+    // This protocol's one window, held open on demand so a control can look
+    // through it. What stands here is a STAGING directory carrying our pid; the
+    // lock itself is untouched, which is the property under test. The elder
+    // protocol's window stood at the lock itself, with nothing inside it.
+    // Zero in every build nobody is testing.
+    build_lock_stall(init);
+
+    dir.rename(staging, dir, build_lock_dir, io) catch |err| switch (err) {
+        // Somebody holds a complete lock. `DirNotEmpty` is the answer a kernel
+        // gives for a target directory carrying a pid, which under this protocol
+        // is the only kind a live holder ever publishes; `FileBusy` is the same
+        // refusal wearing another name on a platform that reports it that way.
+        error.DirNotEmpty, error.FileBusy => return false,
+        else => return err,
+    };
+    cleanup_staging = false;
+    return true;
+}
+
+/// Take the tree's one build lock, or say plainly why not. True means held.
+/// A dead holder's lock is cleared once and retried; a live holder is waited on
+/// up to the named bound.
+///
+/// THE GAP THIS CLOSED, recorded because the elder protocol read reasonably and
+/// was wrong. The lock used to be an atomic `mkdir` followed by a separate write
+/// of the holder's pid, so between those two calls it stood with nothing inside.
+/// A waiter reading that state twice, one 50ms poll apart, called it a corpse and
+/// cleared it -- out from under a live holder, which then bridged beside the
+/// waiter that took it, and the two deleted each other's shadows. The elder
+/// comment priced that window at "a maker hanging inside two lines"; under eight
+/// parallel builds a stall of one poll between two syscalls is ordinary, and a
+/// swallowed pid write left the lock permanently anonymous with no timing luck at
+/// all. Proven on metal `20260915`: a lock directory standing with no pid inside
+/// was cleared by the next build, which walked straight on into the bridge.
+///
+/// THE REPAIR IS THAT THE STATE NO LONGER EXISTS. `build_lock_claim` assembles a
+/// complete lock in a staging directory and `rename`s it into place, so a lock is
+/// never seen without its pid. Reading the pid back after writing it was the
+/// first answer tried and it does not work: a holder robbed during the gap writes
+/// its own pid over the thief's and reads back exactly what it just wrote.
+///
+/// The waiter's reading is untouched, because clearing a genuine corpse is still
+/// its job -- and under this protocol an anonymous lock can only ever be one.
+fn build_lock_acquire(init: std.process.Init, io: std.Io, dir: std.Io.Dir, garden: std.mem.Allocator, label: []const u8) !bool {
+    var waited_ms: u64 = 0;
+    var unreadable_looks: u32 = 0;
+    while (true) {
+        if (try build_lock_claim(init, io, dir, garden)) return true;
+        const holder_alive = blk: {
+            const raw = dir.readFileAlloc(io, build_lock_pid_file, garden, .limited64(64)) catch {
+                unreadable_looks += 1;
+                if (unreadable_looks >= 2) break :blk false;
+                break :blk true;
+            };
+            unreadable_looks = 0;
+            const trimmed = std.mem.trim(u8, raw, " \n\r\t");
+            const pid = std.fmt.parseInt(c.pid_t, trimmed, 10) catch break :blk false;
+            break :blk c.kill(pid, @enumFromInt(0)) == 0;
+        };
+        if (!holder_alive) {
+            // The corpse is cleared once; a racing waiter losing this clear
+            // simply meets a fresh lock on the next look.
+            dir.deleteFile(io, build_lock_pid_file) catch {};
+            dir.deleteDir(io, build_lock_dir) catch {};
+            continue;
+        }
+        if (waited_ms >= build_lock_max_wait_ms) {
+            std.debug.print(
+                "rye {s}: the build lock at {s} has been held past {d}s by a live process -- a build this long is its own question. Remove the lock only if you know that process is not building.\n",
+                .{ label, build_lock_dir, build_lock_max_wait_ms / 1000 },
+            );
+            return false;
+        }
+        var ts = c.timespec{ .sec = 0, .nsec = @intCast(build_lock_poll_ms * 1_000_000) };
+        _ = c.nanosleep(&ts, null);
+        waited_ms += build_lock_poll_ms;
+    }
+}
+
+/// Release the tree's build lock. Refusals are swallowed on purpose: the lock
+/// dir and pid file may already be gone if a racing waiter cleared a corpse,
+/// and the worst outcome of a leftover is one dead-pid clear on the next build.
+fn build_lock_release(io: std.Io, dir: std.Io.Dir) void {
+    dir.deleteFile(io, build_lock_pid_file) catch {};
+    dir.deleteDir(io, build_lock_dir) catch {};
+}
+
+fn bridge_to_zig(
+    init: std.process.Init,
+    args: []const [:0]const u8,
+    zig_subcommand: []const u8,
+    label: []const u8,
+    key_only: bool,
+) !u8 {
+    const garden = init.arena.allocator();
+    const io = init.io;
+
+    if (args.len < 3) {
+        std.debug.print("rye {s}: expected a .rye file\n", .{label});
+        return 2;
+    }
+    const rye_path = args[2];
+
+    // A `.rye` source is required; reject the negative space plainly.
+    if (!std.mem.endsWith(u8, rye_path, ".rye")) {
+        std.debug.print("rye {s}: source file must end with .rye, got '{s}'\n", .{ label, rye_path });
+        return 2;
+    }
+
+    const dir = std.Io.Dir.cwd();
+
+    // Resolve the toolchain explicitly: RYE_ZIG, else the pinned toolchain this
+    // tree ships, else `zig` on PATH.
+    const zig = resolve_zig(init, garden);
+
+    // Resolve Rye's own standard library, so `@import("std")` means *our* std.
+    // Rye insists on its own std and never falls back to the toolchain's
+    // silently: a build that succeeds is a build that used our standard library.
+    const rye_lib = resolve_rye_lib(init, garden) catch |err| {
+        std.debug.print(
+            "rye {s}: could not locate Rye's standard library ({s}). It should sit beside this binary at '{s}', or set RYE_LIB to point at rye/lib.\n",
+            .{ label, @errorName(err), rye_lib_relative_to_exe },
+        );
+        return 1;
+    };
+
+    // Confirm our std is truly present at that path before we lean on it. This
+    // is the assurance that we load our own library, never the backend's.
+    const std_root = try std.fmt.allocPrint(garden, "{s}/std/std.zig", .{rye_lib});
+    dir.access(io, std_root, .{}) catch |err| {
+        std.debug.print(
+            "rye {s}: Rye's standard library is missing at '{s}' ({s}). Expected our std at '{s}'.\n",
+            .{ label, rye_lib, @errorName(err), std_root },
+        );
+        return 1;
+    };
+
+    const extra: []const [:0]const u8 = if (args.len > 3) args[3..] else &.{};
+
+    // The receipt's key opens here, fed in one fixed order so the same inputs
+    // always speak the same digest: marker, verb, the toolchain's bytes, the
+    // library's bytes, flags, then every closure source inside the bridge
+    // walk, then this binary's own bytes. The hasher always runs, and whether
+    // the KEY is consulted is decided separately below.
+    //
+    // THE HASH IS THE EXPENSIVE HALF, rather than a rounding error beside the
+    // read. This comment claimed the hasher's cost was nanoseconds beside a
+    // read until `20260916.185437`, and that reading is inverted by an order of
+    // magnitude. Measured on this pier over the pinned 172,641,672-byte
+    // toolchain with a warm page cache: `cat` 18 ms against `sha256sum` 194 and
+    // 198 ms -- eleven times the read, and coreutils reaches the CPU's SHA
+    // extensions where this standard library's SHA-256 runs in software at
+    // roughly 120 MB/s, so the cost inside rye is higher again. The recovered
+    // lap at
+    // `session-logs/date/20260915/20260915-182427_the-key-that-cost-more-than-the-compile.kyri`
+    // read the same ratio from inside this program: a receipt HIT on a one-file
+    // program cost 1,492 ms, of which hashing this toolchain was 1,420 ms and
+    // reading the same bytes was 124 ms. Both figures are FREE -- nothing holds
+    // them still, so run the two commands rather than trusting these numbers.
+    //
+    // WHAT THE MEASUREMENT REFUSES, AND WHAT IT LEAVES WHOLE. The key stays
+    // correct: content is what decides a build, and every reason below for
+    // taking the compiler's bytes rather than its path is untouched. What falls
+    // is the claim that computing a key is free -- the claim a reader would use
+    // to decide no cheaper path is worth designing. The repair that lap names,
+    // deciding whether a key is wanted before reading and remembering the
+    // compiler's digest under inode, size, mtime and ctime, stands unbuilt at
+    // HEAD and is booked on the card rather than assumed here.
+    // WHETHER A KEY IS WANTED IS DECIDED BEFORE ITS EXPENSIVE HALF IS READ.
+    // Every condition below is one this function already required; what moves
+    // is only WHEN each is asked. Four of them are answerable from the label,
+    // the environment, and the flags -- no file opened -- while the other four
+    // (the toolchain's bytes, the library's bytes, the closure walk, and this
+    // binary's own path) can only be answered by reading. Asking the cheap four
+    // first costs nothing when they pass and skips the whole read when one of
+    // them has already settled the question.
+    //
+    // WHAT THIS SPARES, measured on this pier `20260916.191733` over the pinned
+    // 172,641,672-byte toolchain: a warm `cat` runs 18 ms against `sha256sum`
+    // 160 ms, and this standard library's SHA-256 runs in software where
+    // coreutils reaches the CPU's SHA extensions, so the cost inside rye is
+    // higher again. `rye run` could never earn a receipt -- it is excluded by
+    // name below and always has been -- and paid that read on every invocation.
+    // Both figures are FREE; run the two commands rather than trusting them.
+    //
+    // THE KEY ITSELF IS UNTOUCHED. The skip happens only where no receipt can
+    // be consulted or written, so no digest that reaches a stamp is ever taken
+    // over fewer bytes than before. A build whose key IS wanted hashes exactly
+    // what it hashed before, in exactly the order it hashed it.
+    const key_wanted = !std.mem.eql(u8, label, "run") and
+        init.environ_map.get("RYE_BUILD_FRESH") == null and
+        find_emit_path(extra) != null and
+        flags_are_keyable(extra);
+    if (std.mem.eql(u8, label, "run")) {
+        // invariant: a run never earns a receipt, so it never pays to key one.
+        assert(!key_wanted);
+    }
+    if (key_wanted) {
+        // invariant: a wanted key names the output its stamp will sit beside.
+        assert(find_emit_path(extra) != null);
+    }
+
+    var hasher = Sha256.init(.{});
+    hasher.update(ryekey_marker);
+    hasher.update(zig_subcommand);
+    hasher.update("\x00");
+    // THE COMPILER JOINS BY ITS BYTES ALONE, never by the path that reached
+    // it. The fetch pin proves the installed archive on arrival; this reading
+    // proves the executable used by THIS build, since path and size alone let
+    // a same-size replacement serve an elder output. The path itself names how
+    // the compiler was found rather than what it compiled, so it stays out.
+    // Measured `20260916.030500` in a throwaway pen: one pinned toolchain
+    // reached four ways -- absolute, symlinked, relative, and the default
+    // resolution -- spoke four different keys and bought four full rebuilds,
+    // while the emitted binaries were byte identical at -OReleaseSmall.
+    // A read refusal turns receipts off below rather than guessing.
+    //
+    // READ ONLY WHERE A KEY IS WANTED. Both readability flags mean *no
+    // unreadable input refused the key*, so a skipped read leaves them true:
+    // nothing was read, and nothing refused. The refusal message below then
+    // names the condition that actually settled it rather than blaming a file
+    // this build never opened.
+    //
+    // THE COMPILER JOINS AS A DIGEST, REMEMBERED. `file_digest_remembered`
+    // takes the compiler's SHA-256 from a record beside this binary while the
+    // filesystem still gives that file the same inode, size, mtime and ctime,
+    // and from its 172 MB otherwise. So the bytes still decide the key, read
+    // once per compiler rather than once per build. Feeding a 32-byte digest
+    // rather than a byte stream is what moved the marker to v8 above.
+    const self_exe_path: ?[]const u8 = if (key_wanted) (resolve_self_exe(init, garden) catch null) else null;
+    const zig_content_readable = if (key_wanted) zig_blk: {
+        const digest = file_digest_remembered(io, dir, zig, ryekey_toolchain_max_bytes, self_exe_path, garden) orelse
+            break :zig_blk false;
+        // invariant: a remembered digest is the full width the key expects.
+        assert(digest.len == Sha256.digest_length);
+        hasher.update(&digest);
+        break :zig_blk true;
+    } else true;
+    // The standard library joins the same way for the same reason, and now by
+    // the same mechanism: the sorted tree's bytes decide the build, and the
+    // directory holding them does not. Proven beside the toolchain in that pen
+    // -- an equivalent spelling of one library's content emitted identical
+    // bytes.
+    //
+    // THE TREE JOINS AS A DIGEST, REMEMBERED, and its identity is composed FROM
+    // the walk rather than taken beside it, because one stat cannot stand for
+    // 552 files. Every file is still discovered and still stat-ed on every
+    // build; what is read once per tree rather than once per build is its 16 MB
+    // of content. Feeding a 32-byte digest where a byte stream went is what
+    // moved the marker to v9 above.
+    //
+    // WHAT STAYS, AND WHY IT IS NOT THE SAME THING. A closure source's path
+    // remains in the key, and each library entry keeps its own relative path
+    // and length: those are FRAMING, which is what stops two files blurring
+    // into one stream. What leaves is the ROOT each tree hangs from, which
+    // frames nothing and only names where a reader stood.
+    //
+    // THE COMPARISON WAS TAKEN WHERE THE OUTPUT IS STABLE. At -ODebug this
+    // toolchain is not reproducible at all: two builds of one unchanged source
+    // differed in 45,027 of 10,239,778 bytes, entirely in anonymous struct
+    // serial numbers (`__struct_15431` against `__struct_15413`). So a Debug
+    // receipt was already serving one of many equally valid outputs before
+    // this change, and dropping a path that reaches none of them takes
+    // nothing further away.
+    const library_content_readable = if (key_wanted)
+        hash_library_into(io, dir, rye_lib, self_exe_path, garden, &hasher)
+    else
+        true;
+    // THE OUTPUT'S PATH JOINS AS A FACT RATHER THAN A SPELLING. `-femit-bin=`
+    // says an output was named; where it lands says how a caller filed the
+    // result, never what compiled. Every other flag joins whole, value and
+    // all, because a flag is otherwise an instruction to the compiler.
+    // Measured `20260916.064500` in a throwaway pen: one source emitted to two
+    // paths spoke two keys and produced byte-identical binaries.
+    //
+    // WHAT THIS BUYS. A running binary refuses to be written over, so every
+    // ship rebuilds `rishi` by emitting to `rishi/bin/rishi.new` and renaming.
+    // Under the elder key that move spoke a key no later build could ever
+    // match, and it left the elder receipt beside the new binary speaking for
+    // the old one -- five of the pier's eight checkouts stood that way on the
+    // lap this landed. Move the binary and its receipt together now and the
+    // next build hits.
+    //
+    // WHAT STILL HOLDS THE SERVED BYTES HONEST. Each output keeps its own
+    // receipt at `<path>.ryekey`, and every hit re-hashes the file standing
+    // there against the stamp's second line, so a key two paths share can
+    // never serve one path's bytes for the other.
+    //
+    // ONLY `-femit-bin`. A sibling emit flag names an artifact no receipt
+    // verifies -- a hit emits nothing at all -- so `-femit-asm=` and its kin
+    // keep their values in the key and two spellings miss.
+    for (extra) |flag| {
+        if (std.mem.startsWith(u8, flag, "-femit-bin=")) {
+            hasher.update("-femit-bin=");
+        } else {
+            hasher.update(flag);
+        }
+        hasher.update("\x00");
+    }
+
+    // One tree, one toolchain spawn (REDS %281): held from the first shadow
+    // write to the last delete, hit path included, since the bridge stages
+    // shadows before any receipt is consulted. Declared ahead of the shadow
+    // defers below, so LIFO order releases the lock after their cleanup.
+    //
+    // A KEY READING TAKES NO LOCK, on purpose. It writes no shadow and deletes
+    // no stamp, so it has nothing to protect; and a predicate that blocks for
+    // the length of somebody else's build is a predicate callers stop reaching
+    // for. Reading mid-build can only answer `miss`, which is the safe
+    // direction: a caller told to build when it need not builds once more than
+    // it had to, where the reverse serves elder bytes.
+    if (!key_only) {
+        if (!(try build_lock_acquire(init, io, dir, garden, label))) return 1;
+    }
+    defer if (!key_only) build_lock_release(io, dir);
+
+    // Bridge the root `.rye` file and every local `.rye` module dependency to
+    // ephemeral `.zig` files the toolchain can read, then clear them all away.
+    var staged_rye = std.ArrayListUnmanaged([]const u8).empty;
+    defer staged_rye.deinit(garden);
+    var bridge_zigs = std.ArrayListUnmanaged([]const u8).empty;
+    defer {
+        for (bridge_zigs.items) |path| dir.deleteFile(io, path) catch {};
+        for (bridge_zigs.items) |p| garden.free(p);
+        bridge_zigs.deinit(garden);
+    }
+    defer {
+        for (staged_rye.items) |p| garden.free(p);
+    }
+    var keyable = true;
+    const bridge_path = try bridge_rye_tree(io, dir, rye_path, true, &staged_rye, &bridge_zigs, garden, label, 0, &hasher, &keyable, !key_only);
+
+    // A receipt is consulted only where every one of its conditions holds
+    // plainly: a build verb (running is the point of `run`), a named output,
+    // no RYE_BUILD_FRESH, a toolchain whose bytes were readable, and this
+    // binary's own path resolvable so its bytes can join the key. Anything
+    // less builds fresh, which is always the safe direction.
+    // The cheap four were asked above and stand in `key_wanted`; the four that
+    // needed a read join them here. Naming each condition once keeps the two
+    // askings from ever drifting apart -- `find_emit_path` was the one that
+    // used to be spelled twice, once here as an `if` and once in the refusal.
+    const wants_receipt = key_wanted and
+        zig_content_readable and
+        library_content_readable and
+        keyable;
+    var receipt_path: ?[]const u8 = null;
+    if (wants_receipt) {
+        if (find_emit_path(extra)) |emit_path| {
+            // The binary's own bytes joined here as a digest already, so this
+            // reading changes no key -- what changes is that its 12 MB are read
+            // once per binary rather than once per build, through the same
+            // record the compiler uses. `self_exe_path` was resolved above,
+            // where the compiler's record needed the directory to sit in; a
+            // build that cannot name its own binary earns no receipt, exactly
+            // as it could not before.
+            if (self_exe_path) |self_path| {
+                if (file_digest_remembered(io, dir, self_path, rye_self_max_bytes, self_exe_path, garden)) |self_digest| {
+                    // invariant: the binary that computed this key is inside the key.
+                    assert(self_digest.len == Sha256.digest_length);
+                    hasher.update(&self_digest);
+                    receipt_path = try std.fmt.allocPrint(garden, "{s}.ryekey", .{emit_path});
+                }
+            }
+        }
+    }
+
+    // What the key reading reports beside its verdict: the key these sources
+    // speak, and the key standing on disk. A caller comparing two builds wants
+    // both, and a caller that merely asks "is it current" reads the verdict.
+    var standing_key: []const u8 = "";
+    var key_hex: [Sha256.digest_length * 2]u8 = undefined;
+    if (receipt_path) |rp| {
+        var digest: [Sha256.digest_length]u8 = undefined;
+        hasher.final(&digest);
+        key_hex = std.fmt.bytesToHex(digest, .lower);
+
+        // HIT: the standing receipt speaks this exact key and the emitted
+        // binary stands beside it -- the toolchain is not spawned. The bridge
+        // files staged above are cleared by the defers on the way out.
+        const emit_path = rp[0 .. rp.len - ".ryekey".len];
+        const standing = dir.readFileAlloc(io, rp, garden, .limited64(ryekey_stamp_max_bytes)) catch null;
+        if (standing) |stamp| {
+            const trimmed = std.mem.trim(u8, stamp, " \n\r\t");
+            var lines = std.mem.splitScalar(u8, trimmed, '\n');
+            const key_line = lines.next() orelse "";
+            const out_line = lines.next() orelse "";
+            standing_key = key_line;
+            if (key_line.len == key_hex.len and std.mem.eql(u8, key_line, key_hex[0..]) and out_line.len == key_hex.len) {
+                // The output's own bytes answer for themselves on every hit: a
+                // truncated, torn, or hand-replaced binary misses and rebuilds.
+                if (dir.readFileAlloc(io, emit_path, garden, .limited64(ryekey_emit_max_bytes))) |emitted| {
+                    var out_digest: [Sha256.digest_length]u8 = undefined;
+                    Sha256.hash(emitted, &out_digest, .{});
+                    const out_hex = std.fmt.bytesToHex(out_digest, .lower);
+                    if (std.mem.eql(u8, out_line, out_hex[0..])) {
+                        if (key_only) {
+                            report_key(key_hex[0..], standing_key, "hit", "the standing receipt speaks this key and the binary beside it answers for its own bytes");
+                            return 0;
+                        }
+                        return 0;
+                    }
+                } else |_| {}
+            }
+        }
+    }
+    // A KEY READING STOPS HERE. Everything below writes or spawns: the standing
+    // stamp falls, the toolchain runs, a fresh receipt lands. Reaching this line
+    // with the question already answered means the answer was `miss` -- or
+    // `unkeyable`, where no receipt could be formed at all and the distinction
+    // matters to a caller, since one says rebuild and the other says this build
+    // will never be spared.
+    if (key_only) {
+        if (receipt_path == null) {
+            report_key("", "", "unkeyable", unkeyable_reason(extra, init.environ_map.get("RYE_BUILD_FRESH") != null, zig_content_readable, library_content_readable, keyable));
+            return 1;
+        }
+        report_key(key_hex[0..], standing_key, "miss", "no standing receipt speaks this key, or the binary beside it has changed");
+        return 1;
+    }
+
+    const argv = try garden.alloc([]const u8, 5 + extra.len);
+    argv[0] = zig;
+    argv[1] = zig_subcommand;
+    argv[2] = bridge_path;
+    argv[3] = "--zig-lib-dir";
+    argv[4] = rye_lib;
+    for (extra, 0..) |item, i| argv[5 + i] = item;
+
+    // The standing stamp falls before the toolchain runs: a build killed
+    // between emit and stamp can then never leave an elder receipt speaking
+    // for bytes it did not produce.
+    if (receipt_path) |rp| dir.deleteFile(io, rp) catch {};
+
+    var child = std.process.spawn(io, .{ .argv = argv }) catch |err| {
+        std.debug.print(
+            "rye {s}: could not start toolchain '{s}' ({s}). Rye looks for RYE_ZIG, then '{s}' beside this binary, then `zig` on your PATH. Run `sh tools/f/fetch-toolchain.sh` to install the pinned toolchain, or set RYE_ZIG to a zig binary.\n",
+            .{ label, zig, @errorName(err), zig_relative_to_exe },
+        );
+        return 1;
+    };
+    const term = try child.wait(io);
+    const code: u8 = switch (term) {
+        .exited => |exit_code| exit_code,
+        else => 1,
+    };
+
+    // MISS built fresh: a clean exit earns the receipt, written only after the
+    // toolchain succeeded so a failed build can never leave a stamp that lies.
+    // A write refusal is swallowed on purpose -- the build itself stands, and
+    // the worst outcome of a missing stamp is one extra fresh build.
+    if (code == 0) {
+        if (receipt_path) |rp| {
+            const emit_path = rp[0 .. rp.len - ".ryekey".len];
+            if (dir.readFileAlloc(io, emit_path, garden, .limited64(ryekey_emit_max_bytes))) |emitted| {
+                var out_digest: [Sha256.digest_length]u8 = undefined;
+                Sha256.hash(emitted, &out_digest, .{});
+                const out_hex = std.fmt.bytesToHex(out_digest, .lower);
+                const stamp_body = try std.fmt.allocPrint(garden, "{s}\n{s}", .{ key_hex[0..], out_hex[0..] });
+                dir.writeFile(io, .{ .sub_path = rp, .data = stamp_body }) catch {};
+            } else |_| {}
+        }
+    }
+    return code;
+}
+
+/// The named output of a build, read from the forwarded flags: the value of
+/// `-femit-bin=<path>`. A build that names no output earns no receipt, since a
+/// receipt with nowhere to sit beside is a receipt for nothing.
+fn hash_file_into(io: std.Io, dir: std.Io.Dir, path: []const u8, hasher: *Sha256) bool {
+    var file = dir.openFile(io, path, .{}) catch return false;
+    defer file.close(io);
+
+    var reader = file.reader(io, &.{});
+    var buffer: [64 * 1024]u8 = undefined;
+    while (true) {
+        const n = reader.interface.readSliceShort(&buffer) catch return false;
+        if (n == 0) return true;
+        hasher.update(buffer[0..n]);
+        if (n < buffer.len) return true;
+    }
+}
+
+/// A file's SHA-256, taken from a record beside the `rye` binary when the
+/// filesystem still gives that file the same identity, and from its bytes
+/// otherwise. A record that cannot be read, written, or trusted costs one
+/// wasted `stat` and the read happens exactly as it did before.
+///
+/// WHY. Measured `20260915` on this pier: hashing the pinned toolchain's 172 MB
+/// costs about 1,420 ms, while READING those same bytes costs 124 ms -- the
+/// whole difference is SHA-256 running in software at roughly 120 MB/s. A
+/// receipt HIT cost 1,492 ms against the 1,900 ms the compiler spends building
+/// a one-file program, so the key spent nearly all the saving it bought, on
+/// every build, proving a file nobody had touched. The bytes still decide the
+/// key. They are read once per compiler now rather than once per build.
+///
+/// THE IDENTITY, and what each of its four readings refuses. `inode` moves when
+/// a file is replaced rather than rewritten, which is what `mv`, `cp` over a
+/// fresh name, and a fetched archive all do. `size` moves on any length change.
+/// `mtime` moves on any write. `ctime` moves on any write OR metadata change,
+/// and no ordinary call sets it backward -- so it catches the one case the
+/// other three miss: a same-size rewrite in place whose modification time was
+/// restored afterward. All four must agree, and the record names the path it
+/// speaks for, so a record can never answer for a file it never read.
+///
+/// THE HONEST LIMIT, named rather than hidden. A hand that can write inside the
+/// binary's own directory can write a record saying whatever it likes, and the
+/// key will believe it. That same hand can replace the `rye` binary itself, so
+/// the record adds no reach it did not already have.
+fn file_digest_remembered(
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    max_bytes: u64,
+    self_exe_path: ?[]const u8,
+    garden: std.mem.Allocator,
+) ?[Sha256.digest_length]u8 {
+    const stat = dir.statFile(io, path, .{}) catch return null;
+    // invariant: a file past its caller's named ceiling is a wrong path rather than an input.
+    if (stat.size > max_bytes) return null;
+    const identity = Identity{
+        .inode = @intCast(stat.inode),
+        .size = stat.size,
+        .mtime_ns = stat.mtime.nanoseconds,
+        .ctime_ns = stat.ctime.nanoseconds,
+    };
+
+    const record_path = digest_record_path(ryekey_cache_prefix, path, self_exe_path, garden);
+    if (record_path) |rp| {
+        if (digest_record_read(io, dir, rp, path, identity, garden)) |remembered| return remembered;
+    }
+
+    var hasher = Sha256.init(.{});
+    if (!hash_file_into(io, dir, path, &hasher)) return null;
+    var digest: [Sha256.digest_length]u8 = undefined;
+    hasher.final(&digest);
+    // invariant: a digest earned by reading is the full width the key expects.
+    assert(digest.len == Sha256.digest_length);
+    if (record_path) |rp| digest_record_write(io, dir, rp, path, identity, digest, garden);
+    return digest;
+}
+
+/// The four filesystem readings that together say *this is the same file*.
+const Identity = struct {
+    inode: u64,
+    size: u64,
+    mtime_ns: i96,
+    ctime_ns: i96,
+};
+
+/// Where one record sits: beside the `rye` binary, under a name derived from
+/// the digest of the subject it speaks for, so a path holding spaces or slashes
+/// still names one subject and two subjects never share a record. A build that
+/// cannot resolve its own binary keeps no record and reads every time.
+///
+/// The caller hands in the prefix, so one derivation serves the file records
+/// and the library tree's alike and the two can never land on one name.
+fn digest_record_path(
+    prefix: []const u8,
+    path: []const u8,
+    self_exe_path: ?[]const u8,
+    garden: std.mem.Allocator,
+) ?[]const u8 {
+    // invariant: a record's prefix is what keeps two subjects out of one name, so it is never empty.
+    assert(prefix.len != 0);
+    const self_path = self_exe_path orelse return null;
+    const bin_dir = std.fs.path.dirname(self_path) orelse return null;
+    // invariant: a record name is derived from a subject, so the subject is named.
+    assert(path.len != 0);
+    var path_digest: [Sha256.digest_length]u8 = undefined;
+    Sha256.hash(path, &path_digest, .{});
+    const path_hex = std.fmt.bytesToHex(path_digest, .lower);
+    return std.fmt.allocPrint(garden, "{s}/{s}{s}{s}", .{
+        bin_dir,
+        prefix,
+        path_hex[0..16],
+        ryekey_cache_suffix,
+    }) catch null;
+}
+
+/// Read a record and answer only when every field agrees with the file in hand.
+fn digest_record_read(
+    io: std.Io,
+    dir: std.Io.Dir,
+    record_path: []const u8,
+    path: []const u8,
+    identity: Identity,
+    garden: std.mem.Allocator,
+) ?[Sha256.digest_length]u8 {
+    const body = dir.readFileAlloc(io, record_path, garden, .limited64(ryekey_cache_max_bytes)) catch return null;
+    var seen_format = false;
+    var seen_path = false;
+    var seen_inode = false;
+    var seen_size = false;
+    var seen_mtime = false;
+    var seen_ctime = false;
+    var digest: [Sha256.digest_length]u8 = undefined;
+    var seen_digest = false;
+    var lines = std.mem.splitScalar(u8, body, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \r\t");
+        if (line.len == 0) continue;
+        const space = std.mem.indexOfScalar(u8, line, ' ') orelse continue;
+        const field = line[0..space];
+        const value = line[space + 1 ..];
+        if (std.mem.eql(u8, field, "format")) {
+            seen_format = std.mem.eql(u8, value, "rye-key-cache-v1");
+        } else if (std.mem.eql(u8, field, "path")) {
+            seen_path = std.mem.eql(u8, value, path);
+        } else if (std.mem.eql(u8, field, "inode")) {
+            const n = std.fmt.parseInt(u64, value, 10) catch return null;
+            seen_inode = n == identity.inode;
+        } else if (std.mem.eql(u8, field, "size")) {
+            const n = std.fmt.parseInt(u64, value, 10) catch return null;
+            seen_size = n == identity.size;
+        } else if (std.mem.eql(u8, field, "mtime")) {
+            const n = std.fmt.parseInt(i96, value, 10) catch return null;
+            seen_mtime = n == identity.mtime_ns;
+        } else if (std.mem.eql(u8, field, "ctime")) {
+            const n = std.fmt.parseInt(i96, value, 10) catch return null;
+            seen_ctime = n == identity.ctime_ns;
+        } else if (std.mem.eql(u8, field, "sha256")) {
+            if (value.len != Sha256.digest_length * 2) return null;
+            // u32 in memory, per TAME's explicit widths: a digest is 32 bytes and
+            // the index never approaches a machine word.
+            var i: u32 = 0;
+            while (i < Sha256.digest_length) : (i += 1) {
+                const at: usize = @intCast(i * 2); // seam: a slice index is the machine word
+                digest[i] = std.fmt.parseInt(u8, value[at .. at + 2], 16) catch return null;
+            }
+            seen_digest = true;
+        }
+    }
+    if (!seen_format) return null;
+    // A RECORD NAMES THE FILE IT SPEAKS FOR, AND THAT NAME IS COMPARED. The
+    // record's filename is the digest of the path, so a record is already
+    // reached only under its own path's hash -- yet a hand-written record, or
+    // one left by a path that hashed the same, would otherwise answer for a
+    // file it never read. `seen_path` stood computed and unread until
+    // 20260916.203519, when leg 28's own plant found it.
+    if (!seen_path) return null;
+    if (!seen_inode) return null;
+    if (!seen_size) return null;
+    if (!seen_mtime) return null;
+    if (!seen_ctime) return null;
+    if (!seen_digest) return null;
+    return digest;
+}
+
+/// Write a record through a temporary name and one rename, so a reader never
+/// meets a half-written record. The temporary's name is derived from the
+/// record's own, and its content is a pure function of the path, the identity,
+/// and the digest -- so two builds remembering one compiler write the same
+/// bytes and cannot disagree.
+fn digest_record_write(
+    io: std.Io,
+    dir: std.Io.Dir,
+    record_path: []const u8,
+    path: []const u8,
+    identity: Identity,
+    digest: [Sha256.digest_length]u8,
+    garden: std.mem.Allocator,
+) void {
+    const digest_hex = std.fmt.bytesToHex(digest, .lower);
+    const body = std.fmt.allocPrint(
+        garden,
+        "format rye-key-cache-v1\npath {s}\ninode {d}\nsize {d}\nmtime {d}\nctime {d}\nsha256 {s}\n",
+        .{ path, identity.inode, identity.size, identity.mtime_ns, identity.ctime_ns, digest_hex[0..] },
+    ) catch return;
+    // invariant: a record that would not fit its own ceiling is never written.
+    if (body.len > ryekey_cache_max_bytes) return;
+    const temp_path = std.fmt.allocPrint(garden, "{s}.writing", .{record_path}) catch return;
+    dir.writeFile(io, .{ .sub_path = temp_path, .data = body }) catch return;
+    dir.rename(temp_path, dir, record_path, io) catch {
+        dir.deleteFile(io, temp_path) catch {};
+        return;
+    };
+    record_family_evict(io, dir, record_path, ryekey_cache_prefix, garden);
+}
+
+/// One record standing in the binary's directory: its bare name, and when it
+/// was last written. The name is duplicated out of the iterator, whose own
+/// `name` is invalidated by the very next read.
+const RecordEntry = struct {
+    name: []const u8,
+    mtime_ns: i96,
+};
+
+/// Oldest first, with the name breaking a tie. Two records written inside one
+/// filesystem tick would otherwise sort differently on two runs, and an
+/// eviction that picks a different victim each time is one nobody can prove.
+fn record_older_than(_: void, a: RecordEntry, b: RecordEntry) bool {
+    if (a.mtime_ns != b.mtime_ns) return a.mtime_ns < b.mtime_ns;
+    return std.mem.order(u8, a.name, b.name) == .lt;
+}
+
+/// Is this name exactly one record of this family, and therefore ours to
+/// delete? The shape is the whole safety argument: prefix, then exactly sixteen
+/// lowercase hex characters, then the suffix, and nothing else at any length.
+///
+/// WHAT THE EXACTNESS REFUSES. A peer's `<record>.writing` temporary carries
+/// the same prefix and an extra five characters, and deleting one mid-rename
+/// would lose a record a second build is in the middle of landing. The `rye`
+/// binary itself, a receipt, a stamp, and anything else a hand leaves beside
+/// them all fail the prefix or the width. The library family's names fail the
+/// file family's prefix and the other way about, which is what keeps one
+/// family from ever evicting the other.
+fn record_name_matches(prefix: []const u8, name: []const u8) bool {
+    // invariant: a family is identified by its prefix, so the prefix is named.
+    assert(prefix.len != 0);
+    // invariant: a directory entry always carries a name.
+    assert(name.len != 0);
+    const want = prefix.len + ryekey_record_digest_chars + ryekey_cache_suffix.len;
+    if (name.len != want) return false;
+    if (!std.mem.startsWith(u8, name, prefix)) return false;
+    if (!std.mem.endsWith(u8, name, ryekey_cache_suffix)) return false;
+    for (name[prefix.len..][0..ryekey_record_digest_chars]) |letter| {
+        if (letter >= '0') {
+            if (letter <= '9') continue;
+        }
+        if (letter >= 'a') {
+            if (letter <= 'f') continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+/// Hold one memo family to its ceiling, deleting the oldest-written records
+/// past it. Called straight after a record lands, so the room is measured at
+/// the one moment it can only have grown.
+///
+/// A HIT WALKS NOTHING. The writers below are reached only when the memo
+/// missed, so a build that answers from memory pays no directory read at all --
+/// which matters, since sparing exactly that kind of read is what the memo is
+/// for. The room grows only when a record is written, so bounding it there is
+/// the whole of the bound rather than a convenient half of it.
+///
+/// THE RECORD JUST WRITTEN IS NEVER THE VICTIM. It is skipped by name during
+/// the walk and counted as one toward the ceiling afterward, so a build can
+/// never evict the very answer it just earned -- which at a ceiling of one
+/// would otherwise be the ordinary case rather than the edge.
+///
+/// A FAILURE HERE IS SILENT AND SAFE, exactly as the writers above are. An
+/// unreadable directory, a stat that refuses, a delete another hand wins --
+/// each leaves a record standing, and a record standing is only ever a hit the
+/// next build gets to keep.
+fn record_family_evict(
+    io: std.Io,
+    dir: std.Io.Dir,
+    record_path: []const u8,
+    prefix: []const u8,
+    garden: std.mem.Allocator,
+) void {
+    // invariant: a family is identified by its prefix, so the prefix is named.
+    assert(prefix.len != 0);
+    // invariant: the record just written names a real path, so it has a directory and a name.
+    assert(record_path.len != 0);
+    const bin_dir = std.fs.path.dirname(record_path) orelse return;
+    const keep_name = std.fs.path.basename(record_path);
+    var room = dir.openDir(io, bin_dir, .{ .iterate = true }) catch return;
+    defer room.close(io);
+
+    var records = std.ArrayListUnmanaged(RecordEntry).empty;
+    defer {
+        for (records.items) |record| garden.free(record.name);
+        records.deinit(garden);
+    }
+
+    // THE WALK COLLECTS AND THE DELETE FOLLOWS, never interleaved: removing an
+    // entry from a directory under its own open iterator is exactly the shape
+    // that skips a sibling on some filesystems and repeats one on others.
+    var it = room.iterate();
+    while (it.next(io) catch return) |entry| {
+        if (entry.kind != .file) continue;
+        if (!record_name_matches(prefix, entry.name)) continue;
+        if (std.mem.eql(u8, entry.name, keep_name)) continue;
+        // The count crosses back to an authored width at the std seam: `items.len`
+        // is the inherited type, the bound is `u32`, and the cast is safe because
+        // this test runs before every append and never lets the list reach it.
+        const held: u32 = @intCast(records.items.len);
+        if (held >= ryekey_record_scan_max) return;
+        const name = garden.dupe(u8, entry.name) catch return;
+        records.append(garden, .{ .name = name, .mtime_ns = 0 }) catch return;
+    }
+
+    // invariant: a room holding no peer record is already inside any ceiling of one or more.
+    assert(ryekey_record_family_max >= 1);
+    // The record just written counts toward the ceiling it is exempt from being.
+    const peers: u32 = @intCast(records.items.len);
+    const standing: u32 = peers + 1;
+    if (standing <= ryekey_record_family_max) return;
+
+    for (records.items) |*record| {
+        const full = std.fmt.allocPrint(garden, "{s}/{s}", .{ bin_dir, record.name }) catch return;
+        const stat = dir.statFile(io, full, .{}) catch continue;
+        record.mtime_ns = stat.mtime.nanoseconds;
+    }
+    std.mem.sortUnstable(RecordEntry, records.items, {}, record_older_than);
+
+    const over: u32 = standing - ryekey_record_family_max;
+    // invariant: an eviction never reaches past the peers the walk actually found.
+    assert(over <= peers);
+    var removed: u32 = 0;
+    while (removed < over) : (removed += 1) {
+        room.deleteFile(io, records.items[removed].name) catch {};
+    }
+}
+
+fn path_less_than(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.order(u8, a, b) == .lt;
+}
+
+/// What one entry contributes to the library tree's identity: its relative path
+/// as NUL-terminated framing, then the four fixed-width readings that together
+/// say *this is the same file* -- the same four `Identity` documents above, and
+/// each refusing the same class of change. Framing matters here for the reason
+/// it matters in the content stream: without it two entries blur into one run
+/// of bytes and a rename between them goes unseen.
+fn library_identity_update(hasher: *Sha256, path: []const u8, identity: Identity) void {
+    // invariant: an entry with no path frames nothing, so it never reaches the stream.
+    assert(path.len != 0);
+    // invariant: a real file carries a real inode, so a zero here is a reading that failed.
+    assert(identity.inode != 0);
+    hasher.update(path);
+    hasher.update("\x00");
+    var eight: [8]u8 = undefined;
+    std.mem.writeInt(u64, &eight, identity.size, .little);
+    hasher.update(&eight);
+    std.mem.writeInt(u64, &eight, identity.inode, .little);
+    hasher.update(&eight);
+    // Both timestamps are `i96` where std speaks them and sixteen bytes on the
+    // wire, which is the next fixed width that holds one whole. The width is
+    // the stream's own, so it can never shift under a std that widens.
+    var sixteen: [16]u8 = undefined;
+    std.mem.writeInt(i128, &sixteen, @as(i128, identity.mtime_ns), .little);
+    hasher.update(&sixteen);
+    std.mem.writeInt(i128, &sixteen, @as(i128, identity.ctime_ns), .little);
+    hasher.update(&sixteen);
+}
+
+/// Read the library tree's record and answer only when its format, the root it
+/// speaks for, and the identity digest it was taken under all agree.
+///
+/// The record carries exactly what is compared and nothing beside it. A file
+/// count and a byte total would read as checks and be neither -- both are
+/// already inside the identity digest -- and a field computed and never read is
+/// the fault `20260916.203519` booked one function over.
+fn library_record_read(
+    io: std.Io,
+    dir: std.Io.Dir,
+    record_path: []const u8,
+    root: []const u8,
+    identity_hex: []const u8,
+    garden: std.mem.Allocator,
+) ?[Sha256.digest_length]u8 {
+    // invariant: an identity is compared at its full hex width or not at all.
+    assert(identity_hex.len == Sha256.digest_length * 2);
+    const body = dir.readFileAlloc(io, record_path, garden, .limited64(ryekey_cache_max_bytes)) catch return null;
+    var seen_format = false;
+    var seen_root = false;
+    var seen_identity = false;
+    var seen_digest = false;
+    var digest: [Sha256.digest_length]u8 = undefined;
+    var lines = std.mem.splitScalar(u8, body, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \r\t");
+        if (line.len == 0) continue;
+        const space = std.mem.indexOfScalar(u8, line, ' ') orelse continue;
+        const field = line[0..space];
+        const value = line[space + 1 ..];
+        if (std.mem.eql(u8, field, "format")) {
+            seen_format = std.mem.eql(u8, value, ryekey_library_format);
+        } else if (std.mem.eql(u8, field, "root")) {
+            seen_root = std.mem.eql(u8, value, root);
+        } else if (std.mem.eql(u8, field, "identity")) {
+            seen_identity = std.mem.eql(u8, value, identity_hex);
+        } else if (std.mem.eql(u8, field, "sha256")) {
+            if (value.len != Sha256.digest_length * 2) return null;
+            // u32 in memory, per TAME's explicit widths: a digest is 32 bytes and
+            // the index never approaches a machine word.
+            var i: u32 = 0;
+            while (i < Sha256.digest_length) : (i += 1) {
+                const at: usize = @intCast(i * 2); // seam: a slice index is the machine word
+                digest[i] = std.fmt.parseInt(u8, value[at .. at + 2], 16) catch return null;
+            }
+            seen_digest = true;
+        }
+    }
+    if (!seen_format) return null;
+    // A RECORD NAMES THE TREE IT SPEAKS FOR, AND THAT NAME IS COMPARED. The
+    // record's filename is the digest of the root, so it is already reached only
+    // under that root's hash -- yet a hand-written record, or one left by a root
+    // that hashed the same, would otherwise answer for a tree it never read.
+    if (!seen_root) return null;
+    if (!seen_identity) return null;
+    if (!seen_digest) return null;
+    return digest;
+}
+
+/// Write the library tree's record through a temporary name and one rename, so
+/// a reader never meets a half-written record. The content is a pure function
+/// of the root, the identity, and the digest, so two builds remembering one
+/// tree write the same bytes and cannot disagree.
+fn library_record_write(
+    io: std.Io,
+    dir: std.Io.Dir,
+    record_path: []const u8,
+    root: []const u8,
+    identity_hex: []const u8,
+    digest: [Sha256.digest_length]u8,
+    garden: std.mem.Allocator,
+) void {
+    // invariant: a record is written at the full hex width a reader compares.
+    assert(identity_hex.len == Sha256.digest_length * 2);
+    const digest_hex = std.fmt.bytesToHex(digest, .lower);
+    const body = std.fmt.allocPrint(
+        garden,
+        "format {s}\nroot {s}\nidentity {s}\nsha256 {s}\n",
+        .{ ryekey_library_format, root, identity_hex, digest_hex[0..] },
+    ) catch return;
+    // invariant: a record that would not fit its own ceiling is never written.
+    if (body.len > ryekey_cache_max_bytes) return;
+    const temp_path = std.fmt.allocPrint(garden, "{s}.writing", .{record_path}) catch return;
+    dir.writeFile(io, .{ .sub_path = temp_path, .data = body }) catch return;
+    dir.rename(temp_path, dir, record_path, io) catch {
+        dir.deleteFile(io, temp_path) catch {};
+        return;
+    };
+    record_family_evict(io, dir, record_path, ryekey_library_cache_prefix, garden);
+}
+
+/// Feed the standard library tree into a build's key, read once per tree rather
+/// than once per build.
+///
+/// WHY. Measured on this pier `20260916.210324` with a binary built from the
+/// source beside this comment: a warm receipt reading cost 140-146 ms, of which
+/// about 112 ms was this one tree -- 552 files and 16,416,628 bytes read and
+/// hashed to prove nothing had moved. Hashing those bytes alone measures
+/// 145-154 ms and walking the tree while stat-ing every file measures 16-21 ms,
+/// both including process start. So the read was roughly four fifths of the
+/// whole cost of proving a skip was safe. Every figure is FREE -- nothing holds
+/// them still -- so run `rye key` and the two probes rather than trusting them.
+///
+/// ONE STAT CANNOT STAND FOR A TREE, so the identity is composed FROM the walk
+/// rather than taken beside it. The walk stays and the read goes: every file is
+/// still discovered and still stat-ed, and its four `Identity` readings join one
+/// identity digest in sorted order. A record beside the `rye` binary carries the
+/// content digest under that identity, and a build whose walk speaks the same
+/// identity feeds the remembered 32 bytes into the key.
+///
+/// WHAT EACH READING REFUSES. A file added or removed changes the sorted path
+/// stream. A rename does the same. A length change moves `size`; any write moves
+/// `mtime`; a replacement rather than a rewrite moves `inode`; and `ctime` moves
+/// on any write or metadata change and no ordinary call sets it backward, which
+/// catches the one case the other three miss -- a same-size rewrite in place
+/// whose modification time was restored afterward.
+///
+/// THE HONEST LIMIT is the single-file memo's, unchanged: a hand that can write
+/// inside the binary's own directory can write a record saying whatever it
+/// likes. That same hand can replace the `rye` binary itself, so the record adds
+/// no reach it did not already have.
+fn hash_library_into(
+    io: std.Io,
+    dir: std.Io.Dir,
+    rye_lib: []const u8,
+    self_exe_path: ?[]const u8,
+    garden: std.mem.Allocator,
+    hasher: *Sha256,
+) bool {
+    const std_root = std.fmt.allocPrint(garden, "{s}/std", .{rye_lib}) catch return false;
+    var library_dir = dir.openDir(io, std_root, .{ .iterate = true }) catch return false;
+    defer library_dir.close(io);
+
+    var walker = library_dir.walk(garden) catch return false;
+    defer walker.deinit();
+    var paths = std.ArrayListUnmanaged([]const u8).empty;
+    defer {
+        for (paths.items) |path| garden.free(path);
+        paths.deinit(garden);
+    }
+
+    while (walker.next(io) catch return false) |entry| {
+        if (entry.kind != .file and entry.kind != .sym_link) continue;
+        if (paths.items.len >= @as(usize, ryekey_library_max_files)) return false;
+        paths.append(garden, garden.dupe(u8, entry.path) catch return false) catch return false;
+    }
+    if (paths.items.len == 0) return false;
+    std.mem.sortUnstable([]const u8, paths.items, {}, path_less_than);
+
+    // THE STAT PASS, which every build pays and which is the cheap half. It
+    // composes the identity and carries each size forward, so the content pass
+    // below asks the filesystem for nothing a second time.
+    var sizes = std.ArrayListUnmanaged(u64).empty;
+    defer sizes.deinit(garden);
+    var identity = Sha256.init(.{});
+    identity.update(ryekey_library_format);
+    identity.update("\x00");
+    var count_bytes: [8]u8 = undefined;
+    std.mem.writeInt(u64, &count_bytes, @intCast(paths.items.len), .little);
+    identity.update(&count_bytes);
+    var total_bytes: u64 = 0;
+    for (paths.items) |path| {
+        const full_path = std.fmt.allocPrint(garden, "{s}/{s}", .{ std_root, path }) catch return false;
+        const stat = dir.statFile(io, full_path, .{}) catch return false;
+        if (stat.size > ryekey_library_max_bytes - total_bytes) return false;
+        total_bytes += stat.size;
+        sizes.append(garden, stat.size) catch return false;
+        library_identity_update(&identity, path, .{
+            .inode = @intCast(stat.inode),
+            .size = stat.size,
+            .mtime_ns = stat.mtime.nanoseconds,
+            .ctime_ns = stat.ctime.nanoseconds,
+        });
+    }
+    // invariant: the stat pass answered for every path the walk found.
+    assert(sizes.items.len == paths.items.len);
+    var identity_digest: [Sha256.digest_length]u8 = undefined;
+    identity.final(&identity_digest);
+    const identity_hex = std.fmt.bytesToHex(identity_digest, .lower);
+
+    const record_path = digest_record_path(ryekey_library_cache_prefix, std_root, self_exe_path, garden);
+    if (record_path) |rp| {
+        if (library_record_read(io, dir, rp, std_root, identity_hex[0..], garden)) |remembered| {
+            // invariant: a remembered digest is the full width the key expects.
+            assert(remembered.len == Sha256.digest_length);
+            hasher.update(&remembered);
+            return true;
+        }
+    }
+
+    // THE CONTENT PASS, paid once per tree. The stream is exactly the one this
+    // function fed the key directly until `20260916.210324` -- each sorted
+    // relative path, NUL, its length little-endian, then its bytes -- so what
+    // changed is where the stream is hashed rather than what it holds.
+    var content = Sha256.init(.{});
+    for (paths.items, sizes.items) |path, size| {
+        const full_path = std.fmt.allocPrint(garden, "{s}/{s}", .{ std_root, path }) catch return false;
+        content.update(path);
+        content.update("\x00");
+        var size_bytes: [8]u8 = undefined;
+        std.mem.writeInt(u64, &size_bytes, size, .little);
+        content.update(&size_bytes);
+        if (!hash_file_into(io, dir, full_path, &content)) return false;
+    }
+    var content_digest: [Sha256.digest_length]u8 = undefined;
+    content.final(&content_digest);
+    // invariant: a digest earned by reading is the full width the key expects.
+    assert(content_digest.len == Sha256.digest_length);
+    if (record_path) |rp| {
+        library_record_write(io, dir, rp, std_root, identity_hex[0..], content_digest, garden);
+    }
+    hasher.update(&content_digest);
+    return true;
+}
+
+/// Print one key reading, in the shape a shell reads and a person understands:
+/// a verdict word first, then the two keys, then a plain reason. Empty keys
+/// print as `-` rather than as nothing, so a field never goes missing from the
+/// line and a reader can tell "no key" from a truncated write.
+///
+/// The line goes where every other word this program says goes. A caller
+/// branching on the answer reads the exit status -- 0 for `hit`, 1 for anything
+/// that means build -- and a caller wanting the keys themselves reads the line.
+fn report_key(computed: []const u8, standing: []const u8, verdict: []const u8, reason: []const u8) void {
+    // invariant: a verdict is always one of the three words this reading speaks.
+    assert(verdict.len > 0);
+    // invariant: a reading always carries the plain reason behind its verdict.
+    assert(reason.len > 0);
+    std.debug.print("verdict={s}\nkey={s}\nstanding={s}\nreason={s}\n", .{
+        verdict,
+        if (computed.len == 0) "-" else computed,
+        if (standing.len == 0) "-" else standing,
+        reason,
+    });
+}
+
+/// Name which condition refused the receipt, rather than reporting one word for
+/// five different causes. A caller meeting `unkeyable` has to change something
+/// about the build to earn a receipt at all, and this sentence is what says
+/// which thing.
+fn unkeyable_reason(
+    extra: []const [:0]const u8,
+    fresh_forced: bool,
+    zig_readable: bool,
+    library_readable: bool,
+    keyable: bool,
+) []const u8 {
+    // invariant: a refusal is always explained against the flags that caused it.
+    assert(extra.len == 0 or extra[0].len > 0);
+    if (find_emit_path(extra) == null) return "no -femit-bin= names an output, so there is no file a receipt could sit beside";
+    // RYE_BUILD_FRESH IS A CHOICE RATHER THAN A FAULT, and it had no sentence
+    // here until `20260916.191733`. Every other reason names something the
+    // build could not do; this one names something the caller asked for, and
+    // without it the walk fell past all four readings to the assert below and
+    // blamed this binary's own path -- a path that had resolved perfectly well.
+    // Measured at HEAD before the repair: `RYE_BUILD_FRESH=1 rye key <file>
+    // -femit-bin=<out>` answered `this binary's own path could not be
+    // resolved`, which was false in every part.
+    if (fresh_forced) return "RYE_BUILD_FRESH is set, so this build is asked to ignore any receipt and compile fresh";
+    if (!zig_readable) return "the toolchain's own bytes could not be read, so the key cannot name what would compile";
+    if (!library_readable) return "the standard library's bytes could not be read, so the key cannot name what would compile";
+    if (!keyable) return "a closure source reaches bytes this walk cannot enumerate -- an unreadable embed, unreadable permissions, or @cImport";
+    if (!flags_are_keyable(extra)) return "a flag names a path or a library this walk cannot follow, so the key cannot cover the build";
+    // invariant: the five readings above are the only conditions that refuse a
+    // receipt once an output is named, so reaching here means the refusal came
+    // from this binary's own path, which is the one cause with no flag to fix.
+    // Split rather than compounded, so a refusal names which reading held.
+    assert(!fresh_forced);
+    assert(zig_readable);
+    assert(library_readable);
+    assert(keyable);
+    return "this binary's own path could not be resolved, so its bytes cannot join the key";
+}
+
+fn find_emit_path(extra: []const [:0]const u8) ?[]const u8 {
+    var found: ?[]const u8 = null;
+    for (extra) |flag| {
+        if (std.mem.startsWith(u8, flag, "-femit-bin=")) {
+            const path = flag["-femit-bin=".len..];
+            // invariant: an empty output name earns no receipt rather than a stamp at ".ryekey".
+            if (path.len == 0) return null;
+            // The LAST flag wins, exactly as the toolchain reads them, so the
+            // stamp always sits beside the file zig actually wrote.
+            found = path;
+        }
+    }
+    return found;
+}
+
+/// Whether the forwarded flags leave every byte of the binary inside the key.
+/// A positional argument (a bare C source), a file-valued flag (a linker
+/// script, an include or library path), or a system-library link pulls bytes
+/// this walk never hashes -- such a build builds fresh, every time.
+fn flags_are_keyable(extra: []const [:0]const u8) bool {
+    for (extra) |flag| {
+        if (flag.len == 0) return false;
+        if (flag[0] != '-') return false;
+        if (std.mem.startsWith(u8, flag, "-T")) return false;
+        if (std.mem.startsWith(u8, flag, "-I")) return false;
+        if (std.mem.startsWith(u8, flag, "-L")) return false;
+        if (std.mem.startsWith(u8, flag, "-l")) return false;
+        if (std.mem.startsWith(u8, flag, "--script")) return false;
+        if (std.mem.startsWith(u8, flag, "-framework")) return false;
+    }
+    return true;
+}
+
+/// Find this binary's own path, the same two readings resolve_rye_lib takes:
+/// the kernel's `/proc/self/exe` where a host publishes it, then the path the
+/// shell invoked. A bare name off PATH names no file to hash, so it errors and
+/// the caller builds fresh rather than keying on a guess.
+fn resolve_self_exe(init: std.process.Init, garden: std.mem.Allocator) ![]const u8 {
+    var buf: [4096]u8 = undefined;
+    if (std.Io.Dir.readLinkAbsolute(init.io, "/proc/self/exe", &buf)) |len| {
+        // invariant: the kernel's answer is a real path, never empty.
+        assert(len > 0);
+        return garden.dupe(u8, buf[0..len]);
+    } else |_| {}
+    const args = try init.minimal.args.toSlice(garden);
+    defer garden.free(args);
+    // invariant: a program always receives its own name, so argv is never empty here.
+    assert(args.len >= 1);
+    const argv0 = std.mem.sliceTo(args[0], 0);
+    if (std.fs.path.dirname(argv0) == null) return error.NoExecutableDirectory;
+    return garden.dupe(u8, argv0);
+}
+
+/// Find the Zig toolchain this build runs through.
+///
+/// THREE READINGS, the first two in the order `rye/bootstrap.sh` already takes.
+/// An explicit RYE_ZIG wins, for clarity and for a host that keeps its toolchain
+/// somewhere of its own. Failing that, the toolchain this tree fetches for
+/// itself -- pinned to one version against a checksum by
+/// `tools/f/fetch-toolchain.sh` -- found beside this binary the way
+/// `resolve_rye_lib` finds our std, so it answers the same from any working
+/// directory. Last, a bare `zig` for the host's PATH to answer.
+///
+/// WHY THE PIN COMES BEFORE PATH. The cold start in `bootstrap.sh` reads
+/// `${RYE_ZIG:-../vendor/zig-toolchain/zig}` and consults no PATH at all, and the
+/// tree's witnesses spell `RYE_ZIG=vendor/zig-toolchain/zig` by hand at well over
+/// a thousand sites -- so the tree's standing answer to *which toolchain* is the
+/// pinned one, and this reading is the compiler agreeing with it rather than a
+/// new decision. A host `zig` of some other version stays reachable, in the last
+/// reading and through RYE_ZIG.
+///
+/// EVERY REFUSAL FALLS BACK rather than stopping, because each one means only
+/// *this* reading cannot answer: no `/proc` and no directory in argv[0], no room
+/// to print the path, or a vendored file that is absent or not executable. The
+/// spawn below names whatever this returns when it will not start, which is the
+/// one place a toolchain failure is worth reporting.
+fn resolve_zig(init: std.process.Init, garden: std.mem.Allocator) []const u8 {
+    // invariant: the fallback name is a bare command for PATH to resolve, so it carries no
+    // separator -- a path here would silently become a second, unannounced location
+    assert(std.fs.path.dirname(zig_fallback) == null);
+
+    if (init.environ_map.get("RYE_ZIG")) |path| return path;
+
+    const exe = resolve_self_exe(init, garden) catch return zig_fallback;
+    const bin_dir = std.fs.path.dirname(exe) orelse return zig_fallback;
+    const vendored = std.fmt.allocPrint(garden, "{s}/{s}", .{ bin_dir, zig_relative_to_exe }) catch return zig_fallback;
+
+    // invariant: the joined path is longer than the template alone, which is what says the
+    // binary's own directory actually reached the front of it
+    assert(vendored.len > zig_relative_to_exe.len);
+
+    // Asked whether it can be RUN, which is the only question a toolchain path
+    // answers. A directory or an unreadable file here would spawn and fail one
+    // step later under a name that says less.
+    std.Io.Dir.cwd().access(init.io, vendored, .{ .execute = true }) catch return zig_fallback;
+    return vendored;
+}
+
+/// The last reading's name: a bare command, left for the host's PATH to resolve.
+const zig_fallback = "zig";
+
+/// Find Rye's standard library directory, so the compiler can be pointed at it.
+/// An explicit RYE_LIB wins, for clarity and for hosts that name their running
+/// binary some other way. Failing that, we find this executable's own directory
+/// and apply the relative template beside it -- `<exe_dir>/../lib`, the layout the
+/// `rye` tree ships in. We return an error rather than a silent fallback, so the
+/// caller can insist on our std.
+///
+/// TWO READINGS, because one of them is Linux-only. `/proc/self/exe` is exact and
+/// is tried first. macOS and the BSDs have no `/proc`, so that read returns
+/// `FileNotFound` and a newcomer following this tree's own onboarding -- fetch the
+/// toolchain, bootstrap `rye`, build -- met that error with nothing but a hint
+/// (REDS %214). The second reading is `argv[0]`, the path the shell actually
+/// invoked: `rye/bin/rye`, `./rye/bin/rye`, or an absolute path all carry a
+/// separator and resolve against the working directory the same way. A bare `rye`
+/// found on PATH carries none, and that one still errors rather than guessing.
+fn resolve_rye_lib(init: std.process.Init, garden: std.mem.Allocator) ![]const u8 {
+    // An explicit RYE_LIB wins, for clarity and for a host neither reading suits.
+    if (init.environ_map.get("RYE_LIB")) |path| return path;
+
+    // First reading: the kernel's own answer, on the hosts that publish it.
+    var buf: [4096]u8 = undefined;
+    if (std.Io.Dir.readLinkAbsolute(init.io, "/proc/self/exe", &buf)) |len| {
+        const bin_dir = std.fs.path.dirname(buf[0..len]) orelse return error.NoExecutableDirectory;
+        return std.fmt.allocPrint(garden, "{s}/{s}", .{ bin_dir, rye_lib_relative_to_exe });
+    } else |_| {}
+
+    // Second reading: the path the shell invoked, which every host provides.
+    const args = try init.minimal.args.toSlice(garden);
+    defer garden.free(args);
+    // invariant: a program always receives its own name, so argv is never empty here
+    assert(args.len >= 1);
+    const argv0 = std.mem.sliceTo(args[0], 0);
+    // A bare name came off PATH and names no directory, so it cannot locate our std.
+    const bin_dir = std.fs.path.dirname(argv0) orelse return error.NoExecutableDirectory;
+    return std.fmt.allocPrint(garden, "{s}/{s}", .{ bin_dir, rye_lib_relative_to_exe });
+}
+
+/// Ephemeral bridge path for a `.rye` source. The root file keeps the historical
+/// `{path}.rye.zig` shape; local imports bridge to `{basename}.zig` beside the source.
+fn bridge_zig_path(rye_path: []const u8, is_root: bool, garden: std.mem.Allocator) ![]const u8 {
+    // One file, one bridged name. The root once kept `foo.rye.zig` while every
+    // dependency kept `foo.zig`, so a module that imported the root by name asked
+    // for a file the bridge had never written -- which is what a cycle back to the
+    // root does (REDS %125). A single rule for every file closes that, and the
+    // root keeps no privilege the others lack.
+    _ = is_root;
+    if (!std.mem.endsWith(u8, rye_path, ".rye")) return error.NotRyeFile;
+    return std.fmt.allocPrint(garden, "{s}.zig", .{rye_path[0 .. rye_path.len - ".rye".len]});
+}
+
+/// Rewrite local `.rye` import paths to `.zig` for the toolchain bridge.
+fn rewrite_rye_imports(source: []const u8, garden: std.mem.Allocator) ![]u8 {
+    var out = std.ArrayListUnmanaged(u8).empty;
+    errdefer out.deinit(garden);
+
+    var i: usize = 0;
+    while (i < source.len) {
+        if (std.mem.startsWith(u8, source[i..], "@import(\"")) {
+            const marker_start = i;
+            i += "@import(\"".len;
+            const import_start = i;
+            while (i < source.len and source[i] != '"') : (i += 1) {}
+            const import_path = source[import_start..i];
+            try out.appendSlice(garden, source[marker_start..import_start]);
+            if (std.mem.endsWith(u8, import_path, ".rye")) {
+                try out.appendSlice(garden, import_path[0 .. import_path.len - ".rye".len]);
+                try out.appendSlice(garden, ".zig");
+            } else {
+                try out.appendSlice(garden, import_path);
+            }
+            if (i < source.len) {
+                try out.append(garden, source[i]);
+                i += 1;
+            }
+        } else {
+            try out.append(garden, source[i]);
+            i += 1;
+        }
+    }
+    return try out.toOwnedSlice(garden);
+}
+
+/// How deep the bridge may descend through `@import` before it names a fault
+/// rather than exhausting the stack. The Caravan ladder is the deepest import
+/// chain this tree holds -- each rung imports the rung beneath it -- so the
+/// bound sits well above any chain we have measured, and it exists so that a
+/// pathological graph meets a named error instead of a segfault (TAME root
+/// rule 1: no unbounded recursion).
+const max_bridge_depth: u32 = 1024;
+
+fn bridge_already_seen(staged_rye: *const std.ArrayListUnmanaged([]const u8), rye_path: []const u8) bool {
+    for (staged_rye.items) |path| {
+        if (std.mem.eql(u8, path, rye_path)) return true;
+    }
+    return false;
+}
+
+/// Bridge `rye_path` and every local `.rye` module it imports, recursively.
+fn bridge_rye_tree(
+    io: std.Io,
+    dir: std.Io.Dir,
+    rye_path: []const u8,
+    is_root: bool,
+    staged_rye: *std.ArrayListUnmanaged([]const u8),
+    bridge_zigs: *std.ArrayListUnmanaged([]const u8),
+    garden: std.mem.Allocator,
+    label: []const u8,
+    depth: u32,
+    hasher: *Sha256,
+    keyable: *bool,
+    stage: bool,
+) ![]const u8 {
+    // invariant: the descent stays inside the bound named above, so a cyclic or
+    // pathological import graph meets a named error rather than the stack's end.
+    if (depth > max_bridge_depth) {
+        std.debug.print("rye {s}: import graph deeper than {d} at '{s}'\n", .{ label, max_bridge_depth, rye_path });
+        return error.BridgeTooDeep;
+    }
+    // invariant: the root of the walk always begins at depth zero.
+    assert(depth > 0 or is_root);
+
+    if (bridge_already_seen(staged_rye, rye_path)) {
+        return bridge_zig_path(rye_path, is_root, garden);
+    }
+
+    // A file is marked seen BEFORE its imports are walked, never after. The
+    // visited set is what makes this walk terminate, and a set that records a
+    // node only once its whole subtree has finished records nothing at all while
+    // a cycle is being traversed -- so two files importing each other recursed
+    // until the stack died (REDS %125). Marking on entry closes that, and it also
+    // makes a mutual import legal, which is what Zig's own file-as-struct model
+    // already allows.
+    try staged_rye.append(garden, try garden.dupe(u8, rye_path));
+
+    const source = dir.readFileAlloc(io, rye_path, garden, .unlimited) catch |err| {
+        std.debug.print("rye {s}: could not read '{s}': {s}\n", .{ label, rye_path, @errorName(err) });
+        return err;
+    };
+
+    // Every closure source joins the receipt key exactly once, framed by path
+    // and length so two files can never blur into one stream: the walk's DFS
+    // order is a pure function of the sources, so the same tree always speaks
+    // the same digest.
+    hasher.update(rye_path);
+    hasher.update("\x00");
+    var src_len: [8]u8 = undefined;
+    std.mem.writeInt(u64, &src_len, source.len, .little);
+    hasher.update(&src_len);
+    hasher.update(source);
+
+    // The repository tracks whether a source is executable, so the receipt
+    // does too. Normalize the three POSIX execute bits to one byte: their
+    // presence can change how a source is reached, while owner and write
+    // permissions do not change the program the compiler reads. Hosts with no
+    // executable-bit concept contribute zero, which is their whole answer.
+    const source_stat: ?std.Io.Dir.Stat = dir.statFile(io, rye_path, .{}) catch null;
+    if (source_stat) |st| {
+        var executable: u8 = 0;
+        if (comptime std.Io.File.Permissions.has_executable_bit) {
+            executable = @intFromBool((st.permissions.toMode() & 0o111) != 0);
+        }
+        hasher.update(&.{executable});
+    } else {
+        // invariant: metadata the key cannot read is metadata the key cannot cover.
+        keyable.* = false;
+    }
+
+    var import_paths = std.ArrayListUnmanaged([]const u8).empty;
+    defer {
+        for (import_paths.items) |p| garden.free(p);
+        import_paths.deinit(garden);
+    }
+
+    // Bytes reach a binary through more doors than @import. An @embedFile
+    // target joins the key by content the same way a source does, and a
+    // closure that reaches @cImport carries header bytes this walk cannot
+    // enumerate -- such a build earns no receipt rather than a blind one.
+    if (std.mem.indexOf(u8, source, "@cImport") != null) keyable.* = false;
+    var embed_scan: usize = 0;
+    while (std.mem.indexOfPos(u8, source, embed_scan, "@embedFile(\"")) |at| {
+        const path_start = at + "@embedFile(\"".len;
+        var path_end = path_start;
+        while (path_end < source.len and source[path_end] != '"') : (path_end += 1) {}
+        const embed_rel = source[path_start..path_end];
+        const base_dir = std.fs.path.dirname(rye_path) orelse ".";
+        const embed_path = std.fs.path.resolve(garden, &.{ base_dir, embed_rel }) catch {
+            keyable.* = false;
+            embed_scan = path_end;
+            continue;
+        };
+        if (dir.readFileAlloc(io, embed_path, garden, .limited64(ryekey_embed_max_bytes))) |embed_bytes| {
+            hasher.update(embed_path);
+            hasher.update("\x00");
+            var embed_len: [8]u8 = undefined;
+            std.mem.writeInt(u64, &embed_len, embed_bytes.len, .little);
+            hasher.update(&embed_len);
+            hasher.update(embed_bytes);
+            garden.free(embed_bytes);
+        } else |_| {
+            // invariant: an embed the key cannot read is an embed the key cannot cover.
+            keyable.* = false;
+        }
+        embed_scan = path_end;
+    }
+
+    var scan: usize = 0;
+    while (scan < source.len) {
+        if (std.mem.startsWith(u8, source[scan..], "@import(\"")) {
+            scan += "@import(\"".len;
+            const import_start = scan;
+            while (scan < source.len and source[scan] != '"') : (scan += 1) {}
+            const import_path = source[import_start..scan];
+            if (std.mem.endsWith(u8, import_path, ".rye")) {
+                const base_dir = std.fs.path.dirname(rye_path) orelse ".";
+                const resolved = std.fs.path.resolve(garden, &.{ base_dir, import_path }) catch |err| {
+                    std.debug.print("rye {s}: could not resolve import '{s}' from '{s}': {s}\n", .{
+                        label, import_path, rye_path, @errorName(err),
+                    });
+                    return err;
+                };
+                try import_paths.append(garden, resolved);
+            }
+            if (scan < source.len) scan += 1;
+        } else {
+            scan += 1;
+        }
+    }
+
+    for (import_paths.items) |dep_rye| {
+        _ = try bridge_rye_tree(io, dir, dep_rye, false, staged_rye, bridge_zigs, garden, label, depth + 1, hasher, keyable, stage);
+    }
+
+    const zig_path = try bridge_zig_path(rye_path, is_root, garden);
+
+    // ASKING IS NOT BUILDING. Every line above this one READS -- sources,
+    // permissions, embeds, imports -- and feeds the hasher; every line below
+    // WRITES. So one flag at exactly this seam parts the two, and `rye key`
+    // walks the identical closure in the identical order while touching
+    // nothing. The key is a pure function of what was read, and the caller
+    // that only wants to ask pays a read.
+    if (!stage) return zig_path;
+
+    const bridged_source = try rewrite_rye_imports(source, garden);
+    dir.writeFile(io, .{ .sub_path = zig_path, .data = bridged_source }) catch |err| {
+        std.debug.print("rye {s}: could not stage '{s}': {s}\n", .{ label, zig_path, @errorName(err) });
+        return err;
+    };
+
+    try bridge_zigs.append(garden, try garden.dupe(u8, zig_path));
+
+    // invariant: a staging walk leaves a staged .zig behind for the toolchain to
+    // read and for the caller's defer to clear away.
+    assert(bridge_zigs.items.len > 0);
+
+    return zig_path;
+}

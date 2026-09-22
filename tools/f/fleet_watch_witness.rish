@@ -1,0 +1,55 @@
+# tools/f/fleet_watch_witness.rish -- the captain's watch, proven on a real tmux session.
+#
+#   rishi/bin/rishi run tools/f/fleet_watch_witness.rish
+#
+# A fleet loop can die four ways -- three instant laps, a spent deadline, an interrupt, a closed
+# terminal -- and a loop that has exited cannot hold. tools/f/fleet_watch.sh re-arms a dead loop by
+# sending that seat's own relaunch line into that seat's own tmux window. The two things it must
+# never do are type into a keyboard somebody else is using, and start a second writer on one
+# checkout (%291). Both are proven here from both sides.
+
+# WHY THE PEN'S SEATS CARRY A RUN ID, from `20260907`. This guard reddened three times under a
+# full roster pass -- `20260907.000903`, `20260907.050053`, and this lap's cold open -- and passed
+# every time it was run alone, which is the shape of a control that reads something outside its own
+# pen. `fleet_watch.sh` asks the process table `pgrep -f "fleet-loop\.sh <seat>$"`, matching a
+# command line by its ENDING rather than its path, so the fake loop the control plants at
+# `$pen/fleet-loop.sh penone` is indistinguishable from the one a PEER SHIP'S copy of this same
+# control plants in its own pen. Eight ships run the roster from eight trees on one pier.
+#
+# PROVEN BY MAKING IT FIRE, which is what a peer could not do on `20260907.050053`: with
+# `sh /tmp/foreign-fleet/fleet-loop.sh penone` alive the elder control answered `pass=14 fail=2`,
+# the first failure the exact line the cold open printed -- and its own `pkill -f` cleanup then
+# killed that foreign process, which is REDS %515's wound inside a tracked file. With per-run seat
+# names the same plant leaves `pass=17 fail=0` and the foreign process alive.
+#
+# The seventeenth case is that plant, kept: a loop under the ELDER shared name, from a foreign path,
+# and the pen's own seat still armed. It flips to `no` when the shared name is put back, which is
+# how a leg is proven load-bearing rather than merely green.
+
+say "fleet-watch: Language EN -- a watcher that discovers its windows and refuses to guess."
+say "fleet-watch: Style Gauge, Meter -- each leg names what it plants and what must refuse."
+say "fleet-watch: Lens TAME -- every refusal planted and then lifted, so a wall is not a habit."
+
+say "fleet-watch: the control -- seventeen behaviors on a real tmux session in a throwaway pen..."
+let ctl = run ["sh" "tools/fixtures/f/fleet_watch_control.sh"]
+assert ctl.ok else "fleet-watch: the control refused --\n${ctl.out_brief}\n${ctl.err_brief}"
+assert ctl.out contains "pass=17 fail=0" else "fleet-watch: the control did not prove seventeen behaviors --\n${ctl.out_brief}\n${ctl.err_brief}"
+
+say "fleet-watch: no window index is written down anywhere in the watcher..."
+# invariant: the layout is DISCOVERED every pass. A number spelled here would be true until somebody
+# moves a window, and then the watcher types a ship's relaunch into a stranger's keyboard.
+let numbered = run ["sh" "-c" "grep -n ':[0-9]' tools/f/fleet_watch.sh | grep -vc '^[0-9]*: *#' || true"]
+assert numbered.ok else "fleet-watch: the numbering read could not run"
+assert (trim numbered.out) == "0" else "fleet-watch: a window INDEX is written into the watcher -- discover it instead"
+
+say "fleet-watch: and the seat table is read rather than restated..."
+let reads_roster = run ["sh" "-c" "grep -q 'fleet_roster_scan.sh' tools/f/fleet_watch.sh && echo READS_ROSTER || echo SPELLS_SEATS"]
+assert reads_roster.ok else "fleet-watch: the roster read could not be checked"
+assert reads_roster.out contains "READS_ROSTER" else "fleet-watch: the watcher spells its own seat list -- the seventh copy of the seat table"
+
+say "fleet-watch: a dry run decides and sends nothing..."
+let dry = run ["sh" "-c" "sh tools/f/fleet_watch.sh --dry-run --once 2>&1 | grep -c 'armed (arm' || true"]
+assert dry.ok else "fleet-watch: the dry run could not be read"
+assert (trim dry.out) == "0" else "fleet-watch: a dry run sent a keystroke"
+
+say "GREEN: fleet-watch -- the watch discovers its windows by name, refuses a busy pane, a gate, a duplicate and a living loop, and re-arms only what is truly down."

@@ -1,0 +1,48 @@
+# tools/al/ales_selection_witness.rish -- the selection, a marked span a keeper edits as one across both channels (ALES23).
+#
+# Chapter: the Six-Chapter double-seat, Chapter C thread (Lotus - the creative suite) - waymark ALES - rung ALES23.
+# Design read: active-designing/20260814-fill-ales23-lotus-selection.md
+# Stands on: lotus/timeline.rye (ALES2) -- cut and gain, applied to each channel; lotus/pan.rye (ALES10) -- the StereoClip whose two
+# channels share one length; lotus/markers.rye (ALES20) -- region_between, so a selection is grabbed between two named marks.
+#
+# lotus/selection.rye grabs the span [start, end) between two marks and edits it whole. The crux: an edit keeps the two channels in
+# LOCKSTEP and operates exactly the marked span -- the same (start, span) passed to each channel, checked against the shared length
+# first, so a cut shrinks both equally (left.len == right.len after) and the edit is atomic. The selftest proves: a selection cut
+# equals cutting each channel by hand, the stereo staying aligned; a gain scales the span in both channels and leaves the rest and
+# the lengths untouched; silence zeroes the span in both; a selection grabbed between two markers drives a real cut; every edge
+# refuses by name (BadSelection / BadGain / BadPair / BadRange). Purely local -- no network, no keys, no funds.
+#
+# Run from the repository root:
+#   rishi/bin/rishi run tools/al/ales_selection_witness.rish
+
+say "ales-selection: Language EN — ALES23 lets a keeper grab the span between two marks and act on it whole: silence the count-in, halve the bridge, cut the bad take, across both channels at once."
+say "ales-selection: Style Radiant — the law is stated positively: an edit touches both channels in lockstep with the same (start, span), so a cut shrinks both equally and a gain scales the same samples in both, the edit atomic and the stereo always aligned."
+say "ales-selection: Lens TAME — timeline.cut/gain and markers.region_between reused whole (no new edit, no new bound); the bounds checked on the left channel first so a stale span refuses BadRange before either channel changes; every edge refuses by name; siloed to lotus/, no network, no keys, no funds, no device, no meter, no speaker."
+
+let zig = "vendor/zig-toolchain/zig"
+# THE BINARY LANDS IN A PEN, NEVER A SHARED PATH IN THE TREE (REDS %700). A fixed path is
+# one name every run in this checkout writes: one run EXECUTES it while another's linker
+# opens it, and the linker refuses with ETXTBSY -- so the guard answers differently on
+# bytes nobody changed. `printf %s` trims the newline a bare capture would keep.
+let pen = run ["sh" "-c" "printf %s $(mktemp -d)"]
+assert pen.ok else "could not make a build pen: ${pen.err_brief}"
+let bin = "${pen.out}/selection"
+
+let build = run ["sh" "-c" "mkdir -p lotus/bin && env RYE_ZIG=${zig} sh tools/fixtures/r/rye_build.sh lotus/selection.rye -femit-bin=${bin}"]
+assert build.ok else "ales-selection: build failed — ${build.err_brief}"
+
+let outfile = "lotus/bin/selection.out"
+let selftest = run ["sh" "-c" "${bin} selftest > ${outfile} 2>&1"]
+assert selftest.ok else "ales-selection: selftest exited non-zero — see ${outfile}"
+
+let shown = run ["sh" "-c" "cat ${outfile}"]
+say "ales-selection: ${shown.out_brief}"
+
+let green = run ["sh" "-c" "grep -q 'GREEN ales-selection' ${outfile} && echo yes"]
+assert (trim green.out) == "yes" else "ales-selection: selftest did not print the GREEN ales-selection line"
+
+say "ales-selection: GREEN — a keeper edits a marked span as one across the stereo image: cut, gain, and silence touch both channels in lockstep, the edit atomic and the two channels always aligned. The next Lotus rung can offer the choice of law where a crossfade meets a selected edit, splice a selection onto a second point (a marked copy or move), or carry a selection across the ALES0 audio wire as its own framed payload, tying an editable span to the Mikrophone's capture."
+
+# The pen is swept here rather than left for the next run to meet.
+let pen_swept = run ["sh" "-c" "rm -rf ${pen.out}"]
+assert pen_swept.ok else "the build pen outlived its witness: ${pen_swept.err_brief}"
